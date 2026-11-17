@@ -1,0 +1,236 @@
+name: Deploy Cloud Run
+
+# Build → Artifact Registry → Cloud Run (api / worker / web).
+# Gate: repo variable ENABLE_GCP_DEPLOY=true
+# Secrets: see docs/INFRASTRUCTURE.md §5 (or terraform output github_actions_secrets)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      skip_ci:
+        description: "Skip test job (emergency only)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: ${{ secrets.GCP_REGION }}
+  REGISTRY: ${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/localmeals
+  RUN_SA: localmeals-run@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com
+  SQL_INSTANCE: ${{ secrets.GCP_PROJECT_ID }}:${{ secrets.GCP_REGION }}:localmeals-pg
+
+jobs:
+  test:
+    name: CI gate
+    runs-on: ubuntu-latest
+    if: ${{ vars.ENABLE_GCP_DEPLOY == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.skip_ci) }}
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: localmeals
+          POSTGRES_PASSWORD: localmeals
+          POSTGRES_DB: localmeals
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U localmeals -d localmeals"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://localmeals:localmeals@localhost:5432/localmeals
+      LUNCH_CUTOFF_HOUR: "23"
+      LUNCH_CUTOFF_MINUTE: "59"
+      MOCK_PAYMENTS: "true"
+      MOCK_WHATSAPP: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Build packages
+        run: |
+          npm run build -w @localmeals/domain
+          npm run build -w @localmeals/adapters
+          npm run build -w @localmeals/db
+      - run: npm run db:migrate
+      - run: npm test
+      - name: Typecheck web
+        run: npm run build -w @localmeals/web
+        env:
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:4000
+
+  deploy:
+    name: Build & deploy
+    runs-on: ubuntu-latest
+    needs: [test]
+    if: ${{ always() && vars.ENABLE_GCP_DEPLOY == 'true' && (needs.test.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.skip_ci)) }}
+    environment: production
+    outputs:
+      api_url: ${{ steps.api_url.outputs.url }}
+      web_url: ${{ steps.web_url.outputs.url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Auth Docker (Artifact Registry)
+        run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+      - name: Set image tag
+        id: meta
+        run: |
+          echo "tag=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "short=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - name: Build & push api
+        run: |
+          docker build --platform=linux/amd64 -f apps/api/Dockerfile \
+            -t "${REGISTRY}/api:${{ steps.meta.outputs.tag }}" \
+            -t "${REGISTRY}/api:latest" .
+          docker push "${REGISTRY}/api:${{ steps.meta.outputs.tag }}"
+          docker push "${REGISTRY}/api:latest"
+
+      - name: Build & push worker
+        run: |
+          docker build --platform=linux/amd64 -f apps/worker/Dockerfile \
+            -t "${REGISTRY}/worker:${{ steps.meta.outputs.tag }}" \
+            -t "${REGISTRY}/worker:latest" .
+          docker push "${REGISTRY}/worker:${{ steps.meta.outputs.tag }}"
+          docker push "${REGISTRY}/worker:latest"
+
+      - name: Resolve public API URL for web build
+        id: public_api
+        run: |
+          URL="${{ secrets.NEXT_PUBLIC_API_URL }}"
+          if [ -z "$URL" ]; then
+            URL=$(gcloud run services describe localmeals-api \
+              --region="$REGION" --format='value(status.url)' 2>/dev/null || true)
+          fi
+          if [ -z "$URL" ]; then
+            echo "NEXT_PUBLIC_API_URL secret empty and api not deployed yet — web will use placeholder; redeploy after first api URL exists."
+            URL="https://example.invalid"
+          fi
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Build & push web
+        run: |
+          docker build --platform=linux/amd64 -f apps/web/Dockerfile \
+            --build-arg "NEXT_PUBLIC_API_URL=${{ steps.public_api.outputs.url }}" \
+            -t "${REGISTRY}/web:${{ steps.meta.outputs.tag }}" \
+            -t "${REGISTRY}/web:latest" .
+          docker push "${REGISTRY}/web:${{ steps.meta.outputs.tag }}"
+          docker push "${REGISTRY}/web:latest"
+
+      - name: Deploy API
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          MOCK_PAYMENTS="${{ vars.MOCK_PAYMENTS || 'true' }}"
+          MOCK_WHATSAPP="${{ vars.MOCK_WHATSAPP || 'true' }}"
+          MOCK_AUTH="${{ vars.MOCK_AUTH || 'true' }}"
+          AUTH_ENFORCE="${{ vars.AUTH_ENFORCE || 'true' }}"
+          WEB_ORIGIN="${{ secrets.WEB_ORIGIN }}"
+
+          ENV_VARS="NODE_ENV=production,MOCK_PAYMENTS=${MOCK_PAYMENTS},MOCK_WHATSAPP=${MOCK_WHATSAPP},MOCK_AUTH=${MOCK_AUTH},AUTH_ENFORCE=${AUTH_ENFORCE},WHATSAPP_API_VERSION=v21.0"
+          if [ -n "$WEB_ORIGIN" ]; then
+            ENV_VARS="${ENV_VARS},WEB_ORIGIN=${WEB_ORIGIN}"
+          fi
+
+          gcloud run deploy localmeals-api \
+            --image="${REGISTRY}/api:${TAG}" \
+            --region="${REGION}" \
+            --platform=managed \
+            --allow-unauthenticated \
+            --service-account="${RUN_SA}" \
+            --vpc-connector=localmeals-conn \
+            --vpc-egress=private-ranges-only \
+            --add-cloudsql-instances="${SQL_INSTANCE}" \
+            --set-env-vars="${ENV_VARS}" \
+            --set-secrets="DATABASE_URL=DATABASE_URL:latest,INTERNAL_JOB_TOKEN=INTERNAL_JOB_TOKEN:latest,AUTH_SECRET=AUTH_SECRET:latest,ADMIN_MOBILES=ADMIN_MOBILES:latest,RAZORPAY_KEY_ID=RAZORPAY_KEY_ID:latest,RAZORPAY_KEY_SECRET=RAZORPAY_KEY_SECRET:latest,RAZORPAY_WEBHOOK_SECRET=RAZORPAY_WEBHOOK_SECRET:latest,WHATSAPP_VERIFY_TOKEN=WHATSAPP_VERIFY_TOKEN:latest,WHATSAPP_ACCESS_TOKEN=WHATSAPP_ACCESS_TOKEN:latest,WHATSAPP_APP_SECRET=WHATSAPP_APP_SECRET:latest,WHATSAPP_PHONE_NUMBER_ID=WHATSAPP_PHONE_NUMBER_ID:latest" \
+            --memory=512Mi \
+            --cpu=1 \
+            --max-instances=5 \
+            --quiet
+
+      - name: Capture API URL
+        id: api_url
+        run: |
+          URL=$(gcloud run services describe localmeals-api --region="$REGION" --format='value(status.url)')
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "API_URL=$URL" >> "$GITHUB_ENV"
+          echo "Deployed API: $URL"
+
+      - name: Deploy worker
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          MOCK_WHATSAPP="${{ vars.MOCK_WHATSAPP || 'true' }}"
+
+          gcloud run deploy localmeals-worker \
+            --image="${REGISTRY}/worker:${TAG}" \
+            --region="${REGION}" \
+            --platform=managed \
+            --ingress=internal \
+            --no-allow-unauthenticated \
+            --service-account="${RUN_SA}" \
+            --vpc-connector=localmeals-conn \
+            --vpc-egress=private-ranges-only \
+            --add-cloudsql-instances="${SQL_INSTANCE}" \
+            --set-env-vars="NODE_ENV=production,MOCK_WHATSAPP=${MOCK_WHATSAPP},WHATSAPP_API_VERSION=v21.0,ENABLE_AUTO_CUTOFF=false,ENABLE_AUTO_EOD=false,API_INTERNAL_URL=${API_URL}" \
+            --set-secrets="DATABASE_URL=DATABASE_URL:latest,INTERNAL_JOB_TOKEN=INTERNAL_JOB_TOKEN:latest,WHATSAPP_VERIFY_TOKEN=WHATSAPP_VERIFY_TOKEN:latest,WHATSAPP_ACCESS_TOKEN=WHATSAPP_ACCESS_TOKEN:latest,WHATSAPP_APP_SECRET=WHATSAPP_APP_SECRET:latest,WHATSAPP_PHONE_NUMBER_ID=WHATSAPP_PHONE_NUMBER_ID:latest" \
+            --memory=512Mi \
+            --cpu=1 \
+            --min-instances=1 \
+            --max-instances=3 \
+            --quiet
+
+      - name: Deploy web
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          gcloud run deploy localmeals-web \
+            --image="${REGISTRY}/web:${TAG}" \
+            --region="${REGION}" \
+            --platform=managed \
+            --allow-unauthenticated \
+            --set-env-vars="NODE_ENV=production" \
+            --memory=512Mi \
+            --cpu=1 \
+            --max-instances=5 \
+            --quiet
+
+      - name: Capture web URL
+        id: web_url
+        run: |
+          URL=$(gcloud run services describe localmeals-web --region="$REGION" --format='value(status.url)')
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Deployed web: $URL"
+
+      - name: Summary
+        run: |
+          {
+            echo "## Cloud Run deploy"
+            echo "- API: ${{ steps.api_url.outputs.url }}"
+            echo "- Web: ${{ steps.web_url.outputs.url }}"
+            echo "- Tag: \`${{ steps.meta.outputs.short }}\`"
+            echo "- Mocks: payments=\`${{ vars.MOCK_PAYMENTS || 'true' }}\` whatsapp=\`${{ vars.MOCK_WHATSAPP || 'true' }}\`"
+            echo ""
+            echo "Next: point Razorpay + Meta webhooks at the API URL, then set repo vars MOCK_*=false."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,20 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: localmeals-db
+    environment:
+      POSTGRES_USER: localmeals
+      POSTGRES_PASSWORD: localmeals
+      POSTGRES_DB: localmeals
+    ports:
+      - "5432:5432"
+    volumes:
+      - localmeals_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U localmeals -d localmeals"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  localmeals_pg:

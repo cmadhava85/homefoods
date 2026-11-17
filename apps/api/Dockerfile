@@ -1,0 +1,25 @@
+FROM node:22-alpine AS deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY apps/api/package.json apps/api/
+COPY packages/domain/package.json packages/domain/
+COPY packages/adapters/package.json packages/adapters/
+COPY packages/db/package.json packages/db/
+RUN npm ci --omit=dev=false
+
+FROM deps AS build
+COPY tsconfig.base.json ./
+COPY packages ./packages
+COPY apps/api ./apps/api
+RUN npm run build -w @localmeals/domain \
+ && npm run build -w @localmeals/adapters \
+ && npm run build -w @localmeals/db \
+ && npm run build -w @localmeals/api
+
+FROM node:22-alpine
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=build /app /app
+WORKDIR /app/apps/api
+EXPOSE 4000
+CMD ["node", "dist/index.js"]

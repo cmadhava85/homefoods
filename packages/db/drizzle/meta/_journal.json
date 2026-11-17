@@ -1,0 +1,188 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1730736000000,
+      "tag": "0000_init",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1730739600000,
+      "tag": "0001_cook_lunch_cutoff",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1730743200000,
+      "tag": "0002_mvp1_gaps",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1730746800000,
+      "tag": "0003_complete_mvp1_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1730750400000,
+      "tag": "0004_menu_image_weekly",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1730754000000,
+      "tag": "0005_delivery_window",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1730757600000,
+      "tag": "0006_cook_meal_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1730761200000,
+      "tag": "0007_order_checkout_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1730764800000,
+      "tag": "0008_kitchen_followers",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1730768400000,
+      "tag": "0009_cook_manual_payout",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1730772000000,
+      "tag": "0010_reviews_mvp2",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1730775600000,
+      "tag": "0011_week_discount",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1730779200000,
+      "tag": "0012_feature_flags",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1730782800000,
+      "tag": "0013_pickup",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1730786400000,
+      "tag": "0014_wa_checkout_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1730790000000,
+      "tag": "0015_item_name_ta",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1730793600000,
+      "tag": "0016_auth_otps",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1730797200000,
+      "tag": "0017_auth_revocations",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1730800800000,
+      "tag": "0018_rate_limit_buckets",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1730804400000,
+      "tag": "0019_ticket_photo_url",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1730808000000,
+      "tag": "0020_cancel_requested",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1730811600000,
+      "tag": "0021_order_trace_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1730815200000,
+      "tag": "0022_ensure_delivery_window_cols",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1731744000000,
+      "tag": "0023_settlement_clawback",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1731747600000,
+      "tag": "0024_partner_delivery",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1731834000000,
+      "tag": "0025_cook_saved_plates",
+      "breakpoints": true
+    }
+  ]
+}

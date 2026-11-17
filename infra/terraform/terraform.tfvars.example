@@ -1,0 +1,40 @@
+project_id  = "home-food-513806"
+region      = "asia-south1"
+name_prefix = "localmeals"
+db_tier     = "db-f1-micro"
+# false = don't manage APIs in TF (avoids ADC 403 when already enabled)
+enable_apis = false
+
+# Admin phone(s) for first AUTH_SECRET / ADMIN_MOBILES seed
+admin_mobiles = "+919900000001"
+
+# Flip on after first images are in Artifact Registry
+create_cloud_run = false
+# api_image    = "asia-south1-docker.pkg.dev/home-food-513806/localmeals/api:latest"
+# worker_image = "asia-south1-docker.pkg.dev/home-food-513806/localmeals/worker:latest"
+# web_image    = "asia-south1-docker.pkg.dev/home-food-513806/localmeals/web:latest"
+# web_public_api_url = "https://localmeals-api-xxxxx-as.a.run.app"
+# web_origin         = "https://localmeals-web-xxxxx-as.a.run.app"
+
+# Scheduler (cut-off 08:00 + EOD 18:00 IST) — created when API Cloud Run exists
+create_scheduler = true
+
+# Keep mocks on until webhooks are public
+mock_payments = true
+mock_whatsapp = true
+mock_auth     = true
+auth_enforce  = true
+
+# Optional
+# alert_email        = "you@example.com"   # creates log-based metrics + alert policies
+# otel_enabled       = false
+# otel_exporter_otlp_endpoint = ""         # e.g. https://…/v1/traces
+# confirming_stuck_ms = 900000             # 15m CONFIRMING_PAYMENT scan
+# api_custom_domain  = "api.localmeals.in"
+# web_custom_domain  = "app.localmeals.in"
+# create_tf_state_bucket = true
+# tf_state_bucket_name   = "home-food-513806-tfstate"
+
+# GitHub Actions → Cloud Run (Workload Identity)
+# create_github_wif = true
+# github_repository = "YOUR_USER/localmeals"

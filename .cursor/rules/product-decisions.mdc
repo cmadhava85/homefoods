@@ -1,0 +1,26 @@
+---
+description: LocalMeals product decisions — monetization, reviews, discounts, MVP scope
+alwaysApply: true
+---
+
+# Product decisions
+
+Follow `docs/PRODUCT_DECISIONS.md`. Summary:
+
+## MVP-1 do not build
+- Public ratings/reviews
+- Multi-day / week discount engine
+- Cook platform surcharge (% or per-order fee)
+- Shadowfax / IVR
+
+## Monetization
+- Customer platform fee ₹7 once per checkout (not per day on week cart); cook gets 100% of food at launch
+- Do not add cook-side fees without an explicit ask after supply is healthy
+- LIVE cooks need FSSAI + payout UPI/bank note (Route optional while RBI-blocked); Admin Mark paid for EOD
+
+## Reviews (when building MVP-2)
+- Platform-standard for LIVE kitchens — not cook opt-in
+- Only after completed paid order; cook may reply, not hide reviews
+
+## Week discounts (when building later)
+- Cook-controlled optional % for N+ days; no coupon stacks; keep simple

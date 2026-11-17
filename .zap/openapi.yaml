@@ -1,0 +1,282 @@
+openapi: 3.0.3
+info:
+  title: LocalMeals API (DAST surface)
+  version: "0.1.0"
+  description: >
+    Minimal OpenAPI for free OWASP ZAP API scans in CI/local.
+    Not a full contract — covers spiderable / public and auth entrypoints.
+servers:
+  - url: http://localhost:4000
+paths:
+  /health:
+    get:
+      summary: Health
+      responses:
+        "200":
+          description: OK
+  /meta/today:
+    get:
+      summary: Service date
+      responses:
+        "200":
+          description: OK
+  /meta/features:
+    get:
+      summary: Feature flags
+      responses:
+        "200":
+          description: OK
+  /kitchens:
+    get:
+      summary: List kitchens
+      parameters:
+        - in: query
+          name: pin
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /kitchens/{slug}/menu:
+    get:
+      summary: Kitchen menu
+      parameters:
+        - in: path
+          name: slug
+          required: true
+          schema:
+            type: string
+            example: sri-sai
+        - in: query
+          name: meal
+          schema:
+            type: string
+            example: LUNCH
+      responses:
+        "200":
+          description: OK
+        "404":
+          description: Missing
+  /kitchens/{slug}/meals:
+    get:
+      summary: Advance meal options
+      parameters:
+        - in: path
+          name: slug
+          required: true
+          schema:
+            type: string
+            example: sri-sai
+      responses:
+        "200":
+          description: OK
+  /kitchens/{slug}/week:
+    get:
+      summary: Week plan
+      parameters:
+        - in: path
+          name: slug
+          required: true
+          schema:
+            type: string
+            example: sri-sai
+      responses:
+        "200":
+          description: OK
+  /kitchens/{slug}/reviews:
+    get:
+      summary: Public kitchen reviews
+      parameters:
+        - in: path
+          name: slug
+          required: true
+          schema:
+            type: string
+            example: sri-sai
+      responses:
+        "200":
+          description: OK
+  /auth/otp/request:
+    post:
+      summary: Request OTP
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                mobile:
+                  type: string
+                  example: "+919900000099"
+                role:
+                  type: string
+                  enum: [CUSTOMER, COOK, ADMIN]
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Rejected
+  /auth/me:
+    get:
+      summary: Current session (expects 401 without cookie)
+      responses:
+        "200":
+          description: Signed in
+        "401":
+          description: Not signed in
+  /admin/tickets:
+    get:
+      summary: Admin tickets (must 401 without session)
+      responses:
+        "401":
+          description: Unauthorized
+  /cooks/{slug}/manifest:
+    get:
+      summary: Cook desk manifest (must 401 without cook session)
+      parameters:
+        - in: path
+          name: slug
+          required: true
+          schema:
+            type: string
+            example: sri-sai
+      responses:
+        "401":
+          description: Unauthorized
+  /webhooks/whatsapp:
+    get:
+      summary: Meta webhook verify challenge (expect 403 without token)
+      parameters:
+        - in: query
+          name: hub.mode
+          schema:
+            type: string
+        - in: query
+          name: hub.verify_token
+          schema:
+            type: string
+        - in: query
+          name: hub.challenge
+          schema:
+            type: string
+      responses:
+        "403":
+          description: Forbidden without valid verify
+  /me/orders:
+    get:
+      summary: Customer order history (must 401 without session)
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            minimum: 0
+      responses:
+        "401":
+          description: Unauthorized
+  /orders:
+    post:
+      summary: Create order (optional Idempotency-Key)
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          schema:
+            type: string
+            maxLength: 128
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [customerMobile, cookSlug, menuItemId]
+              properties:
+                customerMobile:
+                  type: string
+                cookSlug:
+                  type: string
+                menuItemId:
+                  type: integer
+                qty:
+                  type: integer
+                spice:
+                  type: string
+                  enum: [NORMAL, LESS]
+                addressId:
+                  type: integer
+      responses:
+        "200":
+          description: Created or idempotent replay
+        "400":
+          description: Rejected
+        "401":
+          description: Auth required when AUTH_ENFORCE on
+  /orders/batch:
+    post:
+      summary: Multi-day cart checkout (optional Idempotency-Key)
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          schema:
+            type: string
+            maxLength: 128
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [customerMobile, cookSlug, lines]
+              properties:
+                customerMobile:
+                  type: string
+                cookSlug:
+                  type: string
+                addressId:
+                  type: integer
+                lines:
+                  type: array
+                  items:
+                    type: object
+      responses:
+        "200":
+          description: Created or idempotent replay
+        "400":
+          description: Rejected
+  /orders/{publicId}:
+    get:
+      summary: Order by public id (PII redacted for anonymous)
+      parameters:
+        - in: path
+          name: publicId
+          required: true
+          schema:
+            type: string
+            example: LM-ABCDEF0123
+      responses:
+        "200":
+          description: OK (address/mobiles omitted for public)
+        "404":
+          description: Missing
+  /checkouts/{checkoutId}:
+    get:
+      summary: Checkout by id (PII redacted for anonymous)
+      parameters:
+        - in: path
+          name: checkoutId
+          required: true
+          schema:
+            type: string
+            example: CHK-ABCDEF0123
+      responses:
+        "200":
+          description: OK
+        "404":
+          description: Missing

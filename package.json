@@ -1,0 +1,33 @@
+{
+  "name": "localmeals",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev -w @localmeals/api",
+    "dev:worker": "npm run dev -w @localmeals/worker",
+    "dev:web": "npm run dev -w @localmeals/web",
+    "build": "npm run build -w @localmeals/domain && npm run build -w @localmeals/adapters && npm run build -w @localmeals/i18n && npm run build -w @localmeals/observability && npm run build -w @localmeals/db && npm run build -w @localmeals/api --if-present && npm run build -w @localmeals/worker --if-present && npm run build -w @localmeals/web --if-present",
+    "db:migrate": "npm run migrate -w @localmeals/db",
+    "db:seed": "npm run seed -w @localmeals/db",
+    "db:seed:month": "npm run seed:month -w @localmeals/db",
+    "test": "npm run test -w @localmeals/domain && npm run test -w @localmeals/adapters && npm run test -w @localmeals/i18n && npm run test -w @localmeals/observability && npm run test -w @localmeals/api && npm run test -w @localmeals/web",
+    "test:e2e": "playwright test",
+    "test:mutation": "npm run test:mutation -w @localmeals/domain && npm run test:mutation -w @localmeals/api && npm run test:mutation -w @localmeals/web",
+    "typecheck": "npm run typecheck -w @localmeals/domain && npm run typecheck -w @localmeals/adapters && npm run typecheck -w @localmeals/i18n && npm run typecheck -w @localmeals/observability && npm run typecheck -w @localmeals/db",
+    "security:check": "node scripts/security-check.mjs",
+    "security:audit": "npm audit --omit=dev --audit-level=high",
+    "security:zap": "bash scripts/zap-dast.sh baseline",
+    "security:zap:api": "bash scripts/zap-dast.sh api",
+    "security:zap:all": "bash scripts/zap-dast.sh both",
+    "secrets:sync": "bash scripts/sync-secrets-from-sm.sh",
+    "smoke:whatsapp": "npm run build -w @localmeals/adapters && node scripts/smoke-whatsapp.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.0",
+    "typescript": "^5.7.3"
+  }
+}

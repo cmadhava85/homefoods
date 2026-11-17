@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main, staging]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: localmeals
+          POSTGRES_PASSWORD: localmeals
+          POSTGRES_DB: localmeals
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U localmeals -d localmeals"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://localmeals:localmeals@localhost:5432/localmeals
+      LUNCH_CUTOFF_HOUR: "23"
+      LUNCH_CUTOFF_MINUTE: "59"
+      MOCK_PAYMENTS: "true"
+      MOCK_WHATSAPP: "true"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build packages
+        run: |
+          npm run build -w @localmeals/domain
+          npm run build -w @localmeals/adapters
+          npm run build -w @localmeals/i18n
+          npm run build -w @localmeals/db
+
+      - name: Migrate + seed
+        run: |
+          npm run db:migrate
+          npm run db:seed
+
+      - name: Test (domain + adapters + api)
+        run: npm test
+
+      - name: Security static check
+        run: npm run security:check
+
+      - name: npm audit (high+)
+        run: npm run security:audit
+        continue-on-error: true
+
+      - name: Typecheck web
+        run: npm run build -w @localmeals/web
+        env:
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:4000
+
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium --with-deps
+
+      - name: Playwright e2e (address → checkout)
+        run: npm run test:e2e
+        env:
+          CI: "true"
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:4000
+          MOCK_AUTH: "true"
+          MOCK_PAYMENTS: "true"
+          MOCK_WHATSAPP: "true"
+          LUNCH_CUTOFF_HOUR: "23"
+          LUNCH_CUTOFF_MINUTE: "59"
