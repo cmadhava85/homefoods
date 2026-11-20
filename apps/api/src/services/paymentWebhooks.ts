@@ -61,6 +61,8 @@ async function audit(
       notes: event.notes,
       razorpayEvent: event.event,
       traceId: extra.traceId ?? event.notes?.traceId ?? null,
+      // Keep raw webhook for ops (Razorpay payloads are modest).
+      raw: event.raw ?? null,
     },
   });
 }

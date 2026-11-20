@@ -31,6 +31,21 @@ app.get("/admin/tickets", async (req, reply) => {
     return sendCaughtError(reply, e);
   }
 });
+
+/**
+ * Ops support: order + payments + outbox + activity timeline.
+ * `:key` accepts publicId (LM-…), checkoutId, traceId (trc_…), or gatewayTxnId.
+ */
+app.get("/admin/orders/:publicId", async (req, reply) => {
+  try {
+    assertAuthed(req, ["ADMIN"]);
+    const { publicId: key } = req.params as { publicId: string };
+    const { getOrderSupportBundle } = await import("../services/orderActivity.js");
+    return await getOrderSupportBundle(db, key);
+  } catch (e) {
+    return sendCaughtError(reply, e);
+  }
+});
 app.get("/admin/tickets/:id", async (req, reply) => {
   try {
     assertAuthed(req, ["ADMIN"]);
@@ -83,6 +98,7 @@ app.post("/admin/cooks/:id/payout-details", async (req, reply) => {
         payoutBeneficiaryRef: z.string().nullable().optional(),
         pickupLandmark: z.string().nullable().optional(),
         pickupEnabled: z.boolean().optional(),
+        deliveryType: z.enum(["SELF", "PARTNER"]).optional(),
       })
       .parse(req.body);
     return await adminSetCookPayoutDetails(db, id, body);

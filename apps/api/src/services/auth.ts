@@ -127,6 +127,8 @@ function parseToken(token: string): SessionUser | null {
 }
 
 function assertOtpRequestAllowed(key: string) {
+  // Mock auth (local/tests) skips in-process OTP spam throttle — Postgres route limits still apply.
+  if (mockOtpEnabled()) return;
   const now = Date.now();
   const bucket = otpRequestBuckets.get(key);
   if (!bucket || bucket.resetAt <= now) {
@@ -398,7 +400,7 @@ export function getSessionUserFromRequest(headers: {
   return token ? parseSessionToken(token) : null;
 }
 
-/** Bearer / cookie + DB logout revoke check. */
+/** Bearer / cookie + DB logout revoke check (+ LIVE cook revalidation). */
 export async function getSessionUserFromRequestAsync(
   db: Db,
   headers: {
@@ -415,6 +417,21 @@ export async function getSessionUserFromRequestAsync(
       a(e(t.mobileNumber, parsed.user.mobile), e(t.role, parsed.user.role)),
   });
   if (row && parsed.iat <= row.revokedBefore.getTime()) return null;
+
+  // Cook desk: drop session if kitchen left LIVE / paused (do not trust stale token claims).
+  if (parsed.user.role === "COOK") {
+    const cook = await db.query.cookProfiles.findFirst({
+      where: (t, { eq: e }) => e(t.mobileNumber, parsed.user.mobile),
+    });
+    if (!cook || cook.onboardingStatus !== "LIVE" || !cook.isActive) return null;
+    return {
+      ...parsed.user,
+      cookSlug: cook.slugHandle,
+      cookId: cook.id,
+      fullName: cook.kitchenName,
+    };
+  }
+
   return parsed.user;
 }
 

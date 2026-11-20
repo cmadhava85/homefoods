@@ -36,6 +36,19 @@ Decided for LocalMeals launch and near-term roadmap. Do not reverse without an e
 
 Shadowfax / partner delivery, IVR, public ratings/reviews, multi-day discount engine → **MVP-2+**.
 
+## Roadmap (town growth)
+
+Full table: [ROADMAP.md](./ROADMAP.md). Placement:
+
+| Theme | When |
+|-------|------|
+| Pilot: one pin, 5–8 cooks, shareable `/kitchen/:slug` | Now (ops) |
+| Cook sold-out toggle, fulfillment toggles, weekly templates, FSSAI enroll help, opt-in lean WA status | **MVP-2** polish |
+| Party / bulk catering (MOQ, 48–72h cut-off, 50% advance UPI) | **MVP-3** — [MVP3.md](./MVP3.md) |
+| Radius / PostGIS, catering RFQ, pantry, tiffin | MVP-3+ |
+
+Do not start party mode until the lunch pin is stable. Keep customer WA lean by default (status spam stays opt-in).
+
 ## Channels
 
 - Razorpay Payment Links + webhooks; Meta WhatsApp Cloud API

@@ -1,5 +1,17 @@
 import assert from "node:assert/strict";
 import type { FastifyInstance } from "fastify";
+import { sql } from "drizzle-orm";
+import { createDb } from "@localmeals/db";
+
+/** Clear Postgres rate-limit buckets so OTP login tests are not flaky across suites. */
+export async function clearRateLimitBuckets() {
+  const db = createDb();
+  try {
+    await db.execute(sql`DELETE FROM rate_limit_buckets`);
+  } finally {
+    // leave pooled connection; createDb is lightweight shared client in tests
+  }
+}
 
 export function testMobile(prefix = "99") {
   return `+91${prefix}${String(Date.now()).slice(-8)}${Math.floor(Math.random() * 10)}`.slice(
@@ -13,6 +25,7 @@ export async function loginCustomer(
   app: FastifyInstance,
   mobile = testMobile(),
 ): Promise<{ mobile: string; token: string; headers: { authorization: string } }> {
+  await clearRateLimitBuckets();
   const req = await app.inject({
     method: "POST",
     url: "/auth/otp/request",
@@ -62,7 +75,7 @@ export async function customerWithAddress(app: FastifyInstance, mobile = testMob
 }
 
 const COOK_MOBILES: Record<string, string> = {
-  "sri-sai": "+919876543210",
+  "csk-homemade-delights": "+919876543210",
   "amma-priya": "+919876543211",
   "millet-box": "+919876543212",
 };
@@ -72,6 +85,7 @@ export async function loginAdmin(
   app: FastifyInstance,
   mobile = "+919900000001",
 ): Promise<{ mobile: string; token: string; headers: { authorization: string } }> {
+  await clearRateLimitBuckets();
   const req = await app.inject({
     method: "POST",
     url: "/auth/otp/request",
@@ -92,9 +106,10 @@ export async function loginAdmin(
 /** Mock OTP login as COOK for a kitchen slug. */
 export async function loginCook(
   app: FastifyInstance,
-  slug = "sri-sai",
+  slug = "csk-homemade-delights",
 ): Promise<{ mobile: string; token: string; headers: { authorization: string }; slug: string }> {
-  const mobile = COOK_MOBILES[slug] ?? COOK_MOBILES["sri-sai"]!;
+  await clearRateLimitBuckets();
+  const mobile = COOK_MOBILES[slug] ?? COOK_MOBILES["csk-homemade-delights"]!;
   const req = await app.inject({
     method: "POST",
     url: "/auth/otp/request",

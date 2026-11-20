@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { sql } from "drizzle-orm";
 import { buildApp } from "./app.js";
 import { closeDb, createDb } from "@localmeals/db";
 import { assertProductionConfig } from "./prodConfig.js";
@@ -16,6 +17,7 @@ describe("security regressions", () => {
 
   before(async () => {
     await app.ready();
+    await db.execute(sql`DELETE FROM rate_limit_buckets`);
   });
 
   after(async () => {
@@ -52,7 +54,7 @@ describe("security regressions", () => {
   it("kitchen mutator requires cook/admin session", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/cooks/sri-sai/pack",
+      url: "/cooks/csk-homemade-delights/pack",
       payload: {},
     });
     assert.ok(res.statusCode === 401 || res.statusCode === 403);
@@ -162,10 +164,10 @@ describe("security regressions", () => {
   });
 
   it("cook session can hit kitchen route (positive control)", async () => {
-    const cook = await loginCook(app, "sri-sai");
+    const cook = await loginCook(app, "csk-homemade-delights");
     const res = await app.inject({
       method: "GET",
-      url: "/cooks/sri-sai/manifest",
+      url: "/cooks/csk-homemade-delights/manifest",
       headers: cook.headers,
     });
     assert.equal(res.statusCode, 200, res.body);
@@ -177,18 +179,95 @@ describe("security regressions", () => {
     assert.notEqual(res.statusCode, 200);
   });
 
-  it("GET /orders/:publicId redacts mobiles for anonymous callers", async () => {
-    const menu = await app.inject({ method: "GET", url: "/kitchens/sri-sai/menu" });
+  it("rejects anonymous POST /orders (customer session required)", async () => {
+    const menu = await app.inject({ method: "GET", url: "/kitchens/csk-homemade-delights/menu" });
     assert.equal(menu.statusCode, 200, menu.body);
     const menuItemId = menu.json().menus?.[0]?.id;
     assert.ok(menuItemId, "seed menu required");
-    const { mobile, addressId } = await customerWithAddress(app, testMobile("73"));
-    const created = await app.inject({
+    const res = await app.inject({
       method: "POST",
       url: "/orders",
       payload: {
+        customerMobile: testMobile("70"),
+        cookSlug: "csk-homemade-delights",
+        menuItemId,
+        qty: 1,
+      },
+    });
+    assert.ok(res.statusCode === 401 || res.statusCode === 403 || res.statusCode >= 400);
+    assert.notEqual(res.statusCode, 200);
+  });
+
+  it("rejects spoofed customerMobile from another signed-in customer", async () => {
+    const menu = await app.inject({ method: "GET", url: "/kitchens/csk-homemade-delights/menu" });
+    const menuItemId = menu.json().menus?.[0]?.id;
+    assert.ok(menuItemId);
+    const victim = testMobile("69");
+    const { mobile, addressId, headers } = await customerWithAddress(app, testMobile("68"));
+    const created = await app.inject({
+      method: "POST",
+      url: "/orders",
+      headers,
+      payload: {
+        customerMobile: victim,
+        cookSlug: "csk-homemade-delights",
+        menuItemId,
+        qty: 1,
+        addressId,
+      },
+    });
+    assert.equal(created.statusCode, 200, created.body);
+    const order = await app.inject({
+      method: "GET",
+      url: `/orders/${created.json().publicId}`,
+      headers,
+    });
+    assert.equal(order.statusCode, 200);
+    assert.equal(order.json().customerMobile, mobile);
+    assert.notEqual(order.json().customerMobile, victim);
+  });
+
+  it("rejects cancel of another customer order", async () => {
+    const menu = await app.inject({ method: "GET", url: "/kitchens/csk-homemade-delights/menu" });
+    const menuItemId = menu.json().menus?.[0]?.id;
+    assert.ok(menuItemId);
+    const owner = await customerWithAddress(app, testMobile("67"));
+    const created = await app.inject({
+      method: "POST",
+      url: "/orders",
+      headers: owner.headers,
+      payload: {
+        customerMobile: owner.mobile,
+        cookSlug: "csk-homemade-delights",
+        menuItemId,
+        qty: 1,
+        addressId: owner.addressId,
+      },
+    });
+    assert.equal(created.statusCode, 200, created.body);
+    const other = await loginCustomer(app, testMobile("66"));
+    const cancel = await app.inject({
+      method: "POST",
+      url: `/orders/${created.json().publicId}/cancel`,
+      headers: other.headers,
+    });
+    assert.ok(cancel.statusCode === 401 || cancel.statusCode === 403 || cancel.statusCode >= 400);
+    assert.notEqual(cancel.statusCode, 200);
+  });
+
+  it("GET /orders/:publicId redacts mobiles for anonymous callers", async () => {
+    const menu = await app.inject({ method: "GET", url: "/kitchens/csk-homemade-delights/menu" });
+    assert.equal(menu.statusCode, 200, menu.body);
+    const menuItemId = menu.json().menus?.[0]?.id;
+    assert.ok(menuItemId, "seed menu required");
+    const { mobile, addressId, headers } = await customerWithAddress(app, testMobile("73"));
+    const created = await app.inject({
+      method: "POST",
+      url: "/orders",
+      headers,
+      payload: {
         customerMobile: mobile,
-        cookSlug: "sri-sai",
+        cookSlug: "csk-homemade-delights",
         menuItemId,
         qty: 1,
         addressId,
@@ -221,7 +300,7 @@ describe("security regressions", () => {
     }
     assert.doesNotMatch(res.body, /payoutUpiId|payoutAccountNote|payoutBeneficiaryRef|"mobileNumber"/);
 
-    const menu = await app.inject({ method: "GET", url: "/kitchens/sri-sai/menu" });
+    const menu = await app.inject({ method: "GET", url: "/kitchens/csk-homemade-delights/menu" });
     assert.equal(menu.statusCode, 200, menu.body);
     const cook = menu.json().cook as Record<string, unknown>;
     assert.ok(cook);
@@ -234,7 +313,7 @@ describe("security regressions", () => {
   it("Idempotency-Key replays the same POST /orders create", async () => {
     const week = await app.inject({
       method: "GET",
-      url: "/kitchens/sri-sai/week?days=7&meal=LUNCH",
+      url: "/kitchens/csk-homemade-delights/week?days=7&meal=LUNCH",
     });
     assert.equal(week.statusCode, 200, week.body);
     const day = (
@@ -245,11 +324,11 @@ describe("security regressions", () => {
       }>
     ).find((d) => d.orderingOpen && d.menus.length > 0);
     assert.ok(day, "need an open lunch day with plates — run npm run db:seed");
-    const { mobile, addressId } = await customerWithAddress(app, testMobile("75"));
+    const { mobile, addressId, headers } = await customerWithAddress(app, testMobile("75"));
     const key = `e2e-idem-${mobile}-${Date.now()}`;
     const payload = {
       customerMobile: mobile,
-      cookSlug: "sri-sai",
+      cookSlug: "csk-homemade-delights",
       menuItemId: day.menus[0]!.id,
       qty: 1,
       addressId,
@@ -258,14 +337,14 @@ describe("security regressions", () => {
     const first = await app.inject({
       method: "POST",
       url: "/orders",
-      headers: { "idempotency-key": key },
+      headers: { ...headers, "idempotency-key": key },
       payload,
     });
     assert.equal(first.statusCode, 200, first.body);
     const second = await app.inject({
       method: "POST",
       url: "/orders",
-      headers: { "idempotency-key": key },
+      headers: { ...headers, "idempotency-key": key },
       payload,
     });
     assert.equal(second.statusCode, 200, second.body);
@@ -325,15 +404,16 @@ describe("security regressions", () => {
   });
 
   it("confirm-return rejects a paymentLinkId that does not match the order", async () => {
-    const menu = await app.inject({ method: "GET", url: "/kitchens/sri-sai/menu" });
+    const menu = await app.inject({ method: "GET", url: "/kitchens/csk-homemade-delights/menu" });
     const menuItemId = menu.json().menus?.[0]?.id;
-    const { mobile, addressId } = await customerWithAddress(app, testMobile("74"));
+    const { mobile, addressId, headers } = await customerWithAddress(app, testMobile("74"));
     const created = await app.inject({
       method: "POST",
       url: "/orders",
+      headers,
       payload: {
         customerMobile: mobile,
-        cookSlug: "sri-sai",
+        cookSlug: "csk-homemade-delights",
         menuItemId,
         qty: 1,
         addressId,

@@ -40,8 +40,8 @@ resource "google_cloud_run_v2_service" "api" {
     service_account = google_service_account.run.email
 
     scaling {
-      min_instance_count = 0
-      max_instance_count = 5
+      min_instance_count = var.api_min_instances
+      max_instance_count = var.api_max_instances
     }
 
     volumes {
@@ -95,6 +95,18 @@ resource "google_cloud_run_v2_service" "api" {
         name  = "OTEL_ENABLED"
         value = tostring(var.otel_enabled)
       }
+      env {
+        name  = "DB_POOL_MAX"
+        value = tostring(var.db_pool_max_api)
+      }
+
+      dynamic "env" {
+        for_each = var.solo_kitchen_slug != "" ? [var.solo_kitchen_slug] : []
+        content {
+          name  = "SOLO_KITCHEN_SLUG"
+          value = env.value
+        }
+      }
 
       dynamic "env" {
         for_each = var.otel_exporter_otlp_endpoint != "" ? [var.otel_exporter_otlp_endpoint] : []
@@ -126,6 +138,8 @@ resource "google_cloud_run_v2_service" "api" {
       }
 
       resources {
+        # Bill CPU only while serving requests (solo cost).
+        cpu_idle = true
         limits = {
           cpu    = "1"
           memory = "512Mi"
@@ -174,7 +188,7 @@ resource "google_cloud_run_v2_service" "worker" {
 
     scaling {
       min_instance_count = var.worker_min_instances
-      max_instance_count = 3
+      max_instance_count = var.worker_max_instances
     }
 
     volumes {
@@ -224,6 +238,26 @@ resource "google_cloud_run_v2_service" "worker" {
         name  = "CONFIRMING_STUCK_MS"
         value = tostring(var.confirming_stuck_ms)
       }
+      env {
+        name  = "DB_POOL_MAX"
+        value = tostring(var.db_pool_max_worker)
+      }
+      env {
+        name  = "OUTBOX_POLL_MS"
+        value = tostring(var.outbox_poll_ms)
+      }
+      env {
+        name  = "ENABLE_AUTO_RETENTION"
+        value = "true"
+      }
+
+      dynamic "env" {
+        for_each = var.solo_kitchen_slug != "" ? [var.solo_kitchen_slug] : []
+        content {
+          name  = "SOLO_KITCHEN_SLUG"
+          value = env.value
+        }
+      }
 
       dynamic "env" {
         for_each = var.otel_exporter_otlp_endpoint != "" ? [var.otel_exporter_otlp_endpoint] : []
@@ -255,6 +289,8 @@ resource "google_cloud_run_v2_service" "worker" {
       }
 
       resources {
+        # Worker polls continuously when min≥1 — keep CPU allocated.
+        cpu_idle = false
         limits = {
           cpu    = "1"
           memory = "512Mi"
@@ -287,8 +323,8 @@ resource "google_cloud_run_v2_service" "web" {
 
   template {
     scaling {
-      min_instance_count = 0
-      max_instance_count = 5
+      min_instance_count = var.web_min_instances
+      max_instance_count = var.web_max_instances
     }
 
     containers {
@@ -310,7 +346,24 @@ resource "google_cloud_run_v2_service" "web" {
         }
       }
 
+      dynamic "env" {
+        for_each = var.solo_kitchen_slug != "" ? [var.solo_kitchen_slug] : []
+        content {
+          name  = "SOLO_KITCHEN_SLUG"
+          value = env.value
+        }
+      }
+
+      dynamic "env" {
+        for_each = var.solo_kitchen_slug != "" ? [var.solo_kitchen_slug] : []
+        content {
+          name  = "NEXT_PUBLIC_SOLO_KITCHEN_SLUG"
+          value = env.value
+        }
+      }
+
       resources {
+        cpu_idle = true
         limits = {
           cpu    = "1"
           memory = "512Mi"

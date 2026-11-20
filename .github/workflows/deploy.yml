@@ -63,9 +63,11 @@ jobs:
       - run: npm ci
       - name: Build packages
         run: |
+          find packages apps -name 'tsconfig.tsbuildinfo' -delete 2>/dev/null || true
           npm run build -w @localmeals/domain
           npm run build -w @localmeals/adapters
           npm run build -w @localmeals/db
+          test -f packages/domain/dist/index.js
       - run: npm run db:migrate
       - run: npm test
       - name: Typecheck web
@@ -134,8 +136,12 @@ jobs:
 
       - name: Build & push web
         run: |
+          SOLO_SLUG="${{ vars.SOLO_KITCHEN_SLUG }}"
+          HIDE_ONBOARD="${{ vars.HIDE_COOK_ONBOARD }}"
           docker build --platform=linux/amd64 -f apps/web/Dockerfile \
             --build-arg "NEXT_PUBLIC_API_URL=${{ steps.public_api.outputs.url }}" \
+            --build-arg "NEXT_PUBLIC_SOLO_KITCHEN_SLUG=${SOLO_SLUG}" \
+            --build-arg "NEXT_PUBLIC_HIDE_COOK_ONBOARD=${HIDE_ONBOARD}" \
             -t "${REGISTRY}/web:${{ steps.meta.outputs.tag }}" \
             -t "${REGISTRY}/web:latest" .
           docker push "${REGISTRY}/web:${{ steps.meta.outputs.tag }}"
@@ -150,9 +156,14 @@ jobs:
           AUTH_ENFORCE="${{ vars.AUTH_ENFORCE || 'true' }}"
           WEB_ORIGIN="${{ secrets.WEB_ORIGIN }}"
 
-          ENV_VARS="NODE_ENV=production,MOCK_PAYMENTS=${MOCK_PAYMENTS},MOCK_WHATSAPP=${MOCK_WHATSAPP},MOCK_AUTH=${MOCK_AUTH},AUTH_ENFORCE=${AUTH_ENFORCE},WHATSAPP_API_VERSION=v21.0"
+          UPLOADS_BUCKET="${PROJECT_ID}-localmeals-uploads"
+          ENV_VARS="NODE_ENV=production,MOCK_PAYMENTS=${MOCK_PAYMENTS},MOCK_WHATSAPP=${MOCK_WHATSAPP},MOCK_AUTH=${MOCK_AUTH},AUTH_ENFORCE=${AUTH_ENFORCE},WHATSAPP_API_VERSION=v21.0,GCS_UPLOADS_BUCKET=${UPLOADS_BUCKET}"
           if [ -n "$WEB_ORIGIN" ]; then
             ENV_VARS="${ENV_VARS},WEB_ORIGIN=${WEB_ORIGIN}"
+          fi
+          SOLO_SLUG="${{ vars.SOLO_KITCHEN_SLUG }}"
+          if [ -n "$SOLO_SLUG" ]; then
+            ENV_VARS="${ENV_VARS},SOLO_KITCHEN_SLUG=${SOLO_SLUG}"
           fi
 
           gcloud run deploy localmeals-api \
@@ -205,12 +216,17 @@ jobs:
       - name: Deploy web
         run: |
           TAG="${{ steps.meta.outputs.tag }}"
+          WEB_ENV="NODE_ENV=production"
+          SOLO_SLUG="${{ vars.SOLO_KITCHEN_SLUG }}"
+          if [ -n "$SOLO_SLUG" ]; then
+            WEB_ENV="${WEB_ENV},SOLO_KITCHEN_SLUG=${SOLO_SLUG}"
+          fi
           gcloud run deploy localmeals-web \
             --image="${REGISTRY}/web:${TAG}" \
             --region="${REGION}" \
             --platform=managed \
             --allow-unauthenticated \
-            --set-env-vars="NODE_ENV=production" \
+            --set-env-vars="${WEB_ENV}" \
             --memory=512Mi \
             --cpu=1 \
             --max-instances=5 \

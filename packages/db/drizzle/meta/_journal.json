@@ -183,6 +183,20 @@
       "when": 1731834000000,
       "tag": "0025_cook_saved_plates",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1731920400000,
+      "tag": "0026_partner_tracking_url",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1732006800000,
+      "tag": "0027_mvp2_polish",
+      "breakpoints": true
     }
   ]
 }

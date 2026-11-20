@@ -23,13 +23,23 @@ async function ensureCustomer(db: Db, mobile: string, pinCode: string) {
   return created;
 }
 
-export async function followKitchen(db: Db, customerMobile: string, cookSlug: string) {
+export async function followKitchen(
+  db: Db,
+  customerMobile: string,
+  cookSlug: string,
+  opts: { consent?: boolean; consentVia?: "web_confirm" | "whatsapp_command" } = {},
+) {
   const { assertFeatureEnabled } = await import("./featureFlags.js");
   await assertFeatureEnabled(
     db,
     "kitchen_follow_enabled",
     "Kitchen follow alerts are temporarily paused",
   );
+  if (!opts.consent) {
+    throw new Error(
+      "Confirm to get WhatsApp when this kitchen posts a new plate (Unfollow anytime)",
+    );
+  }
   const cook = await db.query.cookProfiles.findFirst({
     where: (t, { eq: e }) => e(t.slugHandle, cookSlug),
   });
@@ -49,6 +59,18 @@ export async function followKitchen(db: Db, customerMobile: string, cookSlug: st
     cookId: cook.id,
     customerMobile: user.mobileNumber,
   });
+  // Record alert consent for DPDP-style audit (Follow = menu WA alerts).
+  const prev = (user.consents ?? {}) as Record<string, unknown>;
+  const consents: Record<string, unknown> = {
+    ...prev,
+    menuWaAlerts: true,
+    menuWaAlertsAt: new Date().toISOString(),
+    menuWaAlertsVia: opts.consentVia ?? "web_confirm",
+  };
+  await db
+    .update(users)
+    .set({ consents })
+    .where(eq(users.mobileNumber, user.mobileNumber));
   return {
     alreadyFollowing: false,
     cook: { kitchenName: cook.kitchenName, slugHandle: cook.slugHandle },

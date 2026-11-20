@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { isAdminUiPath, toInternalAdminPath } from "./lib/adminPath";
 
 /** Soft gate: require `lm_session` cookie for desk/account surfaces. API still enforces auth. */
 const PROTECTED = [
-  /^\/admin(?:\/|$)/,
   /^\/cook(?:\/|$)/,
   /^\/orders(?:\/|$)/,
   /^\/account(?:\/|$)/,
@@ -56,12 +56,47 @@ export function middleware(req: NextRequest) {
   requestHeaders.set("x-nonce", nonce);
 
   const { pathname } = req.nextUrl;
+
+  // Guessable `/admin` UI is closed — use the obscure ops path instead.
+  if (pathname === "/admin" || pathname.startsWith("/admin/")) {
+    return withSecurityHeaders(new NextResponse("Not Found", { status: 404 }), nonce);
+  }
+
+  // Temporary solo-kitchen launch: marketplace entry → that kitchen only.
+  // Prefer SOLO_KITCHEN_SLUG (runtime Cloud Run) then NEXT_PUBLIC_ (build-time).
+  const soloSlug = (
+    process.env.SOLO_KITCHEN_SLUG ||
+    process.env.NEXT_PUBLIC_SOLO_KITCHEN_SLUG ||
+    ""
+  )
+    .trim()
+    .toLowerCase();
+  const soloOk = /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(soloSlug);
+  if (soloOk) {
+    const kitchenPath = `/kitchen/${soloSlug}`;
+    if (pathname === "/" || pathname === "/discover") {
+      return withSecurityHeaders(NextResponse.redirect(new URL(kitchenPath, req.url)), nonce);
+    }
+    if (pathname === "/cook/onboard" || pathname.startsWith("/cook/onboard/")) {
+      return withSecurityHeaders(NextResponse.redirect(new URL(kitchenPath, req.url)), nonce);
+    }
+  } else {
+    const hideOnboard = ["1", "true", "yes"].includes(
+      (process.env.NEXT_PUBLIC_HIDE_COOK_ONBOARD ?? "").trim().toLowerCase(),
+    );
+    if (hideOnboard && (pathname === "/cook/onboard" || pathname.startsWith("/cook/onboard/"))) {
+      return withSecurityHeaders(NextResponse.redirect(new URL("/", req.url)), nonce);
+    }
+  }
+
+  const opsPath = isAdminUiPath(pathname);
   const needsAuth =
-    PROTECTED.some((re) => re.test(pathname)) &&
-    !PUBLIC_COOK.some((re) => re.test(pathname)) &&
+    (opsPath ||
+      (PROTECTED.some((re) => re.test(pathname)) &&
+        !PUBLIC_COOK.some((re) => re.test(pathname)))) &&
     !req.cookies.get("lm_session")?.value;
   if (needsAuth) {
-    const role = pathname.startsWith("/admin")
+    const role = opsPath
       ? "admin"
       : pathname.startsWith("/cook")
         ? "cook"
@@ -70,6 +105,18 @@ export function middleware(req: NextRequest) {
     login.searchParams.set("role", role);
     login.searchParams.set("next", pathname);
     return withSecurityHeaders(NextResponse.redirect(login), nonce);
+  }
+
+  if (opsPath) {
+    const internal = toInternalAdminPath(pathname);
+    if (internal) {
+      const url = req.nextUrl.clone();
+      url.pathname = internal;
+      return withSecurityHeaders(
+        NextResponse.rewrite(url, { request: { headers: requestHeaders } }),
+        nonce,
+      );
+    }
   }
 
   return withSecurityHeaders(

@@ -9,12 +9,12 @@ test.describe("customer address → checkout", () => {
     const mobile = uniqueMobile();
     const line1 = `PW E2E Tower ${Date.now().toString().slice(-4)}`;
 
-    await page.goto(`/login?role=customer&next=/kitchen/sri-sai`);
+    await page.goto(`/login?role=customer&next=/kitchen/csk-homemade-delights`);
     await page.getByPlaceholder("+91…").fill(mobile);
     await page.getByPlaceholder("6-digit code").fill("123456");
     await page.getByRole("button", { name: "Sign in" }).click();
 
-    await expect(page).toHaveURL(/\/kitchen\/sri-sai/, { timeout: 20_000 });
+    await expect(page).toHaveURL(/\/kitchen\/csk-homemade-delights/, { timeout: 20_000 });
     await expect(page.getByText(/Deliver to/i).first()).toBeVisible({ timeout: 20_000 });
 
     const saveAddr = page.getByRole("button", { name: /Save address/i }).first();
@@ -48,7 +48,7 @@ test.describe("customer address → checkout", () => {
     expect(traceHeader, "X-Trace-Id on create order").toMatch(/^trc_/);
 
     // Leaves kitchen for mock /pay or live Razorpay (either proves address checkout worked)
-    await expect(page).not.toHaveURL(/\/kitchen\/sri-sai/, { timeout: 20_000 });
+    await expect(page).not.toHaveURL(/\/kitchen\/csk-homemade-delights/, { timeout: 20_000 });
 
     await page.goto("/account");
     await expect(page.getByRole("heading", { name: "Your account" })).toBeVisible();
@@ -57,11 +57,11 @@ test.describe("customer address → checkout", () => {
 
   test("blocks day order until address chosen", async ({ page }) => {
     const mobile = uniqueMobile();
-    await page.goto(`/login?role=customer&next=/kitchen/sri-sai`);
+    await page.goto(`/login?role=customer&next=/kitchen/csk-homemade-delights`);
     await page.getByPlaceholder("+91…").fill(mobile);
     await page.getByPlaceholder("6-digit code").fill("123456");
     await page.getByRole("button", { name: "Sign in" }).click();
-    await expect(page).toHaveURL(/\/kitchen\/sri-sai/, { timeout: 20_000 });
+    await expect(page).toHaveURL(/\/kitchen\/csk-homemade-delights/, { timeout: 20_000 });
 
     const orderDay = page.getByRole("button", { name: "Order this day only" }).first();
     await expect(orderDay).toBeVisible({ timeout: 15_000 });

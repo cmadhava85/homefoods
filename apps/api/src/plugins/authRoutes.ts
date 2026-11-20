@@ -18,11 +18,16 @@ export async function authRoutes(
 ) {
   const { db, auth } = opts;
   const { currentUser, assertAuthed, assertKitchenStaff, assertOrderKitchenStaff, bindCustomerMobile } = auth;
+  // Local mock auth: avoid tripping the 10/15m OTP cap while testing logins.
+  const mockAuth =
+    (process.env.MOCK_AUTH ?? "true").trim().toLowerCase() !== "false";
+  const otpRequestMax = mockAuth ? 120 : 10;
+  const otpVerifyMax = mockAuth ? 240 : 20;
 app.post(
   "/auth/otp/request",
   {
     config: {
-      rateLimit: { max: 10, timeWindow: "15 minutes" },
+      rateLimit: { max: otpRequestMax, timeWindow: "15 minutes" },
     },
   },
   async (req, reply) => {
@@ -44,7 +49,7 @@ app.post(
   "/auth/otp/verify",
   {
     config: {
-      rateLimit: { max: 20, timeWindow: "15 minutes" },
+      rateLimit: { max: otpVerifyMax, timeWindow: "15 minutes" },
     },
   },
   async (req, reply) => {

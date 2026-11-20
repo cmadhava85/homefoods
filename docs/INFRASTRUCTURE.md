@@ -24,7 +24,7 @@ Read this top to bottom once, then execute **Phase A → B → C**. Do not buy S
 | Voice IVR | **None** | Exotel / Twilio |
 | CI/CD | **GitHub Actions** → Artifact Registry → Cloud Run | same |
 
-**Cost mindset (MVP-1, low traffic):** Cloud Run + small Cloud SQL often stays in low tens of USD/month if you sleep instances and use `db-f1-micro` / `db-g1-small` for staging. Production should use HA later.
+**Cost mindset (solo launch):** See **[COST.md](./COST.md)**. Defaults: API/web scale-to-zero, worker min 1, `db-f1-micro`, Pub/Sub off, GCS lifecycle, Artifact prune. Staging idle: `./scripts/cost-sleep-staging.sh`.
 
 ---
 

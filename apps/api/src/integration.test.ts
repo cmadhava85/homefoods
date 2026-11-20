@@ -25,22 +25,22 @@ describe("MVP-1 integration", () => {
 
   before(async () => {
     await app.ready();
-    const cookAuth = await loginCook(app, "sri-sai");
+    const cookAuth = await loginCook(app, "csk-homemade-delights");
     cookHeaders = cookAuth.headers;
     adminHeaders = (await loginAdmin(app)).headers;
     // Keep ordering open regardless of wall clock — cook-desired cut-off
     const cut = await app.inject({
       method: "PATCH",
-      url: "/cooks/sri-sai/meal-settings/LUNCH",
+      url: "/cooks/csk-homemade-delights/meal-settings/LUNCH",
       headers: cookHeaders,
       payload: { cutoffHour: 23, cutoffMinute: 59 },
     });
     assert.equal(cut.statusCode, 200, cut.body);
-    let menu = await app.inject({ method: "GET", url: "/kitchens/sri-sai/menu" });
+    let menu = await app.inject({ method: "GET", url: "/kitchens/csk-homemade-delights/menu" });
     assert.equal(menu.statusCode, 200);
     if (!menu.json().menus?.[0]) {
       // Service date rolled — re-seed via db package CLI is preferred; fail clearly
-      assert.fail("No menu for sri-sai today — run npm run db:seed");
+      assert.fail("No menu for csk-homemade-delights today — run npm run db:seed");
     }
     menuItemId = menu.json().menus[0].id;
   });
@@ -64,19 +64,19 @@ describe("MVP-1 integration", () => {
 
   it("creates order with idempotent double create", async () => {
     const mobile = testMobile("84");
-    const { addressId } = await customerWithAddress(app, mobile);
+    const { addressId, headers } = await customerWithAddress(app, mobile);
     const payload = {
       customerMobile: mobile,
-      cookSlug: "sri-sai",
+      cookSlug: "csk-homemade-delights",
       menuItemId,
       qty: 1,
       spice: "NORMAL" as const,
       addressId,
     };
-    const a = await app.inject({ method: "POST", url: "/orders", payload });
+    const a = await app.inject({ method: "POST", url: "/orders", headers, payload });
     assert.equal(a.statusCode, 200, a.body);
     assert.equal(a.json().status, "AWAITING_PAYMENT");
-    const b = await app.inject({ method: "POST", url: "/orders", payload });
+    const b = await app.inject({ method: "POST", url: "/orders", headers, payload });
     assert.equal(b.statusCode, 200);
     assert.equal(a.json().publicId, b.json().publicId);
     gatewayTxnId = a.json().gatewayTxnId;
@@ -117,7 +117,7 @@ describe("MVP-1 integration", () => {
     assert.ok(sri);
     const manifest = await app.inject({
       method: "GET",
-      url: "/cooks/sri-sai/manifest",
+      url: "/cooks/csk-homemade-delights/manifest",
       headers: cookHeaders,
     });
     assert.equal(manifest.statusCode, 200);
@@ -153,7 +153,7 @@ describe("MVP-1 integration", () => {
     const kitchens = await app.inject({ method: "GET", url: "/kitchens?pin=600119" });
     assert.equal(kitchens.statusCode, 200);
     const slugs = kitchens.json().map((k: { slugHandle: string }) => k.slugHandle);
-    assert.ok(slugs.includes("sri-sai"));
+    assert.ok(slugs.includes("csk-homemade-delights"));
     assert.ok(!slugs.includes("millet-box"));
   });
 
@@ -187,7 +187,7 @@ describe("MVP-1 integration", () => {
   it("late request + late-approve creates payable order; FSSAI gate blocks unpaid kitchen", async () => {
     const close = await app.inject({
       method: "PATCH",
-      url: "/cooks/sri-sai/meal-settings/LUNCH",
+      url: "/cooks/csk-homemade-delights/meal-settings/LUNCH",
       headers: cookHeaders,
       payload: { cutoffHour: 0, cutoffMinute: 0 },
     });
@@ -201,7 +201,7 @@ describe("MVP-1 integration", () => {
       headers: lateHeaders,
       payload: {
         customerMobile: lateMobile,
-        cookSlug: "sri-sai",
+        cookSlug: "csk-homemade-delights",
         menuItemId,
         qty: 1,
         addressId,
@@ -230,7 +230,7 @@ describe("MVP-1 integration", () => {
 
     await app.inject({
       method: "PATCH",
-      url: "/cooks/sri-sai/meal-settings/LUNCH",
+      url: "/cooks/csk-homemade-delights/meal-settings/LUNCH",
       headers: cookHeaders,
       payload: { cutoffHour: 23, cutoffMinute: 59 },
     });
@@ -262,7 +262,7 @@ describe("MVP-1 integration", () => {
     const res = await app.inject({
       method: "POST",
       url: "/webhooks/whatsapp",
-      payload: { from: mobile, text: "Order sri-sai 1 HOME" },
+      payload: { from: mobile, text: "Order csk-homemade-delights 1 HOME" },
     });
     assert.equal(res.statusCode, 200);
     assert.equal(res.json().intent, "ORDER");
@@ -280,7 +280,7 @@ describe("MVP-1 integration", () => {
     const menu = await app.inject({
       method: "POST",
       url: "/webhooks/whatsapp",
-      payload: { from: mobile, text: "Menu sri-sai" },
+      payload: { from: mobile, text: "Menu csk-homemade-delights" },
     });
     assert.equal(menu.statusCode, 200, menu.body);
     assert.equal(menu.json().intent, "MENU");

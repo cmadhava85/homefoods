@@ -89,11 +89,26 @@ async function main() {
     })
     .onConflictDoNothing();
 
+  // Migrate older local seed slug → launch kitchen.
+  await db
+    .update(cookProfiles)
+    .set({
+      kitchenName: "CSK Homemade Delights",
+      slugHandle: "csk-homemade-delights",
+      payoutBeneficiaryRef: "rzp_acc_csk_homemade_demo",
+      payoutUpiId: "cskhomemade@upi",
+      deliveryType: "SELF",
+      flatSelfDeliveryFee: "25.00",
+      maxSelfDistanceKm: "3.0",
+      offerCustomerArrange: false,
+    })
+    .where(eq(cookProfiles.slugHandle, "sri-sai"));
+
   const cookSeeds = [
     {
       mobileNumber: "+919876543210",
-      kitchenName: "Sri Sai Kitchen",
-      slugHandle: "sri-sai",
+      kitchenName: "CSK Homemade Delights",
+      slugHandle: "csk-homemade-delights",
       lat: "12.9010000",
       lng: "80.2270000",
       pinCode: "600119",
@@ -104,10 +119,17 @@ async function main() {
       maxDailyCapacity: 40,
       lunchCutoffHour: demoHour,
       lunchCutoffMinute: demoMinute,
-      payoutBeneficiaryRef: "rzp_acc_sri_sai_demo",
-      payoutUpiId: "srisai@upi",
+      payoutBeneficiaryRef: "rzp_acc_csk_homemade_demo",
+      payoutUpiId: "cskhomemade@upi",
       weekDiscountPercent: 10,
       weekDiscountMinDays: 3,
+      // Solo launch: SELF delivery, ₹25 delivery fee, no customer-arrange; platform fee ₹0 via solo env.
+      deliveryType: "SELF" as const,
+      flatSelfDeliveryFee: "25.00",
+      maxSelfDistanceKm: "3.0",
+      offerCookDelivery: true,
+      pickupEnabled: false,
+      offerCustomerArrange: false,
     },
     {
       mobileNumber: "+919876543211",
@@ -145,6 +167,7 @@ async function main() {
     await db
       .update(cookProfiles)
       .set({
+        kitchenName: cook.kitchenName,
         lunchCutoffHour: cook.lunchCutoffHour,
         lunchCutoffMinute: cook.lunchCutoffMinute,
         payoutBeneficiaryRef: cook.payoutBeneficiaryRef,
@@ -154,12 +177,38 @@ async function main() {
           "weekDiscountPercent" in cook ? (cook.weekDiscountPercent as number) : 0,
         weekDiscountMinDays:
           "weekDiscountMinDays" in cook ? (cook.weekDiscountMinDays as number) : 3,
+        ...("offerCookDelivery" in cook
+          ? { offerCookDelivery: (cook as { offerCookDelivery: boolean }).offerCookDelivery }
+          : {}),
+        ...("pickupEnabled" in cook
+          ? { pickupEnabled: (cook as { pickupEnabled: boolean }).pickupEnabled }
+          : {}),
+        ...("offerCustomerArrange" in cook
+          ? {
+              offerCustomerArrange: (cook as { offerCustomerArrange: boolean })
+                .offerCustomerArrange,
+            }
+          : {}),
+        ...("deliveryType" in cook
+          ? { deliveryType: (cook as { deliveryType: "SELF" | "PARTNER" }).deliveryType }
+          : {}),
+        ...("flatSelfDeliveryFee" in cook
+          ? {
+              flatSelfDeliveryFee: (cook as { flatSelfDeliveryFee: string })
+                .flatSelfDeliveryFee,
+            }
+          : {}),
+        ...("maxSelfDistanceKm" in cook
+          ? {
+              maxSelfDistanceKm: (cook as { maxSelfDistanceKm: string }).maxSelfDistanceKm,
+            }
+          : {}),
       })
       .where(eq(cookProfiles.slugHandle, cook.slugHandle));
   }
 
-  const sriSai = await db.query.cookProfiles.findFirst({
-    where: eq(cookProfiles.slugHandle, "sri-sai"),
+  const csk = await db.query.cookProfiles.findFirst({
+    where: eq(cookProfiles.slugHandle, "csk-homemade-delights"),
   });
   const amma = await db.query.cookProfiles.findFirst({
     where: eq(cookProfiles.slugHandle, "amma-priya"),
@@ -206,27 +255,27 @@ async function main() {
     }
   }
 
-  if (sriSai) {
+  if (csk) {
     await db
       .insert(subscriptions)
       .values({
         userMobile: "+919840111111",
-        cookId: sriSai.id,
+        cookId: csk.id,
         mealType: "LUNCH",
         isActive: true,
       })
       .onConflictDoNothing();
   }
 
-  if (sriSai) {
+  if (csk) {
     const todayMenu = await db.query.dailyMenus.findFirst({
       where: (t, { eq: e, and: a }) =>
-        a(e(t.cookId, sriSai.id), e(t.serviceDate, today)),
+        a(e(t.cookId, csk.id), e(t.serviceDate, today)),
     });
     if (!todayMenu) {
       await db.insert(dailyMenus).values([
         {
-          cookId: sriSai.id,
+          cookId: csk.id,
           itemName: "Sambar Rice + Poriyal",
           itemNameTa: "சாம்பார் சாதம் + பொரியல்",
           pricePaise: 8000,
@@ -236,7 +285,7 @@ async function main() {
           allergens: ["dairy"],
         },
         {
-          cookId: sriSai.id,
+          cookId: csk.id,
           itemName: "Chapathi (3) + Dal",
           itemNameTa: "சப்பாத்தி (3) + பருப்பு",
           pricePaise: 9000,
@@ -270,14 +319,14 @@ async function main() {
     }
   }
 
-  if (sriSai) {
+  if (csk) {
     const existing = await db.query.orders.findFirst({
       where: eq(orders.publicId, "LM-SEED01"),
     });
     if (!existing) {
       const menu = await db.query.dailyMenus.findFirst({
         where: (t, { eq: e, and: a }) =>
-          a(e(t.cookId, sriSai.id), e(t.serviceDate, today), e(t.itemName, "Sambar Rice + Poriyal")),
+          a(e(t.cookId, csk.id), e(t.serviceDate, today), e(t.itemName, "Sambar Rice + Poriyal")),
       });
       const home = await db.query.addresses.findFirst({
         where: (t, { eq: e, and: a }) =>
@@ -289,7 +338,7 @@ async function main() {
           publicId: "LM-SEED01",
           traceId: "trc_seed_lmseed01",
           customerMobile: "+919840111111",
-          cookId: sriSai.id,
+          cookId: csk.id,
           menuItemId: menu?.id,
           addressId: home?.id,
           mealType: "LUNCH",
@@ -319,7 +368,7 @@ async function main() {
 
       await db.insert(supportTickets).values({
         orderId: order.id,
-        cookId: sriSai.id,
+        cookId: csk.id,
         customerMobile: "+919840111111",
         category: "MISSING_DELIVERY",
         status: "OPEN",
@@ -354,7 +403,7 @@ async function main() {
           publicId: fixture.publicId,
           traceId: `trc_seed_${fixture.publicId.toLowerCase().replace(/[^a-z0-9]/g, "")}`,
           customerMobile: fixture.mobile,
-          cookId: sriSai.id,
+          cookId: csk.id,
           mealType: "LUNCH",
           serviceDate: today,
           itemName: "Sambar Rice + Poriyal",

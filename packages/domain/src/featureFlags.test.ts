@@ -16,6 +16,10 @@ describe("feature flags", () => {
       assert.ok(def.description.length > 0, def.key);
     }
     assert.equal(d.pickup_enabled, false);
+    assert.equal(d.lean_wa_status_enabled, false);
+    assert.equal(d.delivery_distance_limits_enabled, false);
+    assert.equal(d.self_delivery_fee_enabled, false);
+    assert.equal(d.child_pays_enabled, false);
     assert.equal(d.ordering_enabled, true);
     assert.equal(d.reviews_enabled, true);
   });
@@ -27,5 +31,23 @@ describe("feature flags", () => {
     assert.equal(isFeatureEnabled(null, "ordering_enabled"), true);
     assert.equal(isFeatureEnabled(undefined, "pickup_enabled"), false);
     assert.equal(isFeatureEnabled({ ordering_enabled: true }, "ordering_enabled"), true);
+  });
+
+  it("ignores non-boolean flag values and unknown keys", () => {
+    assert.equal(
+      isFeatureEnabled(
+        { ordering_enabled: "yes" as unknown as boolean },
+        "ordering_enabled",
+      ),
+      true,
+    );
+    assert.equal(
+      isFeatureEnabled({ pickup_enabled: 0 as unknown as boolean }, "pickup_enabled"),
+      false,
+    );
+    assert.equal(
+      isFeatureEnabled({}, "not_a_real_flag" as typeof FEATURE_FLAG_DEFS[number]["key"]),
+      true,
+    );
   });
 });

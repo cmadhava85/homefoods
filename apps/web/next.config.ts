@@ -7,7 +7,7 @@ const apiUpstream =
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  transpilePackages: ["@localmeals/i18n"],
+  transpilePackages: ["@localmeals/i18n", "@localmeals/domain"],
   async rewrites() {
     const api = apiUpstream.replace(/\/$/, "");
     return [

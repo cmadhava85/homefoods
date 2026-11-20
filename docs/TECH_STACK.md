@@ -110,7 +110,7 @@ npm test
 
 | Feature | LocalMeals usage |
 |---------|------------------|
-| App Router (`app/`) | Routes: `/discover`, `/kitchen/[slug]`, `/cook/[slug]`, `/admin`, `/orders`, `/family`, `/wa`, `/pay/...` |
+| App Router (`app/`) | Routes: `/discover`, `/kitchen/[slug]`, `/cook/[slug]`, ops UI (`/lm-ops-k7v2m9`), `/orders`, `/family`, `/wa`, `/pay/...` |
 | Client components | Interactive desks, carts, auth (`"use client"`) |
 | `next.config` rewrites | Browser calls `/lm-api/*` → API origin so cookies/session stay same-site friendly ([`apps/web/next.config.ts`](../apps/web/next.config.ts), [`lib/api.ts`](../apps/web/src/lib/api.ts)) |
 | Middleware | Gate sensitive paths (e.g. `/family`) — [`middleware.ts`](../apps/web/src/middleware.ts) |
@@ -462,8 +462,8 @@ In [TECHNICAL_DESIGN.md](./TECHNICAL_DESIGN.md) for scale. Current MVP: outbox +
 |------------|------------|
 | 1. Domain | `packages/domain/src/orderState.ts`, cutoff helpers; run domain tests |
 | 2. Order API | Create order → mock pay → status in DB; read `services/orders.ts` |
-| 3. Web checkout | `/kitchen/sri-sai` → cart → pay → `/orders` |
-| 4. Cook desk | `/cook/sri-sai` menu + cooking buttons |
+| 3. Web checkout | `/kitchen/csk-homemade-delights` → cart → pay → `/orders` |
+| 4. Cook desk | `/cook/csk-homemade-delights` menu + cooking buttons |
 | 5. WhatsApp | `/wa` customer + cook personas; read `parseWhatsAppIntent` |
 | 6. Ops | [RUNBOOK.md](./RUNBOOK.md) cut-off, EOD, Mark paid |
 | 7. Infra | [INFRASTRUCTURE.md](./INFRASTRUCTURE.md) + Terraform README |

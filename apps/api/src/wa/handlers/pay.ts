@@ -23,6 +23,16 @@ export async function handlePay(s: WaSession): Promise<object> {
           });
           return { ok: true, intent, empty: true, replies: replies() };
         }
+        const { mobileOwnsOrder } = await import("../../http/orderOwnership.js");
+        const seed = checkout.orders[0];
+        if (!seed || !mobileOwnsOrder(seed, mobile)) {
+          await wa.send({
+            to: from,
+            body: wt("wa.noUnpaidCheckout", { id: payCheckout }),
+            buttons: ["Orders", "Menu"],
+          });
+          return { ok: true, intent, empty: true, replies: replies() };
+        }
         await wa.send({
           to: from,
           body: [

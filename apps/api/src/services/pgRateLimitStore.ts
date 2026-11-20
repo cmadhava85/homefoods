@@ -6,11 +6,19 @@ type IncrCb = (
   result?: { current: number; ttl: number },
 ) => void;
 
-type StoreOptions = Record<string, unknown>;
+type StoreOptions = Record<string, unknown> & {
+  max?: number;
+  timeWindow?: number | string;
+  /** Optional label when Fastify passes route metadata. */
+  routeInfo?: { method?: string; url?: string };
+};
 
 /**
  * Postgres-backed store for `@fastify/rate-limit` so limits hold across Cloud Run instances.
  * Constructor signature matches FastifyRateLimitStoreCtor.
+ *
+ * Bucket keys include max + timeWindow (+ route when present) so OTP’s 15‑minute
+ * window does not block unrelated routes that share the same client IP.
  */
 export function createPgRateLimitStore(db: Db) {
   return class PgRateLimitStore {
@@ -20,14 +28,25 @@ export function createPgRateLimitStore(db: Db) {
       this.options = options;
     }
 
+    private bucketKey(clientKey: string): string {
+      const max = this.options.max ?? "g";
+      const window = this.options.timeWindow ?? "default";
+      const route = this.options.routeInfo
+        ? `${this.options.routeInfo.method ?? ""}:${this.options.routeInfo.url ?? ""}`
+        : "";
+      const raw = route ? `${route}|${max}|${window}|${clientKey}` : `${max}|${window}|${clientKey}`;
+      return raw.slice(0, 255);
+    }
+
     incr(key: string, callback: IncrCb, timeWindow: number, _max: number): void {
       void (async () => {
         const now = Date.now();
         // postgres.js rejects Date params in drizzle sql`` — bind ISO timestamptz string.
         const resetAtIso = new Date(now + timeWindow).toISOString();
+        const bucketKey = this.bucketKey(key);
         const result = await db.execute(sql`
           INSERT INTO rate_limit_buckets (bucket_key, hits, reset_at)
-          VALUES (${key}, 1, ${resetAtIso}::timestamptz)
+          VALUES (${bucketKey}, 1, ${resetAtIso}::timestamptz)
           ON CONFLICT (bucket_key) DO UPDATE SET
             hits = CASE
               WHEN rate_limit_buckets.reset_at <= NOW() THEN 1

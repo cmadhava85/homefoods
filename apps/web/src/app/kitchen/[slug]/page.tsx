@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { KitchenBrowse } from "./KitchenBrowse";
 
 export default async function KitchenPage({
@@ -6,5 +7,9 @@ export default async function KitchenPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  return <KitchenBrowse slug={slug} />;
+  return (
+    <Suspense fallback={<p className="muted">Loading kitchen…</p>}>
+      <KitchenBrowse slug={slug} />
+    </Suspense>
+  );
 }

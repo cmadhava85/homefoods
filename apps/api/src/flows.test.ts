@@ -27,12 +27,12 @@ describe("MVP-1 API flows", () => {
 
   before(async () => {
     await app.ready();
-    cookHeaders = (await loginCook(app, "sri-sai")).headers;
+    cookHeaders = (await loginCook(app, "csk-homemade-delights")).headers;
     ammaHeaders = (await loginCook(app, "amma-priya")).headers;
     adminHeaders = (await loginAdmin(app)).headers;
     await app.inject({
       method: "PATCH",
-      url: "/cooks/sri-sai/meal-settings/LUNCH",
+      url: "/cooks/csk-homemade-delights/meal-settings/LUNCH",
       headers: cookHeaders,
       payload: { cutoffHour: 23, cutoffMinute: 59 },
     });
@@ -42,8 +42,8 @@ describe("MVP-1 API flows", () => {
       headers: ammaHeaders,
       payload: { cutoffHour: 23, cutoffMinute: 59 },
     });
-    const menu = await app.inject({ method: "GET", url: "/kitchens/sri-sai/menu" });
-    assert.ok(menu.json().menus?.[0], "No menu for sri-sai today — run npm run db:seed");
+    const menu = await app.inject({ method: "GET", url: "/kitchens/csk-homemade-delights/menu" });
+    assert.ok(menu.json().menus?.[0], "No menu for csk-homemade-delights today — run npm run db:seed");
     menuItemId = menu.json().menus[0].id;
   });
 
@@ -59,7 +59,7 @@ describe("MVP-1 API flows", () => {
   });
 
   it("GET kitchen menu includes lunchCutoff", async () => {
-    const res = await app.inject({ method: "GET", url: "/kitchens/sri-sai/menu" });
+    const res = await app.inject({ method: "GET", url: "/kitchens/csk-homemade-delights/menu" });
     assert.equal(res.statusCode, 200);
     assert.ok(res.json().lunchCutoff);
     assert.equal(typeof res.json().orderingOpen, "boolean");
@@ -69,7 +69,7 @@ describe("MVP-1 API flows", () => {
     const name = `Test Thali ${Date.now()}`;
     const created = await app.inject({
       method: "POST",
-      url: "/cooks/sri-sai/menu",
+      url: "/cooks/csk-homemade-delights/menu",
       headers: cookHeaders,
       payload: { itemName: name, priceRupees: 99, isVeg: true },
     });
@@ -78,21 +78,21 @@ describe("MVP-1 API flows", () => {
 
     const listed = await app.inject({
       method: "GET",
-      url: "/cooks/sri-sai/menu",
+      url: "/cooks/csk-homemade-delights/menu",
       headers: cookHeaders,
     });
     assert.ok(listed.json().menus.some((m: { id: number }) => m.id === id));
 
     const hidden = await app.inject({
       method: "PATCH",
-      url: `/cooks/sri-sai/menu/${id}`,
+      url: `/cooks/csk-homemade-delights/menu/${id}`,
       headers: cookHeaders,
       payload: { isAvailable: false },
     });
     assert.equal(hidden.statusCode, 200);
     assert.equal(hidden.json().isAvailable, false);
 
-    const customer = await app.inject({ method: "GET", url: "/kitchens/sri-sai/menu" });
+    const customer = await app.inject({ method: "GET", url: "/kitchens/csk-homemade-delights/menu" });
     assert.ok(!customer.json().menus.some((m: { id: number }) => m.id === id));
   });
 
@@ -100,7 +100,7 @@ describe("MVP-1 API flows", () => {
     const name = `Weekly Bowl ${Date.now()}`;
     const created = await app.inject({
       method: "POST",
-      url: "/cooks/sri-sai/menu",
+      url: "/cooks/csk-homemade-delights/menu",
       headers: cookHeaders,
       payload: { itemName: name, priceRupees: 85, weekly: true, dayOfWeek: 3, isVeg: true },
     });
@@ -111,14 +111,14 @@ describe("MVP-1 API flows", () => {
 
     const week = await app.inject({
       method: "GET",
-      url: "/cooks/sri-sai/menu?view=week",
+      url: "/cooks/csk-homemade-delights/menu?view=week",
       headers: cookHeaders,
     });
     assert.ok(week.json().menus.some((m: { itemName: string }) => m.itemName === name));
 
     const removed = await app.inject({
       method: "DELETE",
-      url: `/cooks/sri-sai/menu/${weeklyId}`,
+      url: `/cooks/csk-homemade-delights/menu/${weeklyId}`,
       headers: cookHeaders,
     });
     assert.equal(removed.statusCode, 200, removed.body);
@@ -137,7 +137,7 @@ describe("MVP-1 API flows", () => {
       headers,
       payload: {
         customerMobile: m,
-        cookSlug: "sri-sai",
+        cookSlug: "csk-homemade-delights",
         menuItemId,
         qty: opts.qty ?? 1,
         spice: opts.spice ?? "NORMAL",
@@ -169,7 +169,7 @@ describe("MVP-1 API flows", () => {
 
     const packed = await app.inject({
       method: "POST",
-      url: "/cooks/sri-sai/pack",
+      url: "/cooks/csk-homemade-delights/pack",
       headers: cookHeaders,
     });
     assert.equal(packed.statusCode, 200);
@@ -177,7 +177,7 @@ describe("MVP-1 API flows", () => {
 
     const dispatched = await app.inject({
       method: "POST",
-      url: "/cooks/sri-sai/dispatch",
+      url: "/cooks/csk-homemade-delights/dispatch",
       headers: cookHeaders,
     });
     assert.equal(dispatched.statusCode, 200);
@@ -256,7 +256,7 @@ describe("MVP-1 API flows", () => {
     // Set cut-off far in the future relative to "now" for a cook
     await app.inject({
       method: "PATCH",
-      url: "/cooks/sri-sai/meal-settings/LUNCH",
+      url: "/cooks/csk-homemade-delights/meal-settings/LUNCH",
       headers: cookHeaders,
       payload: { cutoffHour: 23, cutoffMinute: 59 },
     });
@@ -274,7 +274,7 @@ describe("MVP-1 API flows", () => {
   it("sets cook lunch cut-off via meal-settings", async () => {
     const res = await app.inject({
       method: "PATCH",
-      url: "/cooks/sri-sai/meal-settings/LUNCH",
+      url: "/cooks/csk-homemade-delights/meal-settings/LUNCH",
       headers: cookHeaders,
       payload: { cutoffHour: 8, cutoffMinute: 30 },
     });
@@ -285,7 +285,7 @@ describe("MVP-1 API flows", () => {
     assert.equal(lunch?.cutoff, "08:30");
     await app.inject({
       method: "PATCH",
-      url: "/cooks/sri-sai/meal-settings/LUNCH",
+      url: "/cooks/csk-homemade-delights/meal-settings/LUNCH",
       headers: cookHeaders,
       payload: { cutoffHour: 23, cutoffMinute: 59 },
     });
@@ -294,7 +294,7 @@ describe("MVP-1 API flows", () => {
   it("blocks order after cook cut-off", async () => {
     await app.inject({
       method: "PATCH",
-      url: "/cooks/sri-sai/meal-settings/LUNCH",
+      url: "/cooks/csk-homemade-delights/meal-settings/LUNCH",
       headers: cookHeaders,
       payload: { cutoffHour: 0, cutoffMinute: 0 },
     });
@@ -303,7 +303,7 @@ describe("MVP-1 API flows", () => {
     assert.match(res.json().error, /cut-off/i);
     await app.inject({
       method: "PATCH",
-      url: "/cooks/sri-sai/meal-settings/LUNCH",
+      url: "/cooks/csk-homemade-delights/meal-settings/LUNCH",
       headers: cookHeaders,
       payload: { cutoffHour: 23, cutoffMinute: 59 },
     });
@@ -371,8 +371,8 @@ describe("MVP-1 API flows", () => {
       url: "/internal/cutoffs/LUNCH",
       payload: { force: true },
     });
-    await app.inject({ method: "POST", url: "/cooks/sri-sai/pack", headers: cookHeaders });
-    await app.inject({ method: "POST", url: "/cooks/sri-sai/dispatch", headers: cookHeaders });
+    await app.inject({ method: "POST", url: "/cooks/csk-homemade-delights/pack", headers: cookHeaders });
+    await app.inject({ method: "POST", url: "/cooks/csk-homemade-delights/dispatch", headers: cookHeaders });
     await app.inject({
       method: "POST",
       url: `/orders/${pid}/delivered`,
@@ -433,7 +433,7 @@ describe("MVP-1 API flows", () => {
     assert.equal(photo.json().intent, "COOK_MENU_PHOTO");
     assert.ok(photo.json().imageUrl?.startsWith("/uploads/menu-"));
 
-    const customer = await app.inject({ method: "GET", url: "/kitchens/sri-sai/menu" });
+    const customer = await app.inject({ method: "GET", url: "/kitchens/csk-homemade-delights/menu" });
     assert.equal(customer.statusCode, 200);
     const hit = (customer.json().menus as Array<{ itemName: string; imageUrl?: string | null }>).find(
       (m) => m.itemName === name,

@@ -19,8 +19,9 @@ export async function internalRoutes(
   const { db, auth } = opts;
   const { currentUser, assertAuthed, assertKitchenStaff, assertOrderKitchenStaff, bindCustomerMobile } = auth;
 app.post("/internal/cutoffs/:mealType", async (req, reply) => {
+  let authz: Awaited<ReturnType<typeof assertInternalOrRoles>>;
   try {
-    await assertInternalOrRoles(db, req.headers, ["ADMIN", "COOK"]);
+    authz = await assertInternalOrRoles(db, req.headers, ["ADMIN", "COOK"]);
   } catch (e) {
     return sendCaughtError(reply, e);
   }
@@ -33,6 +34,15 @@ app.post("/internal/cutoffs/:mealType", async (req, reply) => {
       force: z.boolean().optional(),
     })
     .parse(req.body ?? {});
+
+  // COOK may only cut off their own kitchen — never global / other cooks / force.
+  if (authz.kind === "session" && authz.user.role === "COOK") {
+    if (!authz.user.cookId) {
+      return reply.code(403).send({ error: "Not your kitchen" });
+    }
+    return runMealCutoff(db, parsed.data, { cookId: authz.user.cookId, force: false });
+  }
+
   return runMealCutoff(db, parsed.data, body);
 });
 

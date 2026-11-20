@@ -11,10 +11,29 @@ export type SavedAddress = {
   line1: string;
   line2?: string | null;
   pinCode: string;
+  lat?: string | number | null;
+  lng?: string | number | null;
   isDefault: boolean;
 };
 
 type Label = "HOME" | "OFFICE" | "OTHER";
+
+function readDeviceLocation(): Promise<{ lat: number; lng: number } | null> {
+  if (typeof navigator === "undefined" || !navigator.geolocation) {
+    return Promise.resolve(null);
+  }
+  return new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (pos) =>
+        resolve({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+        }),
+      () => resolve(null),
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 60_000 },
+    );
+  });
+}
 
 export function CheckoutAddressPicker({
   addresses,
@@ -37,9 +56,23 @@ export function CheckoutAddressPicker({
   const [label, setLabel] = useState<Label>("HOME");
   const [line1, setLine1] = useState("");
   const [pinCode, setPinCode] = useState("600119");
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [locating, setLocating] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [fieldErr, setFieldErr] = useState<{ line?: string; pin?: string }>({});
+
+  async function captureLocation() {
+    setLocating(true);
+    setErr(null);
+    try {
+      const next = await readDeviceLocation();
+      setCoords(next);
+      if (!next) setErr(t("address.locationHint"));
+    } finally {
+      setLocating(false);
+    }
+  }
 
   async function saveNew() {
     const lineKey = validateAddressLine(line1);
@@ -53,9 +86,17 @@ export function CheckoutAddressPicker({
     setBusy(true);
     setErr(null);
     try {
+      // Prefer already-captured GPS; otherwise try once (deny = still save with PIN centre).
+      const geo = coords ?? (await readDeviceLocation());
       const res = await authFetch("/me/addresses", {
         method: "POST",
-        body: JSON.stringify({ label, line1, pinCode, isDefault: addresses.length === 0 }),
+        body: JSON.stringify({
+          label,
+          line1,
+          pinCode,
+          isDefault: addresses.length === 0,
+          ...(geo ? { lat: geo.lat, lng: geo.lng } : {}),
+        }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Could not save address");
@@ -63,6 +104,7 @@ export function CheckoutAddressPicker({
       onChange(String(json.id));
       setShowAdd(false);
       setLine1("");
+      setCoords(null);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not save address");
     } finally {
@@ -142,7 +184,19 @@ export function CheckoutAddressPicker({
             aria-invalid={Boolean(fieldErr.line)}
           />
           {fieldErr.line ? <p className="err">{fieldErr.line}</p> : null}
+          <p className="muted" style={{ margin: "0.35rem 0 0", fontSize: "0.85rem" }}>
+            {t("address.locationHint")}
+            {coords ? ` · ✓ ${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)}` : ""}
+          </p>
           <div className="checkout-address-add-actions">
+            <button
+              className="btn sm secondary"
+              type="button"
+              disabled={locating || busy}
+              onClick={() => void captureLocation()}
+            >
+              {locating ? t("address.locating") : t("address.useLocation")}
+            </button>
             <button
               className="btn sm secondary"
               type="button"
@@ -150,6 +204,7 @@ export function CheckoutAddressPicker({
                 setShowAdd(false);
                 setErr(null);
                 setFieldErr({});
+                setCoords(null);
               }}
             >
               {t("address.cancel")}
@@ -158,7 +213,7 @@ export function CheckoutAddressPicker({
               className="btn sm"
               type="button"
               disabled={busy || line1.trim().length < 5 || pinCode.length !== 6}
-              onClick={saveNew}
+              onClick={() => void saveNew()}
             >
               {busy ? t("address.saving") : t("address.save")}
             </button>

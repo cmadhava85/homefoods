@@ -6,6 +6,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
 import { useLocale } from "@/components/LocaleProvider";
 import { loginPath, requestOtp, verifyOtp, type AuthRole } from "@/lib/auth";
+import { adminHref, isAdminUiPath } from "@/lib/adminPath";
+import { hideCookOnboard, kitchensBrowseHref } from "@/lib/soloKitchen";
 import { validateMobile, validateOtp } from "@localmeals/i18n";
 
 function parseRole(raw: string | null): AuthRole {
@@ -21,19 +23,25 @@ function postLoginPath(
 ) {
   const n = next?.trim();
   if (n?.startsWith("/") && !n.startsWith("//")) {
-    if (user.role === "CUSTOMER" && !n.startsWith("/cook") && !n.startsWith("/admin")) {
+    if (
+      user.role === "CUSTOMER" &&
+      !n.startsWith("/cook") &&
+      !isAdminUiPath(n) &&
+      n !== "/admin" &&
+      !n.startsWith("/admin/")
+    ) {
       return n;
     }
     if (user.role === "COOK" && (n.startsWith("/cook") || n === "/wa")) {
       return n;
     }
-    if (user.role === "ADMIN" && n.startsWith("/admin")) {
+    if (user.role === "ADMIN" && isAdminUiPath(n)) {
       return n;
     }
   }
   if (user.role === "COOK" && user.cookSlug) return `/cook/${user.cookSlug}`;
-  if (user.role === "ADMIN") return "/admin";
-  return "/discover";
+  if (user.role === "ADMIN") return adminHref();
+  return kitchensBrowseHref();
 }
 
 function LoginForm() {
@@ -84,7 +92,7 @@ function LoginForm() {
       setHint(
         res.mockCode
           ? `Dev OTP: ${res.mockCode}`
-          : "OTP sent to your WhatsApp / SMS (mock logs on API).",
+          : t("login.otpSentWa"),
       );
       if (res.mockCode) setCode(res.mockCode);
     } catch (e) {
@@ -120,27 +128,27 @@ function LoginForm() {
       <h1 style={{ fontSize: "1.55rem" }}>{t(titleKey)}</h1>
       <p className="muted">{t(blurbKey)}</p>
 
-      <div className="seg" style={{ marginTop: "0.85rem" }}>
-        {(["CUSTOMER", "COOK", "ADMIN"] as AuthRole[]).map((r) => (
-          <button
-            key={r}
-            type="button"
-            className={role === r ? "on" : ""}
-            onClick={() => {
-              router.replace(loginPath(r, next, switchAccount));
-              setMobile(
-                r === "COOK" ? "+919876543210" : r === "ADMIN" ? "+919900000001" : "+919840111111",
-              );
-              setCode("123456");
-              setHint(t("login.devHint"));
-              setErr(null);
-              setFieldErr({});
-            }}
-          >
-            {r === "CUSTOMER" ? t("nav.customer") : r === "COOK" ? t("nav.cook") : t("nav.admin")}
-          </button>
-        ))}
-      </div>
+      {role === "ADMIN" ? null : (
+        <div className="seg" style={{ marginTop: "0.85rem" }}>
+          {(["CUSTOMER", "COOK"] as AuthRole[]).map((r) => (
+            <button
+              key={r}
+              type="button"
+              className={role === r ? "on" : ""}
+              onClick={() => {
+                router.replace(loginPath(r, next, switchAccount));
+                setMobile(r === "COOK" ? "+919876543210" : "+919840111111");
+                setCode("123456");
+                setHint(t("login.devHint"));
+                setErr(null);
+                setFieldErr({});
+              }}
+            >
+              {r === "CUSTOMER" ? t("nav.customer") : t("nav.cook")}
+            </button>
+          ))}
+        </div>
+      )}
 
       {switchAccount ? <p className="muted" style={{ marginTop: "0.85rem" }}>{t("nav.switchAccount")} — signing out to continue.</p> : null}
 
@@ -196,7 +204,7 @@ function LoginForm() {
         </button>
       </div>
 
-      {role === "COOK" ? (
+      {role === "COOK" && !hideCookOnboard() ? (
         <p className="muted" style={{ marginTop: "1rem" }}>
           <Link href="/cook/onboard">{t("login.enrollCook")}</Link>
         </p>

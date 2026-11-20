@@ -4,7 +4,12 @@ import {
   getSessionUserFromRequestAsync,
   requireRole,
   type AuthRole,
+  type SessionUser,
 } from "./auth.js";
+
+export type InternalAuthResult =
+  | { kind: "token" }
+  | { kind: "session"; user: SessionUser };
 
 function headerToken(
   headers: Record<string, string | string[] | undefined>,
@@ -35,17 +40,20 @@ export async function assertInternalOrRoles(
   db: Db,
   headers: Record<string, string | string[] | undefined>,
   roles: AuthRole[],
-): Promise<void> {
+): Promise<InternalAuthResult> {
   const expected = process.env.INTERNAL_JOB_TOKEN?.trim();
   const got = headerToken(headers);
 
-  if (expected && got && tokensEqual(expected, got)) return;
+  if (expected && got && tokensEqual(expected, got)) return { kind: "token" };
 
-  if (!expected && process.env.NODE_ENV !== "production") return;
+  if (!expected && process.env.NODE_ENV !== "production") {
+    return { kind: "token" };
+  }
 
   if (process.env.NODE_ENV === "production" && !expected) {
     throw new Error("INTERNAL_JOB_TOKEN is required in production");
   }
 
-  requireRole(await getSessionUserFromRequestAsync(db, headers), roles);
+  const user = requireRole(await getSessionUserFromRequestAsync(db, headers), roles);
+  return { kind: "session", user };
 }

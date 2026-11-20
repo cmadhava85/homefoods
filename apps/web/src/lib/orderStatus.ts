@@ -90,6 +90,8 @@ export function customerStatusHeadline(t: Translate, status: string, opts?: Stat
       return t("status.head.cooking");
     case "PACKED":
       return pickup ? t("status.head.readyPickup") : t("status.head.packedReady");
+    case "ASSIGNING_RIDER":
+      return t("status.label.assigningRider");
     case "DISPATCHED":
       return t("status.head.onTheWay");
     case "DELIVERED":
@@ -123,7 +125,7 @@ export function customerStatusBlurb(t: Translate, status: string, opts?: StatusO
     case "PACKED":
       return pickup ? t("status.blurb.packedPickup") : t("status.blurb.packedDelivery");
     case "ASSIGNING_RIDER":
-      return t("status.label.assigningRider");
+      return t("status.blurb.assigningRider");
     case "DISPATCHED":
       return t("status.blurb.onWay");
     case "DELIVERED":
@@ -162,19 +164,41 @@ export function statusTone(status: string): StatusTone {
       return "done";
     case "CANCELLED":
     case "FAILED":
-    case "REFUNDED":
       return "bad";
+    case "REFUNDED":
+      return "warn";
     default:
       return "neutral";
   }
 }
 
 const PROGRESS_DELIVERY = ["PAID", "COOKING", "PACKED", "DISPATCHED", "DELIVERED"] as const;
+const PROGRESS_PARTNER = [
+  "PAID",
+  "COOKING",
+  "PACKED",
+  "ASSIGNING_RIDER",
+  "DISPATCHED",
+  "DELIVERED",
+] as const;
 const PROGRESS_PICKUP = ["PAID", "COOKING", "PACKED", "DELIVERED"] as const;
 
-export function progressIndex(status: string, fulfillmentMode?: string | null): number {
-  const steps: readonly string[] =
-    fulfillmentMode === "PICKUP" ? PROGRESS_PICKUP : PROGRESS_DELIVERY;
+function progressLane(
+  fulfillmentMode?: string | null,
+  logisticsMode?: string | null,
+  status?: string,
+): readonly string[] {
+  if (fulfillmentMode === "PICKUP") return PROGRESS_PICKUP;
+  if (logisticsMode === "PARTNER" || status === "ASSIGNING_RIDER") return PROGRESS_PARTNER;
+  return PROGRESS_DELIVERY;
+}
+
+export function progressIndex(
+  status: string,
+  fulfillmentMode?: string | null,
+  logisticsMode?: string | null,
+): number {
+  const steps = progressLane(fulfillmentMode, logisticsMode, status);
   if (status === "DELAYED") {
     const delayedAt = steps.indexOf("DISPATCHED");
     return delayedAt >= 0 ? delayedAt : steps.indexOf("PACKED");
@@ -186,9 +210,10 @@ export function progressSteps(
   t: Translate,
   status: string,
   fulfillmentMode?: string | null,
+  logisticsMode?: string | null,
 ) {
-  const steps = fulfillmentMode === "PICKUP" ? PROGRESS_PICKUP : PROGRESS_DELIVERY;
-  const active = progressIndex(status, fulfillmentMode);
+  const steps = progressLane(fulfillmentMode, logisticsMode, status);
+  const active = progressIndex(status, fulfillmentMode, logisticsMode);
   return steps.map((step, i) => ({
     key: step,
     label: customerStatusLabel(t, step, { fulfillmentMode }),
@@ -201,7 +226,10 @@ export function cookNextAction(
   t: Translate,
   status: string,
   fulfillmentMode?: string | null,
-): { label: string; pathSuffix: "cooking" | "pack" | "dispatch" | "delivered" } | null {
+): {
+  label: string;
+  pathSuffix: "cooking" | "pack" | "dispatch" | "rider-assigned" | "delivered";
+} | null {
   const pickup = fulfillmentMode === "PICKUP";
   switch (status) {
     case "PAID":
@@ -212,6 +240,8 @@ export function cookNextAction(
       return pickup
         ? { label: t("status.cook.markPickedUp"), pathSuffix: "delivered" }
         : { label: t("status.cook.dispatch"), pathSuffix: "dispatch" };
+    case "ASSIGNING_RIDER":
+      return { label: t("status.cook.riderAssigned"), pathSuffix: "rider-assigned" };
     case "DISPATCHED":
     case "DELAYED":
       return { label: t("status.cook.markDelivered"), pathSuffix: "delivered" };

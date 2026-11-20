@@ -25,28 +25,24 @@ export function CancelOrderButton({
   const router = useRouter();
   const { t } = useLocale();
   const [busy, setBusy] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const week = Boolean(checkoutId);
   const asRequest = Boolean(cancelRequestable) && !cancellable;
   if (!cancellable && !asRequest) return null;
 
-  async function onCancel() {
+  const confirmCopy = week
+    ? asRequest
+      ? t("orders.confirmCancelRequestWeek", { id: checkoutId ?? "" })
+      : t("orders.confirmCancelWeek", { id: checkoutId ?? "" })
+    : asRequest
+      ? t("orders.confirmCancelRequest", { id: publicId ?? "" })
+      : t("orders.confirmCancel", { id: publicId ?? "" });
+
+  async function proceedCancel() {
     const target = checkoutId ?? publicId;
     if (!target) return;
-    if (
-      !confirm(
-        week
-          ? asRequest
-            ? t("orders.confirmCancelRequestWeek", { id: checkoutId ?? "" })
-            : t("orders.confirmCancelWeek", { id: checkoutId ?? "" })
-          : asRequest
-            ? t("orders.confirmCancelRequest", { id: publicId ?? "" })
-            : t("orders.confirmCancel", { id: publicId ?? "" }),
-      )
-    ) {
-      return;
-    }
     setBusy(true);
     setErr(null);
     try {
@@ -56,6 +52,7 @@ export function CancelOrderButton({
       const res = await authFetch(path, { method: "POST", body: "{}" });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Cancel failed");
+      setConfirmOpen(false);
       if (onDone) onDone({ mode: json.mode });
       else router.refresh();
     } catch (e) {
@@ -74,15 +71,44 @@ export function CancelOrderButton({
       : t("orders.cancelOne");
 
   return (
-    <span className={`order-action-slot${err ? " has-err" : ""}`}>
-      <button
-        className={className ?? "btn secondary"}
-        type="button"
-        disabled={busy}
-        onClick={onCancel}
-      >
-        {busy ? t("orders.cancelling") : (label ?? defaultLabel)}
-      </button>
+    <span className={`order-action-slot${err ? " has-err" : ""}${confirmOpen ? " confirm-open" : ""}`}>
+      {!confirmOpen ? (
+        <button
+          className={className ?? "btn secondary"}
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            setErr(null);
+            setConfirmOpen(true);
+          }}
+        >
+          {label ?? defaultLabel}
+        </button>
+      ) : (
+        <div className="cancel-confirm" role="alertdialog" aria-modal="true" aria-labelledby="cancel-confirm-title">
+          <p id="cancel-confirm-title" className="cancel-confirm-copy">
+            {confirmCopy}
+          </p>
+          <div className="cancel-confirm-actions">
+            <button
+              className="btn secondary"
+              type="button"
+              disabled={busy}
+              onClick={() => setConfirmOpen(false)}
+            >
+              {t("orders.keepOrder")}
+            </button>
+            <button
+              className="btn"
+              type="button"
+              disabled={busy}
+              onClick={() => void proceedCancel()}
+            >
+              {busy ? t("orders.cancelling") : t("orders.confirmCancelYes")}
+            </button>
+          </div>
+        </div>
+      )}
       {err ? <p className="err order-action-err">{err}</p> : null}
     </span>
   );

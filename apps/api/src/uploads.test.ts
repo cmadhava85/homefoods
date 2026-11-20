@@ -6,6 +6,7 @@ import {
   gcsUploadsBucket,
   saveConcernImage,
   saveMenuImage,
+  saveMenuImageBuffer,
   saveUploadedImage,
   uploadsDir,
   usesGcsUploads,
@@ -172,6 +173,16 @@ describe("saveUploadedImage local", () => {
       toBuffer: async () => pngBuf(),
     });
     assert.match(concern, /^\/uploads\/concern-[a-f0-9-]+\.png$/);
+  });
+
+  it("saveMenuImageBuffer writes jpeg under menu- prefix", async () => {
+    delete process.env.GCS_UPLOADS_BUCKET;
+    const url = await saveMenuImageBuffer(jpegBuf(), "image/jpeg");
+    assert.match(url, /^\/uploads\/menu-[a-f0-9-]+\.jpg$/);
+    const name = url.replace("/uploads/", "");
+    assert.ok(fs.existsSync(path.join(uploadsDir(), name)));
+    const defaultMime = await saveMenuImageBuffer(jpegBuf());
+    assert.match(defaultMime, /^\/uploads\/menu-[a-f0-9-]+\.jpg$/);
   });
 
   it("openUpload reads local file and rejects bad names", async () => {

@@ -22,7 +22,7 @@ resource "google_secret_manager_secret_iam_member" "run_secret_accessor" {
 }
 
 resource "google_pubsub_subscription_iam_member" "run_subscriber" {
-  for_each = google_pubsub_subscription.worker
+  for_each = var.create_pubsub ? google_pubsub_subscription.worker : {}
 
   subscription = each.value.name
   role         = "roles/pubsub.subscriber"

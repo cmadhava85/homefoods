@@ -72,5 +72,9 @@ describe("money", () => {
     const noMenu = buildIdempotencyKey({ ...base, menuItemId: undefined });
     assert.notEqual(a, noMenu);
     assert.ok(noMenu.includes("||"));
+    assert.equal(
+      buildIdempotencyKey({ ...base, spice: undefined }),
+      "std|+9198|c1|LUNCH|2026-11-05|10800|1||delivery",
+    );
   });
 });

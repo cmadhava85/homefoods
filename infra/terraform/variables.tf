@@ -109,8 +109,89 @@ variable "web_origin" {
 
 variable "worker_min_instances" {
   type        = number
-  description = "Keep ≥1 so outbox polling stays warm in staging"
+  description = "Prod solo: 1 (outbox). Staging sleep: 0. API/web stay at 0."
   default     = 1
+}
+
+variable "api_min_instances" {
+  type        = number
+  description = "Keep 0 for solo cost (scale to zero)"
+  default     = 0
+}
+
+variable "web_min_instances" {
+  type        = number
+  description = "Keep 0 for solo cost (scale to zero)"
+  default     = 0
+}
+
+variable "api_max_instances" {
+  type    = number
+  default = 3
+}
+
+variable "web_max_instances" {
+  type    = number
+  default = 3
+}
+
+variable "worker_max_instances" {
+  type    = number
+  default = 2
+}
+
+variable "db_disk_autoresize_limit_gb" {
+  type        = number
+  description = "Cap Cloud SQL disk growth (solo launch)"
+  default     = 20
+}
+
+variable "create_pubsub" {
+  type        = bool
+  description = "Create Pub/Sub topics (unused while worker polls DB outbox). Off for solo."
+  default     = false
+}
+
+variable "solo_kitchen_slug" {
+  type        = string
+  description = "Temporary single-kitchen launch slug (empty = multi-cook). Sets SOLO_KITCHEN_SLUG on API/web."
+  default     = "csk-homemade-delights"
+}
+
+variable "uploads_nearline_days" {
+  type        = number
+  description = "Move uploads objects to Nearline after N days (0 = disable)"
+  default     = 30
+}
+
+variable "uploads_delete_days" {
+  type        = number
+  description = "Delete uploads objects after N days (0 = never). Concern photos age out; raise if menus must live forever."
+  default     = 180
+}
+
+variable "artifact_keep_versions" {
+  type        = number
+  description = "Artifact Registry: keep this many recent image versions per package"
+  default     = 5
+}
+
+variable "db_pool_max_api" {
+  type        = number
+  description = "API postgres.js pool size (Cloud SQL f1-micro)"
+  default     = 5
+}
+
+variable "db_pool_max_worker" {
+  type        = number
+  description = "Worker postgres.js pool size"
+  default     = 2
+}
+
+variable "outbox_poll_ms" {
+  type        = number
+  description = "Worker outbox poll interval (higher = less CPU on always-on worker)"
+  default     = 5000
 }
 
 variable "create_scheduler" {

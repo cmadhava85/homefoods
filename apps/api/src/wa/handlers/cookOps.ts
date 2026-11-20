@@ -322,7 +322,7 @@ export async function handleCookOps(s: WaSession): Promise<object> {
           throw new Error("Request not found for your kitchen");
         }
         if (order.status === "CANCEL_REQUESTED") {
-          await acceptCancelRequest(db, publicId);
+          await acceptCancelRequest(db, publicId, { channel: "WHATSAPP_BOT" });
           await wa.send({
             to: from,
             body: [
@@ -373,7 +373,9 @@ export async function handleCookOps(s: WaSession): Promise<object> {
           throw new Error("Request not found for your kitchen");
         }
         if (order.status === "CANCEL_REQUESTED") {
-          await declineCancelRequest(db, publicId, "Kitchen could not cancel — food is being prepared");
+          await declineCancelRequest(db, publicId, "Kitchen could not cancel — food is being prepared", {
+            channel: "WHATSAPP_BOT",
+          });
           await wa.send({
             to: from,
             body: `❌ Kept order ${publicId}. Customer notified — continue cooking.`,
@@ -473,7 +475,9 @@ export async function handleCookOps(s: WaSession): Promise<object> {
       }
 
       if (intent === "COOK_COOKING") {
-        const res = await markStartCooking(db, cook.slugHandle);
+        const res = await markStartCooking(db, cook.slugHandle, undefined, undefined, {
+          channel: "WHATSAPP_BOT",
+        });
         await wa.send({
           to: from,
           body:
@@ -486,7 +490,9 @@ export async function handleCookOps(s: WaSession): Promise<object> {
       }
 
       if (intent === "COOK_PACK") {
-        const res = await markPacked(db, cook.slugHandle);
+        const res = await markPacked(db, cook.slugHandle, undefined, undefined, {
+          channel: "WHATSAPP_BOT",
+        });
         await wa.send({
           to: from,
           body:
@@ -499,7 +505,9 @@ export async function handleCookOps(s: WaSession): Promise<object> {
       }
 
       if (intent === "COOK_DISPATCH") {
-        const res = await markDispatched(db, cook.slugHandle);
+        const res = await markDispatched(db, cook.slugHandle, undefined, undefined, {
+          channel: "WHATSAPP_BOT",
+        });
         const first = res.publicIds[0];
         await wa.send({
           to: from,
@@ -534,7 +542,10 @@ export async function handleCookOps(s: WaSession): Promise<object> {
           });
           return { ok: true, intent, needPublicId: true, replies: replies() };
         }
-        const updated = await markDelivered(db, publicId, { cookId: cook.id });
+        const updated = await markDelivered(db, publicId, {
+          cookId: cook.id,
+          channel: "WHATSAPP_BOT",
+        });
         await wa.send({
           to: from,
           body: `✅ ${updated.publicId} marked DELIVERED`,

@@ -85,7 +85,12 @@ export async function createWaSession(input: WhatsAppInboundInput) {
 
   async function resolveWaDeliveryAddress(label?: "HOME" | "OFFICE" | "OTHER") {
     const { listAddressesForMobile, getAddressByLabel } = await import("../services/addresses.js");
-    const list = await listAddressesForMobile(db, mobile);
+    const all = await listAddressesForMobile(db, mobile);
+    // Ignore signup placeholders so WA never delivers to "Address on file".
+    const list = all.filter((a) => {
+      const line = (a.line1 ?? "").trim();
+      return line.length > 0 && !/^address on file/i.test(line);
+    });
     if (!list.length) {
       return { kind: "empty" as const, list };
     }
@@ -107,6 +112,14 @@ export async function createWaSession(input: WhatsAppInboundInput) {
     }
     try {
       const row = await getAddressByLabel(db, mobile, label);
+      const line = (row.line1 ?? "").trim();
+      if (!line || /^address on file/i.test(line)) {
+        return {
+          kind: "missing_label" as const,
+          list,
+          error: "Save a real address first (Address Tower/flat PIN 600119)",
+        };
+      }
       return { kind: "ok" as const, list, addressId: row.id, label };
     } catch (e) {
       return { kind: "missing_label" as const, list, error: (e as Error).message };
@@ -248,7 +261,7 @@ export async function createWaSession(input: WhatsAppInboundInput) {
     slug: string;
     itemIndex?: number;
     addressLabel?: "HOME" | "OFFICE" | "OTHER";
-    fulfillmentMode?: "DELIVERY" | "PICKUP";
+    fulfillmentMode?: "DELIVERY" | "PICKUP" | "CUSTOMER_ARRANGE";
     payerMobile?: string | null;
     forceLate: boolean;
   }) {
@@ -261,7 +274,8 @@ export async function createWaSession(input: WhatsAppInboundInput) {
       fulfillmentMode: wantFulfillment = "DELIVERY",
       payerMobile = null,
     } = opts;
-    const fulfillmentMode = wantFulfillment === "PICKUP" ? "PICKUP" : "DELIVERY";
+    const { normalizeFulfillmentMode, needsCheckoutAddress } = await import("@localmeals/domain");
+    const fulfillmentMode = normalizeFulfillmentMode(wantFulfillment);
     const menu = await getKitchenMenu(db, slug);
     if (!menu?.menus?.length) {
       await wa.send({
@@ -295,8 +309,13 @@ export async function createWaSession(input: WhatsAppInboundInput) {
     const n = itemIndex ?? 1;
 
     let addressId: number | null = null;
-    let addressLabelResolved: string = "PICKUP";
-    if (fulfillmentMode === "DELIVERY") {
+    let addressLabelResolved: string =
+      fulfillmentMode === "PICKUP"
+        ? "PICKUP"
+        : fulfillmentMode === "CUSTOMER_ARRANGE"
+          ? "ARRANGE"
+          : "HOME";
+    if (needsCheckoutAddress(fulfillmentMode)) {
       const addr = await resolveWaDeliveryAddress(addressLabel);
       if (addr.kind === "empty") {
         await setWaSession(db, mobile, "AWAIT_ADDRESS", {
@@ -315,6 +334,7 @@ export async function createWaSession(input: WhatsAppInboundInput) {
             "",
             "We’ll place this order right after and send Pay.",
             "Or: Order <kitchen> 1 PICKUP",
+            "Or: Order <kitchen> 1 HOME ARRANGE (you arrange auto/porter)",
           ].join("\n"),
           buttons: ["Addresses", "Menu"],
         });
@@ -365,7 +385,9 @@ export async function createWaSession(input: WhatsAppInboundInput) {
             `${menu.cook.kitchenName} · ${menu.mealLabel ?? "Lunch"} · ${localizedDishName(waLocale, item)}`,
             fulfillmentMode === "PICKUP"
               ? "Pickup at kitchen landmark (shown after pay)"
-              : `Deliver to ${addressLabelResolved}`,
+              : fulfillmentMode === "CUSTOMER_ARRANGE"
+                ? `You arrange auto/porter · ${addressLabelResolved}`
+                : `Deliver to ${addressLabelResolved}`,
             payerMobile ? `Family pays: ${payerMobile}` : null,
             `ETA if accepted: ${menu.deliveryWindow ?? "12:00–13:00"}`,
             "Waiting for cook to accept. You’ll get a Pay button if they approve — no charge yet.",
@@ -406,7 +428,9 @@ export async function createWaSession(input: WhatsAppInboundInput) {
           }),
           fulfillmentMode === "PICKUP"
             ? wt("wa.pickupAfterPay")
-            : wt("wa.deliverTo", { label: addressLabelResolved ?? "" }),
+            : fulfillmentMode === "CUSTOMER_ARRANGE"
+              ? `You arrange auto/porter · ${addressLabelResolved}`
+              : wt("wa.deliverTo", { label: addressLabelResolved ?? "" }),
           payerMobile ? wt("wa.familyPays", { mobile: payerMobile }) : null,
           wt("wa.orderWindow", {
             cutoff: menu.cutoff ?? menu.lunchCutoff ?? "08:00",

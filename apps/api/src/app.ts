@@ -81,9 +81,13 @@ export function buildApp(db: Db = createDb(), opts: BuildAppOptions = {}): Fasti
   });
 
   const rateLimitFailOpen = process.env.NODE_ENV !== "production";
+  const mockAuth =
+    (process.env.MOCK_AUTH ?? "true").trim().toLowerCase() !== "false";
+  // Local mock: avoid 429 storms while polling order/confirm pages.
+  const defaultMax = mockAuth && process.env.NODE_ENV !== "production" ? 5000 : 300;
   app.register(rateLimit, {
     global: true,
-    max: Number(process.env.RATE_LIMIT_MAX ?? 300),
+    max: Number(process.env.RATE_LIMIT_MAX ?? defaultMax),
     timeWindow: process.env.RATE_LIMIT_WINDOW ?? "1 minute",
     store: createPgRateLimitStore(db),
     // Prod: fail closed if the store errors so limits are not silently skipped.
@@ -107,10 +111,11 @@ export function buildApp(db: Db = createDb(), opts: BuildAppOptions = {}): Fasti
       root: uploadsDir(),
       prefix: "/uploads/",
       decorateReply: false,
-      setHeaders(res) {
-        res.setHeader("X-Content-Type-Options", "nosniff");
-        res.setHeader("Cache-Control", "public, max-age=86400");
-        res.setHeader("Content-Disposition", "inline");
+      // @fastify/static ≥8 passes FastifyReply (use .header), not Node ServerResponse.
+      setHeaders(reply) {
+        reply.header("X-Content-Type-Options", "nosniff");
+        reply.header("Cache-Control", "public, max-age=86400");
+        reply.header("Content-Disposition", "inline");
       },
     });
   }

@@ -46,7 +46,7 @@ paths:
           required: true
           schema:
             type: string
-            example: sri-sai
+            example: csk-homemade-delights
         - in: query
           name: meal
           schema:
@@ -66,7 +66,7 @@ paths:
           required: true
           schema:
             type: string
-            example: sri-sai
+            example: csk-homemade-delights
       responses:
         "200":
           description: OK
@@ -79,7 +79,7 @@ paths:
           required: true
           schema:
             type: string
-            example: sri-sai
+            example: csk-homemade-delights
       responses:
         "200":
           description: OK
@@ -92,7 +92,7 @@ paths:
           required: true
           schema:
             type: string
-            example: sri-sai
+            example: csk-homemade-delights
       responses:
         "200":
           description: OK
@@ -140,7 +140,7 @@ paths:
           required: true
           schema:
             type: string
-            example: sri-sai
+            example: csk-homemade-delights
       responses:
         "401":
           description: Unauthorized

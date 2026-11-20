@@ -19,12 +19,12 @@ describe("parseWhatsAppIntent", () => {
   it("maps Menu Order Pay Help", () => {
     assert.equal(parseWhatsAppIntent("Menu").intent, "MENU");
     assert.equal(parseWhatsAppIntent("show menu please").intent, "MENU");
-    assert.equal(parseWhatsAppIntent("Order sri-sai").intent, "ORDER");
+    assert.equal(parseWhatsAppIntent("Order csk-homemade-delights").intent, "ORDER");
     assert.equal(parseWhatsAppIntent("order lunch amma-priya").intent, "ORDER");
-    assert.equal(parseWhatsAppIntent("sri-sai").intent, "MENU");
+    assert.equal(parseWhatsAppIntent("csk-homemade-delights").intent, "MENU");
     assert.equal(parseWhatsAppIntent("Pay").intent, "PAY");
     assert.equal(parseWhatsAppIntent("pay now").intent, "PAY");
-    assert.equal(parseWhatsAppIntent("Late sri-sai").intent, "LATE");
+    assert.equal(parseWhatsAppIntent("Late csk-homemade-delights").intent, "LATE");
     assert.equal(parseWhatsAppIntent("late order amma-priya 2").intent, "LATE");
     assert.equal(parseWhatsAppIntent("Late requests").intent, "COOK_LATE_LIST");
     assert.equal(parseWhatsAppIntent("Accept LM-1234").intent, "COOK_LATE_ACCEPT");
@@ -33,9 +33,9 @@ describe("parseWhatsAppIntent", () => {
     assert.equal(parseWhatsAppIntent("Cancel").intent, "CANCEL");
     assert.equal(parseWhatsAppIntent("Cancel LM-1234").intent, "CANCEL");
     assert.equal(parseWhatsAppIntent("Orders").intent, "ORDERS");
-    assert.equal(parseWhatsAppIntent("Week sri-sai").intent, "WEEK");
-    assert.equal(parseWhatsAppIntent("Follow sri-sai").intent, "FOLLOW");
-    assert.equal(parseWhatsAppIntent("Unfollow sri-sai").intent, "UNFOLLOW");
+    assert.equal(parseWhatsAppIntent("Week csk-homemade-delights").intent, "WEEK");
+    assert.equal(parseWhatsAppIntent("Follow csk-homemade-delights").intent, "FOLLOW");
+    assert.equal(parseWhatsAppIntent("Unfollow csk-homemade-delights").intent, "UNFOLLOW");
     assert.equal(parseWhatsAppIntent("Addresses").intent, "ADDRESSES");
     assert.equal(parseWhatsAppIntent("Save HOME Tower 1").intent, "SAVE_ADDRESS");
     assert.equal(parseWhatsAppIntent("Language Tamil").intent, "LANGUAGE");
@@ -76,7 +76,7 @@ describe("parseCookMenuAdd", () => {
       isVeg: true,
     });
     assert.deepEqual(parseCookMenuAdd("Add only name"), {});
-    assert.deepEqual(parseCookMenuAdd("Order sri-sai"), {});
+    assert.deepEqual(parseCookMenuAdd("Order csk-homemade-delights"), {});
   });
 });
 
@@ -97,15 +97,15 @@ describe("parseSaveAddressCommand", () => {
 describe("parseMenuCommand", () => {
   it("reads optional kitchen slug", () => {
     assert.deepEqual(parseMenuCommand("Menu"), { slug: undefined });
-    assert.deepEqual(parseMenuCommand("Menu sri-sai"), { slug: "sri-sai" });
-    assert.deepEqual(parseMenuCommand("sri-sai"), { slug: "sri-sai" });
+    assert.deepEqual(parseMenuCommand("Menu csk-homemade-delights"), { slug: "csk-homemade-delights" });
+    assert.deepEqual(parseMenuCommand("csk-homemade-delights"), { slug: "csk-homemade-delights" });
   });
 });
 
 describe("parseOrderCommand", () => {
   it("reads slug and optional item index", () => {
-    assert.deepEqual(parseOrderCommand("Order sri-sai"), {
-      slug: "sri-sai",
+    assert.deepEqual(parseOrderCommand("Order csk-homemade-delights"), {
+      slug: "csk-homemade-delights",
       itemIndex: undefined,
       addressLabel: undefined,
       fulfillmentMode: undefined,
@@ -118,36 +118,43 @@ describe("parseOrderCommand", () => {
       fulfillmentMode: undefined,
       payerMobile: undefined,
     });
-    assert.deepEqual(parseOrderCommand("Order sri-sai 1 HOME"), {
-      slug: "sri-sai",
+    assert.deepEqual(parseOrderCommand("Order csk-homemade-delights 1 HOME"), {
+      slug: "csk-homemade-delights",
       itemIndex: 1,
       addressLabel: "HOME",
       fulfillmentMode: undefined,
       payerMobile: undefined,
     });
-    assert.deepEqual(parseOrderCommand("Order sri-sai 1 PICKUP PAY 9876543210"), {
-      slug: "sri-sai",
+    assert.deepEqual(parseOrderCommand("Order csk-homemade-delights 1 PICKUP PAY 9876543210"), {
+      slug: "csk-homemade-delights",
       itemIndex: 1,
       addressLabel: undefined,
       fulfillmentMode: "PICKUP",
       payerMobile: "9876543210",
     });
-    assert.deepEqual(parseOrderCommand("sri-sai"), {});
+    assert.deepEqual(parseOrderCommand("Order csk-homemade-delights 1 HOME ARRANGE"), {
+      slug: "csk-homemade-delights",
+      itemIndex: 1,
+      addressLabel: "HOME",
+      fulfillmentMode: "CUSTOMER_ARRANGE",
+      payerMobile: undefined,
+    });
+    assert.deepEqual(parseOrderCommand("csk-homemade-delights"), {});
   });
 });
 
 describe("parseWeekCommand", () => {
   it("reads meal type for advance / week carts", () => {
-    assert.deepEqual(parseWeekCommand("Week sri-sai"), { slug: "sri-sai" });
-    assert.deepEqual(parseWeekCommand("Week sri-sai lunch"), {
-      slug: "sri-sai",
+    assert.deepEqual(parseWeekCommand("Week csk-homemade-delights"), { slug: "csk-homemade-delights" });
+    assert.deepEqual(parseWeekCommand("Week csk-homemade-delights lunch"), {
+      slug: "csk-homemade-delights",
       mealType: "LUNCH",
       addressLabel: undefined,
       fulfillmentMode: undefined,
       payerMobile: undefined,
     });
-    assert.deepEqual(parseWeekCommand("Week sri-sai L all"), {
-      slug: "sri-sai",
+    assert.deepEqual(parseWeekCommand("Week csk-homemade-delights L all"), {
+      slug: "csk-homemade-delights",
       mealType: "LUNCH",
       addressLabel: undefined,
       fulfillmentMode: undefined,
@@ -155,8 +162,8 @@ describe("parseWeekCommand", () => {
       all: true,
       itemIndex: 1,
     });
-    assert.deepEqual(parseWeekCommand("Week sri-sai dinner Mon Wed"), {
-      slug: "sri-sai",
+    assert.deepEqual(parseWeekCommand("Week csk-homemade-delights dinner Mon Wed"), {
+      slug: "csk-homemade-delights",
       mealType: "DINNER",
       addressLabel: undefined,
       fulfillmentMode: undefined,
@@ -164,8 +171,8 @@ describe("parseWeekCommand", () => {
       dayTokens: ["mon", "wed"],
       itemIndex: 1,
     });
-    assert.deepEqual(parseWeekCommand("Week sri-sai L all HOME"), {
-      slug: "sri-sai",
+    assert.deepEqual(parseWeekCommand("Week csk-homemade-delights L all HOME"), {
+      slug: "csk-homemade-delights",
       mealType: "LUNCH",
       addressLabel: "HOME",
       fulfillmentMode: undefined,
@@ -173,8 +180,17 @@ describe("parseWeekCommand", () => {
       all: true,
       itemIndex: 1,
     });
-    assert.deepEqual(parseWeekCommand("Week sri-sai L all PICKUP"), {
-      slug: "sri-sai",
+    assert.deepEqual(parseWeekCommand("Week csk-homemade-delights L all HOME ARRANGE"), {
+      slug: "csk-homemade-delights",
+      mealType: "LUNCH",
+      addressLabel: "HOME",
+      fulfillmentMode: "CUSTOMER_ARRANGE",
+      payerMobile: undefined,
+      all: true,
+      itemIndex: 1,
+    });
+    assert.deepEqual(parseWeekCommand("Week csk-homemade-delights L all PICKUP"), {
+      slug: "csk-homemade-delights",
       mealType: "LUNCH",
       addressLabel: undefined,
       fulfillmentMode: "PICKUP",

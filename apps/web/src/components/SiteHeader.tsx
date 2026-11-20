@@ -6,6 +6,8 @@ import { useAuth } from "./AuthProvider";
 import { useLocale } from "./LocaleProvider";
 import { flagOn, useFeatureFlags } from "@/lib/features";
 import { loginPath } from "@/lib/auth";
+import { adminHref, isAdminUiPath } from "@/lib/adminPath";
+import { kitchensBrowseHref } from "@/lib/soloKitchen";
 import type { Locale } from "@localmeals/i18n";
 
 function navClass(href: string, pathname: string) {
@@ -22,6 +24,7 @@ export function SiteHeader() {
   const flags = useFeatureFlags();
   const pathname = usePathname() ?? "/";
   const router = useRouter();
+  const browse = kitchensBrowseHref();
 
   return (
     <header className="site-header">
@@ -38,22 +41,22 @@ export function SiteHeader() {
               <Link href={`/cook/${user.cookSlug}`} className={navClass(`/cook/${user.cookSlug}`, pathname)}>
                 {t("nav.desk")}
               </Link>
-              <Link href="/discover" className={navClass("/discover", pathname)}>
+              <Link href={browse} className={navClass(browse, pathname)}>
                 {t("nav.kitchens")}
               </Link>
             </>
           ) : user?.role === "ADMIN" ? (
             <>
-              <Link href="/admin" className={navClass("/admin", pathname)}>
+              <Link href={adminHref()} className={isAdminUiPath(pathname) ? "active" : undefined}>
                 {t("nav.admin")}
               </Link>
-              <Link href="/discover" className={navClass("/discover", pathname)}>
+              <Link href={browse} className={navClass(browse, pathname)}>
                 {t("nav.kitchens")}
               </Link>
             </>
           ) : (
             <>
-              <Link href="/discover" className={navClass("/discover", pathname)}>
+              <Link href={browse} className={navClass(browse, pathname)}>
                 {t("nav.discover")}
               </Link>
               <Link href="/orders" className={navClass("/orders", pathname)}>

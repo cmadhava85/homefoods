@@ -10,7 +10,9 @@ import {
   validateAddressLine,
   validateFullName,
   validatePin,
+  type MsgKey,
 } from "@localmeals/i18n";
+import { isSoloKitchenMode, kitchensBrowseHref } from "@/lib/soloKitchen";
 
 type Profile = {
   mobile: string;
@@ -27,6 +29,12 @@ type Profile = {
 };
 
 type AddrLabel = "HOME" | "OFFICE" | "OTHER";
+
+function labelKey(label: string): MsgKey {
+  if (label === "HOME") return "account.labelHome";
+  if (label === "OFFICE") return "account.labelOffice";
+  return "account.labelOther";
+}
 
 function AccountInner() {
   const { user, setUser } = useAuth();
@@ -52,7 +60,9 @@ function AccountInner() {
         if (!r.ok) throw new Error(json.error ?? "Could not load profile");
         setProfile(json as Profile);
         setFullName(json.fullName === "Guest" ? "" : json.fullName);
-        setPinCode(json.pinCode ?? "600119");
+        const pin = json.pinCode ?? "600119";
+        setPinCode(pin);
+        setAddrPin((prev) => (prev === "600119" || !prev ? pin : prev));
       })
       .catch((e) => setErr((e as Error).message));
   }, []);
@@ -73,6 +83,17 @@ function AccountInner() {
     setErr(null);
     setMsg(null);
     try {
+      let geo: { lat: number; lng: number } | null = null;
+      if (typeof navigator !== "undefined" && navigator.geolocation) {
+        geo = await new Promise((resolve) => {
+          navigator.geolocation.getCurrentPosition(
+            (pos) =>
+              resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+            () => resolve(null),
+            { enableHighAccuracy: false, timeout: 8000, maximumAge: 60_000 },
+          );
+        });
+      }
       const res = await authFetch("/me/addresses", {
         method: "POST",
         body: JSON.stringify({
@@ -80,6 +101,7 @@ function AccountInner() {
           line1: addrLine1.trim(),
           pinCode: addrPin.trim(),
           isDefault: !(profile?.addresses?.length),
+          ...(geo ? { lat: geo.lat, lng: geo.lng } : {}),
         }),
       });
       const json = await res.json();
@@ -165,143 +187,223 @@ function AccountInner() {
     }
   }
 
-  return (
-    <main>
-      <h1>{t("account.title")}</h1>
-      <p className="muted">{t("account.blurb")}</p>
+  const browseHref = kitchensBrowseHref();
+  const browseLabel = isSoloKitchenMode() ? t("account.backToKitchen") : t("account.findKitchens");
+  const mobile = profile?.mobile ?? user?.mobile ?? "";
+  const displayName =
+    fullName.trim() ||
+    (profile?.fullName && profile.fullName !== "Guest" ? profile.fullName : null);
 
-      {err ? <p className="err">{err}</p> : null}
-      {msg ? <p className="ok">{msg}</p> : null}
+  if (!profile && !err) {
+    return (
+      <main className="account-page">
+        <p className="muted">{t("common.loading")}</p>
+      </main>
+    );
+  }
+
+  return (
+    <main className="account-page">
+      <header className="account-hero">
+        <p className="account-kicker">{mobile}</p>
+        <h1>{t("account.title")}</h1>
+        {displayName ? (
+          <p className="account-hello">{t("account.hello", { name: displayName })}</p>
+        ) : (
+          <p className="account-lead">{t("account.blurb")}</p>
+        )}
+      </header>
+
+      {err ? <p className="err account-flash">{err}</p> : null}
+      {msg ? <p className="ok account-flash">{msg}</p> : null}
 
       {profile?.needsName ? (
-        <p className="ok status-banner warn">{t("account.needsName")}</p>
+        <p className="ok status-banner warn account-flash" role="status">
+          {t("account.needsName")}
+        </p>
       ) : null}
 
-      <section className="card">
-        <strong>{t("account.profile")}</strong>
-        <p className="muted" style={{ marginTop: "0.35rem" }}>
-          {profile?.mobile ?? user?.mobile}
-        </p>
-        <label className="order-field" style={{ display: "block", marginTop: "0.75rem" }}>
-          <span>{t("account.fullName")}</span>
-          <input
-            type="text"
-            value={fullName}
-            onChange={(e) => setFullName(e.target.value)}
-            placeholder={t("account.fullName")}
-            style={{ width: "100%", marginTop: "0.35rem" }}
-            aria-invalid={Boolean(fieldErr.name)}
-          />
-          {fieldErr.name ? <p className="err" style={{ marginTop: 4 }}>{fieldErr.name}</p> : null}
-        </label>
-        <label className="order-field" style={{ display: "block", marginTop: "0.75rem" }}>
-          <span>{t("account.pin")}</span>
-          <input
-            type="text"
-            inputMode="numeric"
-            value={pinCode}
-            onChange={(e) => setPinCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-            placeholder="600119"
-            style={{ width: "100%", marginTop: "0.35rem" }}
-            aria-invalid={Boolean(fieldErr.pin)}
-          />
-          {fieldErr.pin ? <p className="err" style={{ marginTop: 4 }}>{fieldErr.pin}</p> : null}
-        </label>
-        <button
-          className="btn"
-          type="button"
-          style={{ marginTop: "0.85rem" }}
-          disabled={busy || fullName.trim().length < 2 || pinCode.length !== 6}
-          onClick={save}
-        >
-          {busy ? t("account.saving") : t("account.saveProfile")}
-        </button>
+      <section className="account-panel" aria-labelledby="account-profile-heading">
+        <div className="account-panel-head">
+          <h2 id="account-profile-heading">{t("account.profile")}</h2>
+          <p className="account-panel-sub">{t("account.profileHelp")}</p>
+        </div>
+
+        <div className="account-fields">
+          <label className="account-field account-field-span">
+            <span className="account-field-label">{t("account.fullName")}</span>
+            <input
+              type="text"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              placeholder={t("account.fullName")}
+              autoComplete="name"
+              aria-invalid={Boolean(fieldErr.name)}
+            />
+            {fieldErr.name ? <span className="err account-field-err">{fieldErr.name}</span> : null}
+          </label>
+
+          <label className="account-field">
+            <span className="account-field-label">{t("account.pin")}</span>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={pinCode}
+              onChange={(e) => setPinCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              placeholder="600119"
+              autoComplete="postal-code"
+              aria-invalid={Boolean(fieldErr.pin)}
+              aria-describedby="account-pin-help"
+            />
+            <span id="account-pin-help" className="account-field-hint">
+              {t("account.pinHelp")}
+            </span>
+            {fieldErr.pin ? <span className="err account-field-err">{fieldErr.pin}</span> : null}
+          </label>
+        </div>
+
+        <div className="account-panel-actions">
+          <button
+            className="btn"
+            type="button"
+            disabled={busy || fullName.trim().length < 2 || pinCode.length !== 6}
+            onClick={save}
+          >
+            {busy ? t("account.saving") : t("account.saveProfile")}
+          </button>
+        </div>
       </section>
 
-      <section className="card" style={{ marginTop: "1rem" }}>
-        <strong>{t("account.addresses")}</strong>
+      <section className="account-panel" aria-labelledby="account-addresses-heading">
+        <div className="account-panel-head">
+          <h2 id="account-addresses-heading">{t("account.addresses")}</h2>
+          <p className="account-panel-sub">{t("account.addressesHelp")}</p>
+        </div>
+
         {!profile?.addresses?.length ? (
-          <p className="muted">{t("account.noAddresses")}</p>
+          <div className="account-empty">
+            <p className="account-empty-title">{t("account.noAddresses")}</p>
+            <p className="account-empty-body">{t("account.noAddressesHint")}</p>
+          </div>
         ) : (
-          <ul className="meta-list" style={{ marginTop: "0.5rem" }}>
+          <ul className="account-address-list">
             {profile.addresses.map((a) => (
-              <li key={a.id} style={{ marginBottom: "0.45rem" }}>
-                <strong>{a.label}</strong>
-                {a.isDefault ? " · default" : ""} — {a.line1} · {a.pinCode}
+              <li key={a.id} className={`account-address${a.isDefault ? " is-default" : ""}`}>
+                <div className="account-address-body">
+                  <div className="account-address-meta">
+                    <span className="account-address-label">{t(labelKey(a.label))}</span>
+                    {a.isDefault ? (
+                      <span className="account-address-badge">{t("account.defaultBadge")}</span>
+                    ) : null}
+                  </div>
+                  <p className="account-address-line">{a.line1}</p>
+                  <p className="account-address-pin">PIN {a.pinCode}</p>
+                </div>
                 {!a.isDefault ? (
                   <button
-                    className="btn sm secondary"
+                    className="btn sm secondary account-set-default"
                     type="button"
-                    style={{ marginLeft: "0.5rem" }}
                     disabled={addrBusy}
-                    onClick={() => setDefaultAddress(a.id)}
+                    onClick={() => void setDefaultAddress(a.id)}
                   >
                     {t("account.setDefault")}
                   </button>
-                ) : null}
+                ) : (
+                  <span className="account-default-hint">{t("account.usedAtCheckout")}</span>
+                )}
               </li>
             ))}
           </ul>
         )}
+
         {showAddAddr ? (
-          <div style={{ marginTop: "0.75rem" }}>
-            <label className="order-field" style={{ display: "block" }}>
-              <span>Label</span>
-              <select
-                value={addrLabel}
-                onChange={(e) => setAddrLabel(e.target.value as AddrLabel)}
-                style={{ display: "block", marginTop: "0.25rem" }}
-              >
-                <option value="HOME">HOME</option>
-                <option value="OFFICE">OFFICE</option>
-                <option value="OTHER">OTHER</option>
-              </select>
-            </label>
-            <label className="order-field" style={{ display: "block", marginTop: "0.5rem" }}>
-              <span>Line</span>
-              <input
-                type="text"
-                value={addrLine1}
-                onChange={(e) => setAddrLine1(e.target.value)}
-                style={{ width: "100%", marginTop: "0.25rem" }}
-              />
-              {addrFieldErr.line ? <p className="err">{addrFieldErr.line}</p> : null}
-            </label>
-            <label className="order-field" style={{ display: "block", marginTop: "0.5rem" }}>
-              <span>PIN</span>
-              <input
-                type="text"
-                inputMode="numeric"
-                value={addrPin}
-                onChange={(e) => setAddrPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                style={{ width: "100%", marginTop: "0.25rem" }}
-              />
-              {addrFieldErr.pin ? <p className="err">{addrFieldErr.pin}</p> : null}
-            </label>
-            <div className="actions" style={{ marginTop: "0.65rem" }}>
-              <button className="btn sm" type="button" disabled={addrBusy} onClick={saveAddress}>
-                {addrBusy ? t("account.saving") : t("account.addAddress")}
+          <div className="account-add-address">
+            <h3 className="account-add-title">{t("account.addAddress")}</h3>
+            <div className="account-label-pills" role="group" aria-label={t("account.addressLabel")}>
+              {(
+                [
+                  ["HOME", "account.labelHome"],
+                  ["OFFICE", "account.labelOffice"],
+                  ["OTHER", "account.labelOther"],
+                ] as const
+              ).map(([value, key]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={`account-label-pill${addrLabel === value ? " is-active" : ""}`}
+                  aria-pressed={addrLabel === value}
+                  onClick={() => setAddrLabel(value)}
+                >
+                  {t(key)}
+                </button>
+              ))}
+            </div>
+            <div className="account-fields">
+              <label className="account-field account-field-span">
+                <span className="account-field-label">{t("account.addressLine")}</span>
+                <input
+                  type="text"
+                  value={addrLine1}
+                  onChange={(e) => setAddrLine1(e.target.value)}
+                  placeholder={t("account.addressLinePlaceholder")}
+                  autoComplete="street-address"
+                />
+                {addrFieldErr.line ? (
+                  <span className="err account-field-err">{addrFieldErr.line}</span>
+                ) : null}
+              </label>
+              <label className="account-field">
+                <span className="account-field-label">{t("account.addressPin")}</span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={addrPin}
+                  onChange={(e) => setAddrPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  placeholder="600119"
+                  autoComplete="postal-code"
+                />
+                {addrFieldErr.pin ? (
+                  <span className="err account-field-err">{addrFieldErr.pin}</span>
+                ) : null}
+              </label>
+            </div>
+            <div className="account-panel-actions">
+              <button className="btn" type="button" disabled={addrBusy} onClick={() => void saveAddress()}>
+                {addrBusy ? t("account.saving") : t("account.saveAddress")}
               </button>
               <button
-                className="btn sm secondary"
+                className="btn secondary"
                 type="button"
-                onClick={() => setShowAddAddr(false)}
+                onClick={() => {
+                  setShowAddAddr(false);
+                  setAddrFieldErr({});
+                }}
               >
-                {t("common.clear")}
+                {t("address.cancel")}
               </button>
             </div>
           </div>
         ) : (
-          <div className="actions" style={{ marginTop: "0.75rem" }}>
-            <button className="btn sm" type="button" onClick={() => setShowAddAddr(true)}>
+          <div className="account-panel-actions">
+            <button
+              className="btn"
+              type="button"
+              onClick={() => {
+                setShowAddAddr(true);
+                setAddrPin(pinCode || "600119");
+              }}
+            >
               {t("account.addAddress")}
             </button>
-            <Link className="btn sm secondary" href="/discover">
-              {t("account.findKitchens")}
-            </Link>
           </div>
         )}
       </section>
+
+      <div className="account-footer">
+        <Link className="btn account-browse-cta" href={browseHref}>
+          {browseLabel}
+        </Link>
+      </div>
     </main>
   );
 }

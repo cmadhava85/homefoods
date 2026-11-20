@@ -3,10 +3,13 @@
 import Link from "next/link";
 import { useLocale } from "@/components/LocaleProvider";
 import { flagOn, useFeatureFlags } from "@/lib/features";
+import { hideCookOnboard, isSoloKitchenMode, kitchensBrowseHref } from "@/lib/soloKitchen";
 
 export function SiteFooter() {
   const { t } = useLocale();
   const flags = useFeatureFlags();
+  const browse = kitchensBrowseHref();
+  const showEnroll = !hideCookOnboard();
 
   const whatsNew = [
     t("common.open") + " / " + t("common.closed"),
@@ -34,7 +37,7 @@ export function SiteFooter() {
             <h2 className="site-footer-heading">{t("footer.explore")}</h2>
             <ul className="site-footer-links">
               <li>
-                <Link href="/discover">{t("footer.discover")}</Link>
+                <Link href={browse}>{t("footer.discover")}</Link>
               </li>
               <li>
                 <Link href="/wa">{t("footer.wa")}</Link>
@@ -59,12 +62,11 @@ export function SiteFooter() {
               <li>
                 <Link href="/login?role=cook">{t("footer.cookLogin")}</Link>
               </li>
-              <li>
-                <Link href="/cook/onboard">{t("footer.enrollCook")}</Link>
-              </li>
-              <li>
-                <Link href="/login?role=admin">{t("footer.adminLogin")}</Link>
-              </li>
+              {showEnroll ? (
+                <li>
+                  <Link href="/cook/onboard">{t("footer.enrollCook")}</Link>
+                </li>
+              ) : null}
             </ul>
           </nav>
         </div>
@@ -79,7 +81,11 @@ export function SiteFooter() {
         </div>
 
         <div className="site-footer-meta">
-          <span>{t("footer.metaFee")}</span>
+          <span>
+            {isSoloKitchenMode()
+              ? "Cooks keep 100% of food · free delivery · no platform fee"
+              : t("footer.metaFee")}
+          </span>
         </div>
       </div>
     </footer>

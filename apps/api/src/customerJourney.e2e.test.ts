@@ -64,15 +64,15 @@ describe("customer ordering journey + logs", () => {
       assert.ok(process.env.RAZORPAY_KEY_SECRET, "RAZORPAY_KEY_SECRET");
       assert.equal(paymentsAreMock(), false, "expected live Razorpay provider");
     }
-    cookHeaders = (await loginCook(app, "sri-sai")).headers;
+    cookHeaders = (await loginCook(app, "csk-homemade-delights")).headers;
     await app.inject({
       method: "PATCH",
-      url: "/cooks/sri-sai/meal-settings/LUNCH",
+      url: "/cooks/csk-homemade-delights/meal-settings/LUNCH",
       headers: cookHeaders,
       payload: { cutoffHour: 23, cutoffMinute: 59 },
     });
-    const menu = await app.inject({ method: "GET", url: "/kitchens/sri-sai/menu" });
-    assert.ok(menu.json().menus?.[0], "No menu for sri-sai — run npm run db:seed");
+    const menu = await app.inject({ method: "GET", url: "/kitchens/csk-homemade-delights/menu" });
+    assert.ok(menu.json().menus?.[0], "No menu for csk-homemade-delights — run npm run db:seed");
     menuItemId = menu.json().menus[0].id;
   });
 
@@ -96,7 +96,7 @@ describe("customer ordering journey + logs", () => {
         headers,
         payload: {
           customerMobile: mobile,
-          cookSlug: "sri-sai",
+          cookSlug: "csk-homemade-delights",
           menuItemId,
           qty: 1,
           spice: "NORMAL",
@@ -219,14 +219,14 @@ describe("customer ordering journey + logs", () => {
       });
       const packed = await app.inject({
         method: "POST",
-        url: "/cooks/sri-sai/pack",
+        url: "/cooks/csk-homemade-delights/pack",
         headers: cookHeaders,
       });
       assert.equal(packed.statusCode, 200, packed.body);
 
       const dispatched = await app.inject({
         method: "POST",
-        url: "/cooks/sri-sai/dispatch",
+        url: "/cooks/csk-homemade-delights/dispatch",
         headers: cookHeaders,
       });
       assert.equal(dispatched.statusCode, 200, dispatched.body);

@@ -19,29 +19,42 @@ import { enqueueOutbox } from "./outboxEnqueue.js";
 const orderLog = createServiceLogger("localmeals-api");
 import {
   assertCanAcceptPaidOrders,
+  assertFulfillmentAllowed,
+  assertIntakeOpen,
+  assertSelfDeliveryAllowed,
   assertTransition,
   buildIdempotencyKey,
   addDaysISO,
+  cookFulfillmentOffersFromRow,
   dayOfWeekForServiceDate,
   formatCutoffLabel,
   formatDeliveryWindowLabel,
   isBeforeCutoff,
+  isIntakePausedForDate,
+  isFeatureEnabled,
+  isZeroDeliveryFulfillment,
   lineFoodDiscountPaise,
   mealLabel,
+  normalizeFulfillmentMode,
   normalizeWeekDiscountRule,
   orderTotalPaise,
-  PLATFORM_FEE_PAISE,
-  platformFeePaiseForCheckoutLine,
   parseServiceDate,
   resolveMealSchedule,
+  resolveSelfDeliveryPaise,
   serviceDateISO,
   weekDiscountApplies,
   WEEKDAY_SHORT,
+  aggregateCheckoutStatus,
+  type FulfillmentMode,
   type MealPeriod,
   type MealSettingsRow,
   type OrderState,
 } from "@localmeals/domain";
 import { getPaymentProvider } from "@localmeals/adapters";
+import {
+  platformFeePaise,
+  platformFeePaiseForCheckoutLine,
+} from "../soloKitchen.js";
 
 /**
  * Customer-facing kitchen card — never include cook personal mobile or payout rails.
@@ -61,7 +74,12 @@ export function publicCookDto(cook: {
   weekDiscountPercent?: number | null;
   weekDiscountMinDays?: number | null;
   pickupEnabled?: boolean | null;
+  intakePausedDate?: string | null;
+  offerCookDelivery?: boolean | null;
+  offerCustomerArrange?: boolean | null;
 }) {
+  const offers = cookFulfillmentOffersFromRow(cook);
+  const today = serviceDateISO();
   return {
     id: cook.id,
     kitchenName: cook.kitchenName,
@@ -76,6 +94,9 @@ export function publicCookDto(cook: {
     weekDiscountPercent: cook.weekDiscountPercent ?? 0,
     weekDiscountMinDays: cook.weekDiscountMinDays ?? 3,
     pickupEnabled: Boolean(cook.pickupEnabled),
+    intakePaused: isIntakePausedForDate(cook.intakePausedDate, today),
+    intakePausedDate: cook.intakePausedDate ?? null,
+    fulfillmentOffers: offers,
   };
 }
 
@@ -207,10 +228,85 @@ export async function scheduleForCook(
   return resolveMealSchedule(meal, rows, cook);
 }
 
-export type FulfillmentMode = "DELIVERY" | "PICKUP";
+export type { FulfillmentMode };
 
 function isPickupMode(mode: string | null | undefined): mode is "PICKUP" {
   return mode === "PICKUP";
+}
+
+/** Resolve checkout mode against cook offers + platform pickup gate. */
+async function resolveCheckoutFulfillment(
+  db: Db,
+  cook: {
+    pickupEnabled?: boolean | null;
+    pickupLandmark?: string | null;
+    offerCookDelivery?: boolean | null;
+    offerCustomerArrange?: boolean | null;
+    flatSelfDeliveryFee?: string | number | null;
+  },
+  inputMode: FulfillmentMode | string | null | undefined,
+) {
+  const fulfillmentMode = normalizeFulfillmentMode(inputMode);
+  const offers = cookFulfillmentOffersFromRow(cook);
+  const pickup = await resolvePickupAvailability(db, cook);
+  assertFulfillmentAllowed(fulfillmentMode, offers, {
+    pickupPlatformAvailable: pickup.available,
+  });
+  let pickupLandmark: string | null = null;
+  if (fulfillmentMode === "PICKUP") {
+    const { assertFeatureEnabled } = await import("./featureFlags.js");
+    await assertFeatureEnabled(
+      db,
+      "pickup_enabled",
+      "Pickup is not available right now — choose delivery",
+    );
+    if (!pickup.available || !pickup.landmark) {
+      throw new Error("This kitchen is not offering pickup right now");
+    }
+    pickupLandmark = pickup.landmark;
+  }
+  let deliveryPaise = 0;
+  if (!isZeroDeliveryFulfillment(fulfillmentMode)) {
+    const { getFeatureFlags } = await import("./featureFlags.js");
+    const flags = await getFeatureFlags(db);
+    deliveryPaise = isFeatureEnabled(flags, "self_delivery_fee_enabled")
+      ? Math.round(Number(cook.flatSelfDeliveryFee) * 100)
+      : 0;
+  }
+  return { fulfillmentMode, pickupLandmark, deliveryPaise, offers, pickup };
+}
+
+/**
+ * When Admin flag `delivery_distance_limits_enabled` is on: free ≤3 km, flat fee ≤5 km,
+ * block cook delivery beyond / without lat-lng. Flag off → keep flat fee.
+ */
+async function applyDeliveryDistancePaise(
+  db: Db,
+  input: {
+    cook: { lat?: string | number | null; lng?: string | number | null };
+    address: {
+      lat?: string | number | null;
+      lng?: string | number | null;
+      pinCode?: string | null;
+    };
+    fulfillmentMode: FulfillmentMode;
+    baseDeliveryPaise: number;
+  },
+): Promise<number> {
+  const { getFeatureFlags } = await import("./featureFlags.js");
+  const flags = await getFeatureFlags(db);
+  const resolved = resolveSelfDeliveryPaise({
+    distanceLimitsEnabled: isFeatureEnabled(flags, "delivery_distance_limits_enabled"),
+    fulfillmentMode: input.fulfillmentMode,
+    flatSelfDeliveryFeePaise: input.baseDeliveryPaise,
+    cookLat: input.cook.lat,
+    cookLng: input.cook.lng,
+    addressLat: input.address.lat,
+    addressLng: input.address.lng,
+    addressPinCode: input.address.pinCode,
+  });
+  assertSelfDeliveryAllowed(resolved.band);
+  return resolved.deliveryPaise;
 }
 
 /** Platform flag + cook opt-in + landmark required. */
@@ -309,9 +405,12 @@ export async function nextOpenSlotForCook(
 export async function listKitchens(db: Db, pinCode?: string) {
   const rows = await db.query.cookProfiles.findMany();
   const { getCookReviewSummary } = await import("./reviews.js");
+  const { soloKitchenSlug } = await import("../soloKitchen.js");
+  const soloOnly = soloKitchenSlug();
   const weekStart = addDaysISO(serviceDateISO(), -6);
   const out = [];
   for (const c of rows) {
+    if (soloOnly && c.slugHandle !== soloOnly) continue;
     if (
       !(
         c.onboardingStatus === "LIVE" &&
@@ -522,6 +621,9 @@ export async function getKitchenWeekPlan(
   });
   const slot = await nextOpenSlotForCook(db, cook, mealType);
   const pickup = await resolvePickupAvailability(db, cook);
+  const offers = cookFulfillmentOffersFromRow(cook);
+  const todayPaused = isIntakePausedForDate(cook.intakePausedDate, serviceDateISO());
+  const orderingOpen = slot.orderingOpen && !todayPaused;
 
   return {
     cook: publicCookDto(cook),
@@ -533,9 +635,15 @@ export async function getKitchenWeekPlan(
     lunchCutoff: cutoffLabel,
     cutoff: cutoffLabel,
     deliveryWindow: deliveryWindowLabel,
-    orderingOpen: slot.orderingOpen,
+    orderingOpen,
+    intakePaused: todayPaused,
     nextServiceDate: slot.nextServiceDate,
-    openStatusLabel: slot.statusLabel,
+    openStatusLabel: todayPaused ? "Paused for today" : slot.statusLabel,
+    fulfillmentOffers: {
+      cookDelivery: offers.cookDelivery,
+      pickup: pickup.available,
+      customerArrange: offers.customerArrange,
+    },
     pickup: {
       available: pickup.available,
       /** Same restricted window as delivery for this meal. */
@@ -544,7 +652,11 @@ export async function getKitchenWeekPlan(
         ? `Pickup during ${deliveryWindowLabel} · landmark after pay · show order code`
         : null,
     },
-    plan,
+    plan: plan.map((day) => ({
+      ...day,
+      orderingOpen:
+        day.orderingOpen && !isIntakePausedForDate(cook.intakePausedDate, day.serviceDate),
+    })),
     weekDiscount: {
       ...weekDiscount,
       label: describeWeekDiscount(weekDiscount),
@@ -682,20 +794,30 @@ async function resolveCheckoutAddress(
   if (input.addressId != null) {
     const { getAddressForUser } = await import("./addresses.js");
     const address = await getAddressForUser(db, input.customerMobile, input.addressId);
+    const line1 = (address.line1 ?? "").trim();
+    if (!line1 || /^address on file/i.test(line1)) {
+      throw new Error("Choose a real delivery address (update Home/Office in My account)");
+    }
+    const line = address.line2 ? `${line1}, ${address.line2}` : line1;
     return {
       user,
       address,
-      deliveryTargetAddress: address.line2
-        ? `${address.line1}, ${address.line2}`
-        : address.line1,
+      deliveryTargetAddress:
+        input.fulfillmentMode === "CUSTOMER_ARRANGE" ? `Customer arranges · ${line}` : line,
     };
   }
 
   if (input.channel === "WHATSAPP_BOT") {
+    const line = (home.line1 ?? "").trim();
+    if (!line || /^address on file/i.test(line)) {
+      throw new Error(
+        "Save your delivery address first — reply: Address Tower/flat/street PIN 600119",
+      );
+    }
     return {
       user,
       address: home,
-      deliveryTargetAddress: home.line1,
+      deliveryTargetAddress: line,
     };
   }
 
@@ -771,22 +893,6 @@ export async function createOrder(
     payoutBeneficiaryRef: cook.payoutBeneficiaryRef,
   });
 
-  const fulfillmentMode: FulfillmentMode =
-    input.fulfillmentMode === "PICKUP" ? "PICKUP" : "DELIVERY";
-  let pickupLandmark: string | null = null;
-  if (fulfillmentMode === "PICKUP") {
-    await assertFeatureEnabled(
-      db,
-      "pickup_enabled",
-      "Pickup is not available right now — choose delivery",
-    );
-    const pickup = await resolvePickupAvailability(db, cook);
-    if (!pickup.available || !pickup.landmark) {
-      throw new Error("This kitchen is not offering pickup right now");
-    }
-    pickupLandmark = pickup.landmark;
-  }
-
   let payerMobile: string | null = null;
   if (input.payerMobile?.trim()) {
     await assertFeatureEnabled(
@@ -806,8 +912,12 @@ export async function createOrder(
   if (!menu.isAvailable) throw new Error("That plate is not available");
 
   const serviceDate = input.serviceDate ?? menu.serviceDate ?? serviceDateISO();
+  assertIntakeOpen(cook.intakePausedDate, serviceDate);
   assertAdvanceServiceDate(serviceDate);
   assertMenuAppliesToDate(menu, serviceDate);
+
+  const { fulfillmentMode, pickupLandmark, deliveryPaise: fulfillDeliveryPaise } =
+    await resolveCheckoutFulfillment(db, cook, input.fulfillmentMode);
 
   const mealType = (menu.mealType ?? "LUNCH") as MealPeriod;
   const schedule = await scheduleForCook(db, cook, mealType);
@@ -836,13 +946,17 @@ export async function createOrder(
   });
   await assertCapacity(db, cook.id, serviceDate, input.qty);
 
-  const deliveryPaise =
-    fulfillmentMode === "PICKUP" ? 0 : Math.round(Number(cook.flatSelfDeliveryFee) * 100);
-  const platformFeePaise = PLATFORM_FEE_PAISE;
+  const deliveryPaise = await applyDeliveryDistancePaise(db, {
+    cook,
+    address,
+    fulfillmentMode,
+    baseDeliveryPaise: fulfillDeliveryPaise,
+  });
+  const feePaise = platformFeePaise();
   const amountPaise = orderTotalPaise({
     foodPaise: menu.pricePaise,
     deliveryPaise,
-    platformFeePaise,
+    platformFeePaise: feePaise,
     qty: input.qty,
   });
   const idempotencyKey = input.clientIdempotencyKey?.trim()
@@ -859,25 +973,32 @@ export async function createOrder(
         fulfillmentMode,
       });
 
+  let orderIdempotencyKey = idempotencyKey;
   const existing = await db.query.orders.findFirst({
-    where: (t, { eq: e }) => e(t.idempotencyKey, idempotencyKey),
+    where: (t, { eq: e }) => e(t.idempotencyKey, orderIdempotencyKey),
   });
   if (existing) {
-    bindTrace({
-      traceId: existing.traceId,
-      publicId: existing.publicId,
-      checkoutId: existing.checkoutId,
-    });
-    return {
-      ...existing,
-      paymentUrl: await resolveCustomerPaymentUrl(db, {
-        orderId: existing.id,
+    const reopen =
+      existing.status === "AWAITING_PAYMENT" || existing.status === "PENDING_APPROVAL";
+    if (reopen) {
+      bindTrace({
+        traceId: existing.traceId,
         publicId: existing.publicId,
-        gatewayTxnId: existing.gatewayTxnId,
         checkoutId: existing.checkoutId,
-      }),
-      gatewayTxnId: existing.gatewayTxnId,
-    };
+      });
+      return {
+        ...existing,
+        paymentUrl: await resolveCustomerPaymentUrl(db, {
+          orderId: existing.id,
+          publicId: existing.publicId,
+          gatewayTxnId: existing.gatewayTxnId,
+          checkoutId: existing.checkoutId,
+        }),
+        gatewayTxnId: existing.gatewayTxnId,
+      };
+    }
+    // Same deterministic key but order already progressed — allow an additional order.
+    orderIdempotencyKey = `${orderIdempotencyKey}|addl|${publicId()}`;
   }
 
   const pay = getPaymentProvider();
@@ -905,12 +1026,12 @@ export async function createOrder(
         spice: input.spice,
         foodPaise: menu.pricePaise,
         deliveryPaise,
-        platformFeePaise,
+        platformFeePaise: feePaise,
         status: "AWAITING_PAYMENT",
         fulfillmentMode,
         deliveryTargetAddress,
         channel,
-        idempotencyKey,
+        idempotencyKey: orderIdempotencyKey,
       })
       .returning();
 
@@ -918,7 +1039,7 @@ export async function createOrder(
       orderPublicId: order.publicId,
       amountPaise,
       customerMobile: billMobile,
-      idempotencyKey,
+      idempotencyKey: orderIdempotencyKey,
       traceId,
     });
 
@@ -928,7 +1049,7 @@ export async function createOrder(
       amountPaise,
       status: "CREATED",
       gatewayTxnId: payment.gatewayTxnId,
-      idempotencyKey,
+      idempotencyKey: orderIdempotencyKey,
     });
 
     const [updated] = await tx
@@ -996,6 +1117,15 @@ export async function createOrder(
           amountPaise,
           lineCount: 1,
         });
+      const { recordOrderActivity } = await import("./orderActivity.js");
+      await recordOrderActivity(tx, {
+        orderId: order.id,
+        customerMobile: input.customerMobile,
+        cookId: cook.id,
+        channel,
+        eventName: "CHILD_PAYS_REQUESTED",
+        payload: { payerMobile, publicId: order.publicId },
+      });
     }
 
     return {
@@ -1166,6 +1296,22 @@ export async function markOrderPaid(
           .set({ status: "COOKING", updatedAt: new Date() })
           .where(eq(orders.id, order.id))
           .returning();
+        const { recordOrderActivity } = await import("./orderActivity.js");
+        await recordOrderActivity(tx, {
+          orderId: order.id,
+          customerMobile: order.customerMobile,
+          cookId: order.cookId,
+          channel: "SYSTEM_CRON",
+          eventName: "ORDER_STATUS_COOKING",
+          payload: {
+            fromStatus: "PAID",
+            toStatus: "COOKING",
+            reason: "cutoff_lock",
+            serviceDate: order.serviceDate,
+            mealType: order.mealType,
+            publicId: order.publicId,
+          },
+        });
       }
       out.push(updated);
     }
@@ -1202,7 +1348,11 @@ export async function createOrderBatch(
   },
 ) {
   if (!input.lines.length) throw new Error("Add at least one day to the cart");
-  if (input.lines.length > 14) throw new Error("Cart is limited to 14 days");
+  // Up to 14 calendar days × breakfast/lunch/dinner.
+  if (input.lines.length > 42) throw new Error("Cart is limited to 42 plates");
+  if (new Set(input.lines.map((l) => l.serviceDate)).size > 14) {
+    throw new Error("Cart is limited to 14 days");
+  }
 
   const { assertFeatureEnabled, getFeatureFlags } = await import("./featureFlags.js");
   await assertFeatureEnabled(
@@ -1224,21 +1374,12 @@ export async function createOrderBatch(
     payoutBeneficiaryRef: cook.payoutBeneficiaryRef,
   });
 
-  const fulfillmentMode: FulfillmentMode =
-    input.fulfillmentMode === "PICKUP" ? "PICKUP" : "DELIVERY";
-  let pickupLandmark: string | null = null;
-  if (fulfillmentMode === "PICKUP") {
-    await assertFeatureEnabled(
-      db,
-      "pickup_enabled",
-      "Pickup is not available right now — choose delivery",
-    );
-    const pickup = await resolvePickupAvailability(db, cook);
-    if (!pickup.available || !pickup.landmark) {
-      throw new Error("This kitchen is not offering pickup right now");
-    }
-    pickupLandmark = pickup.landmark;
+  for (const line of input.lines) {
+    assertIntakeOpen(cook.intakePausedDate, line.serviceDate);
   }
+
+  const { fulfillmentMode, pickupLandmark, deliveryPaise: fulfillDeliveryPaise } =
+    await resolveCheckoutFulfillment(db, cook, input.fulfillmentMode);
 
   const channel = input.channel ?? "WEB_STOREFRONT";
   let payerMobile: string | null = null;
@@ -1307,8 +1448,12 @@ export async function createOrderBatch(
     addressId: input.addressId,
     channel,
   });
-  const deliveryPaise =
-    fulfillmentMode === "PICKUP" ? 0 : Math.round(Number(cook.flatSelfDeliveryFee) * 100);
+  const deliveryPaise = await applyDeliveryDistancePaise(db, {
+    cook,
+    address,
+    fulfillmentMode,
+    baseDeliveryPaise: fulfillDeliveryPaise,
+  });
 
   type Prepared = {
     menu: NonNullable<Awaited<ReturnType<typeof db.query.dailyMenus.findFirst>>>;
@@ -1368,10 +1513,10 @@ export async function createOrderBatch(
     qtyByDate.set(line.serviceDate, (qtyByDate.get(line.serviceDate) ?? 0) + line.qty);
   }
 
-  // Same calendar day twice → reject (keep cart simple: one plate per day)
-  const dates = drafts.map((p) => p.serviceDate);
-  if (new Set(dates).size !== dates.length) {
-    throw new Error("Only one plate per day in a week cart — remove the duplicate day");
+  // Same calendar day + meal twice → reject (B+L+D same day is OK)
+  const slots = drafts.map((p) => `${p.serviceDate}|${p.mealType}`);
+  if (new Set(slots).size !== slots.length) {
+    throw new Error("Only one plate per meal on each day — remove the duplicate");
   }
 
   for (const [serviceDate, qty] of qtyByDate) {
@@ -1382,11 +1527,17 @@ export async function createOrderBatch(
     percent: flags.week_discount_enabled ? cook.weekDiscountPercent : 0,
     minDays: cook.weekDiscountMinDays,
   });
-  const dayCount = drafts.length;
+  // Week % is by calendar days, not meal lines (B+L+D same day = 1 day).
+  const dayCount = new Set(drafts.map((d) => d.serviceDate)).size;
   const discountOn = weekDiscountApplies(dayCount, weekRule);
 
-  // Earliest day gets the single ₹7 platform fee for this checkout; delivery stays per day.
-  const draftsByDate = [...drafts].sort((a, b) => a.serviceDate.localeCompare(b.serviceDate));
+  const mealOrder: Record<string, number> = { BREAKFAST: 0, LUNCH: 1, DINNER: 2 };
+  // Earliest day gets the single ₹7 platform fee for this checkout; delivery stays per meal line.
+  const draftsByDate = [...drafts].sort((a, b) => {
+    const byDate = a.serviceDate.localeCompare(b.serviceDate);
+    if (byDate !== 0) return byDate;
+    return (mealOrder[a.mealType] ?? 9) - (mealOrder[b.mealType] ?? 9);
+  });
 
   const prepared: Prepared[] = draftsByDate.map((d, lineIndex) => {
     const linePlatformFeePaise = platformFeePaiseForCheckoutLine(lineIndex);
@@ -1422,7 +1573,30 @@ export async function createOrderBatch(
     };
   });
 
-  // Idempotency: same customer+cook+day+plate may already exist from a prior cart/pay.
+  const checkoutId = checkoutPublicId();
+  const traceId = newTraceId();
+  bindTrace({ traceId, checkoutId });
+  const totalPaise = prepared.reduce((s, p) => s + p.amountPaise, 0);
+  const foodDiscountTotalPaise = prepared.reduce((s, p) => s + p.foodDiscountPaise, 0);
+  const batchIdempotency = input.clientIdempotencyKey?.trim()
+    ? httpIdempotencyKey(input.customerMobile, input.clientIdempotencyKey)
+    : `batch|${createHash("sha256")
+        .update(
+          [input.customerMobile, cook.id, ...prepared.map((p) => p.idempotencyKey).sort()].join(
+            "|",
+          ),
+        )
+        .digest("hex")
+        .slice(0, 40)}`;
+
+  // Salt line keys with this checkout attempt so a 2nd same-day order is allowed.
+  // Same Idempotency-Key header still replays an in-flight unpaid checkout below.
+  const lineKeySalt = batchIdempotency.slice(0, 24);
+  for (const p of prepared) {
+    p.idempotencyKey = `${p.idempotencyKey}|${lineKeySalt}`;
+  }
+
+  // Idempotency: replay unpaid checkout when the same client key is retried.
   const existingByKey = new Map<string, NonNullable<Awaited<ReturnType<typeof db.query.orders.findFirst>>>>();
   for (const p of prepared) {
     const existing = await db.query.orders.findFirst({
@@ -1439,25 +1613,25 @@ export async function createOrderBatch(
       existingLines.every((o) => o.checkoutId === existingLines[0].checkoutId);
     if (allAwaiting && (sameCheckout || prepared.length === 1)) {
       const first = existingLines[0];
-      const checkoutId = first.checkoutId ?? first.publicId;
+      const existingCheckoutId = first.checkoutId ?? first.publicId;
       const gatewayTxnId = first.gatewayTxnId;
-      const totalPaise = existingLines.reduce((s, o) => s + lineTotal(o), 0);
+      const existingTotal = existingLines.reduce((s, o) => s + lineTotal(o), 0);
       bindTrace({
         traceId: first.traceId,
         publicId: first.publicId,
-        checkoutId: first.checkoutId ?? checkoutId,
+        checkoutId: first.checkoutId ?? existingCheckoutId,
       });
       return {
-        checkoutId,
+        checkoutId: existingCheckoutId,
         traceId: first.traceId,
         gatewayTxnId,
         paymentUrl: await resolveCustomerPaymentUrl(db, {
           orderId: first.id,
           publicId: first.publicId,
           gatewayTxnId,
-          checkoutId: first.checkoutId ?? checkoutId,
+          checkoutId: first.checkoutId ?? existingCheckoutId,
         }),
-        totalPaise,
+        totalPaise: existingTotal,
         foodDiscountTotalPaise: existingLines.reduce(
           (s, o) => s + (o.foodDiscountPaise ?? 0),
           0,
@@ -1469,24 +1643,7 @@ export async function createOrderBatch(
     }
   }
 
-  const blocking = existingLines.filter(
-    (o) => !["AWAITING_PAYMENT", "CANCELLED", "FAILED", "REFUNDED"].includes(o.status),
-  );
-  if (blocking.length > 0) {
-    const days = [...new Set(blocking.map((o) => o.serviceDate))].sort().join(", ");
-    const paidLike = blocking.every((o) =>
-      ["PAID", "COOKING", "PACKED", "ASSIGNING_RIDER", "DISPATCHED", "DELAYED", "DELIVERED"].includes(
-        o.status,
-      ),
-    );
-    throw new Error(
-      paidLike
-        ? `Already paid for ${days} — open My orders, or remove those days from the cart`
-        : `Already ordered for ${days} — remove those days from the cart (or check My orders)`,
-    );
-  }
-
-  // Abandoned unpaid lines from earlier attempts — free the idempotency keys
+  // Abandoned unpaid lines from earlier attempts with these salted keys
   for (const o of existingLines) {
     if (o.status === "AWAITING_PAYMENT") {
       await db
@@ -1500,22 +1657,6 @@ export async function createOrderBatch(
         .where(eq(orders.id, o.id));
     }
   }
-
-  const checkoutId = checkoutPublicId();
-  const traceId = newTraceId();
-  bindTrace({ traceId, checkoutId });
-  const totalPaise = prepared.reduce((s, p) => s + p.amountPaise, 0);
-  const foodDiscountTotalPaise = prepared.reduce((s, p) => s + p.foodDiscountPaise, 0);
-  const batchIdempotency = input.clientIdempotencyKey?.trim()
-    ? httpIdempotencyKey(input.customerMobile, input.clientIdempotencyKey)
-    : `batch|${createHash("sha256")
-        .update(
-          [input.customerMobile, cook.id, ...prepared.map((p) => p.idempotencyKey).sort()].join(
-            "|",
-          ),
-        )
-        .digest("hex")
-        .slice(0, 40)}`;
 
   const pay = getPaymentProvider();
 
@@ -1630,6 +1771,17 @@ export async function createOrderBatch(
           amountPaise: totalPaise,
           lineCount: created.length,
         });
+      const { recordOrderActivity } = await import("./orderActivity.js");
+      for (const o of created) {
+        await recordOrderActivity(tx, {
+          orderId: o.id,
+          customerMobile: input.customerMobile,
+          cookId: cook.id,
+          channel,
+          eventName: "CHILD_PAYS_REQUESTED",
+          payload: { payerMobile, checkoutId, publicId: o.publicId },
+        });
+      }
     }
 
     const refreshed = await tx.query.orders.findMany({
@@ -1671,8 +1823,10 @@ export async function getCheckoutById(db: Db, checkoutId: string) {
   }
   return {
     checkoutId,
-    status: rows[0].status,
+    status: aggregateCheckoutStatus(rows.map((o) => o.status)),
     gatewayTxnId: rows[0].gatewayTxnId,
+    payerMobile: rows[0].payerMobile ?? null,
+    customerMobile: rows[0].customerMobile,
     paymentUrl: await resolveCustomerPaymentUrl(db, {
       orderId: rows[0].id,
       publicId: rows[0].publicId,
@@ -1766,12 +1920,15 @@ export async function isOrderCancelRequestable(
   );
 }
 
+type ActivityChannel = "VOICE_IVR" | "WHATSAPP_BOT" | "WEB_STOREFRONT" | "SYSTEM_CRON" | "ADMIN";
+
 async function finalizeCancelInTx(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   tx: any,
   order: typeof orders.$inferSelect,
   cook: { kitchenName: string },
   wasPaid: boolean,
+  activityChannel: ActivityChannel = "WEB_STOREFRONT",
 ) {
   assertTransition(order.status as OrderState, "CANCELLED");
   const [updated] = await tx
@@ -1794,10 +1951,30 @@ async function finalizeCancelInTx(
       serviceDate: order.serviceDate,
       wasPaid,
     });
+  const { recordOrderActivity } = await import("./orderActivity.js");
+  await recordOrderActivity(tx, {
+    orderId: order.id,
+    customerMobile: order.customerMobile,
+    cookId: order.cookId,
+    channel: activityChannel,
+    eventName: "ORDER_CANCELLED",
+    payload: {
+      wasPaid,
+      fromStatus: order.status,
+      serviceDate: order.serviceDate,
+      mealType: order.mealType,
+      checkoutId: order.checkoutId,
+    },
+  });
   return updated;
 }
 
-export async function cancelOrder(db: Db, publicId: string) {
+export async function cancelOrder(
+  db: Db,
+  publicId: string,
+  opts: { channel?: ActivityChannel } = {},
+) {
+  const activityChannel = opts.channel ?? "WEB_STOREFRONT";
   const order = await db.query.orders.findFirst({
     where: (t, { eq: e }) => e(t.publicId, publicId),
   });
@@ -1824,14 +2001,30 @@ export async function cancelOrder(db: Db, publicId: string) {
     order.status === "PAID" &&
     (await isOrderCancelRequestable(db, order, cook))
   ) {
-    return requestCancelOrder(db, publicId);
+    return requestCancelOrder(db, publicId, { channel: activityChannel });
   }
 
   await assertCustomerCanCancelInstant(db, order, cook);
   const wasPaid = order.status === "PAID";
 
+  // Paid + before cut-off → auto full refund (food after week discount + line fees).
+  if (wasPaid) {
+    const { refundOrder } = await import("./admin.js");
+    const refunded = await refundOrder(db, {
+      orderId: order.id,
+      mode: "FULL",
+      reason: "Customer cancelled before cut-off",
+    });
+    return {
+      ...refunded,
+      cancellable: false,
+      cancelRequestable: false,
+      mode: "refunded" as const,
+    };
+  }
+
   const updated = await db.transaction(async (tx) =>
-    finalizeCancelInTx(tx, order, cook, wasPaid),
+    finalizeCancelInTx(tx, order, cook, wasPaid, activityChannel),
   );
   return {
     ...updated,
@@ -1842,7 +2035,12 @@ export async function cancelOrder(db: Db, publicId: string) {
 }
 
 /** Customer asks kitchen to cancel after cut-off (PAID only). */
-export async function requestCancelOrder(db: Db, publicId: string) {
+export async function requestCancelOrder(
+  db: Db,
+  publicId: string,
+  opts: { channel?: ActivityChannel } = {},
+) {
+  const activityChannel = opts.channel ?? "WEB_STOREFRONT";
   const order = await db.query.orders.findFirst({
     where: (t, { eq: e }) => e(t.publicId, publicId),
   });
@@ -1894,6 +2092,19 @@ export async function requestCancelOrder(db: Db, publicId: string) {
         qty: order.qty,
         toStatus: "CANCEL_REQUESTED",
       });
+    const { recordOrderActivity } = await import("./orderActivity.js");
+    await recordOrderActivity(tx, {
+      orderId: order.id,
+      customerMobile: order.customerMobile,
+      cookId: order.cookId,
+      channel: activityChannel,
+      eventName: "ORDER_CANCEL_REQUESTED",
+      payload: {
+        serviceDate: order.serviceDate,
+        mealType: order.mealType,
+        afterCutoff: true,
+      },
+    });
     return {
       ...updated,
       cancellable: false,
@@ -1904,7 +2115,12 @@ export async function requestCancelOrder(db: Db, publicId: string) {
 }
 
 /** Cook allows post–cut-off cancel → refund paid order. */
-export async function acceptCancelRequest(db: Db, publicId: string) {
+export async function acceptCancelRequest(
+  db: Db,
+  publicId: string,
+  opts: { channel?: ActivityChannel } = {},
+) {
+  const activityChannel = opts.channel ?? "WEB_STOREFRONT";
   const order = await db.query.orders.findFirst({
     where: (t, { eq: e }) => e(t.publicId, publicId),
   });
@@ -1912,6 +2128,15 @@ export async function acceptCancelRequest(db: Db, publicId: string) {
   if (order.status !== "CANCEL_REQUESTED") {
     throw new Error("No cancel request pending for this order");
   }
+  const { recordOrderActivity } = await import("./orderActivity.js");
+  await recordOrderActivity(db, {
+    orderId: order.id,
+    customerMobile: order.customerMobile,
+    cookId: order.cookId,
+    channel: activityChannel,
+    eventName: "ORDER_CANCEL_ACCEPTED",
+    payload: { by: "cook" },
+  });
   const { refundOrder } = await import("./admin.js");
   return refundOrder(db, {
     orderId: order.id,
@@ -1921,7 +2146,13 @@ export async function acceptCancelRequest(db: Db, publicId: string) {
 }
 
 /** Cook declines — order returns to PAID kitchen queue. */
-export async function declineCancelRequest(db: Db, publicId: string, reason?: string) {
+export async function declineCancelRequest(
+  db: Db,
+  publicId: string,
+  reason?: string,
+  opts: { channel?: ActivityChannel } = {},
+) {
+  const activityChannel = opts.channel ?? "WEB_STOREFRONT";
   const order = await db.query.orders.findFirst({
     where: (t, { eq: e }) => e(t.publicId, publicId),
   });
@@ -1948,6 +2179,17 @@ export async function declineCancelRequest(db: Db, publicId: string, reason?: st
         qty: order.qty,
         reason: reason?.slice(0, 200) || "Kitchen could not cancel — food is being prepared",
       });
+    const { recordOrderActivity } = await import("./orderActivity.js");
+    await recordOrderActivity(tx, {
+      orderId: order.id,
+      customerMobile: order.customerMobile,
+      cookId: order.cookId,
+      channel: activityChannel,
+      eventName: "ORDER_CANCEL_DECLINED",
+      payload: {
+        reason: reason?.slice(0, 200) || "Kitchen could not cancel — food is being prepared",
+      },
+    });
     return { ...updated, mode: "cancel_declined" as const };
   });
 }
@@ -1983,7 +2225,11 @@ export async function listPendingCancelRequests(db: Db, cookSlug: string, date?:
 }
 
 /** Cancel every cancellable day-line in a week checkout. */
-export async function cancelCheckout(db: Db, checkoutId: string) {
+export async function cancelCheckout(
+  db: Db,
+  checkoutId: string,
+  opts: { channel?: ActivityChannel } = {},
+) {
   const rows = await db.query.orders.findMany({
     where: (t, { eq: e }) => e(t.checkoutId, checkoutId),
     orderBy: (t, { asc }) => [asc(t.serviceDate)],
@@ -1998,7 +2244,7 @@ export async function cancelCheckout(db: Db, checkoutId: string) {
       continue;
     }
     try {
-      const updated = await cancelOrder(db, order.publicId);
+      const updated = await cancelOrder(db, order.publicId, opts);
       cancelled.push(updated);
     } catch (e) {
       skipped.push({ publicId: order.publicId, reason: (e as Error).message });
@@ -2009,8 +2255,15 @@ export async function cancelCheckout(db: Db, checkoutId: string) {
       skipped[0]?.reason ?? "Nothing left to cancel in this week order",
     );
   }
+  const modes = cancelled.map((o) => o.mode);
+  const mode = modes.every((m) => m === "refunded")
+    ? ("refunded" as const)
+    : modes.every((m) => m === "cancel_requested")
+      ? ("cancel_requested" as const)
+      : ("cancelled" as const);
   return {
     checkoutId,
+    mode,
     cancelled: cancelled.map((o) => o.publicId),
     skipped,
     orders: cancelled,
@@ -2054,22 +2307,6 @@ export async function requestLateOrder(
     payoutBeneficiaryRef: cook.payoutBeneficiaryRef,
   });
 
-  const fulfillmentMode: FulfillmentMode =
-    input.fulfillmentMode === "PICKUP" ? "PICKUP" : "DELIVERY";
-  let pickupLandmark: string | null = null;
-  if (fulfillmentMode === "PICKUP") {
-    await assertFeatureEnabled(
-      db,
-      "pickup_enabled",
-      "Pickup is not available right now — choose delivery",
-    );
-    const pickup = await resolvePickupAvailability(db, cook);
-    if (!pickup.available || !pickup.landmark) {
-      throw new Error("This kitchen is not offering pickup right now");
-    }
-    pickupLandmark = pickup.landmark;
-  }
-
   let payerMobile: string | null = null;
   if (input.payerMobile?.trim()) {
     await assertFeatureEnabled(
@@ -2089,8 +2326,12 @@ export async function requestLateOrder(
   if (!menu.isAvailable) throw new Error("That plate is not available");
 
   const serviceDate = input.serviceDate ?? menu.serviceDate ?? serviceDateISO();
+  assertIntakeOpen(cook.intakePausedDate, serviceDate);
   assertAdvanceServiceDate(serviceDate);
   assertMenuAppliesToDate(menu, serviceDate);
+
+  const { fulfillmentMode, pickupLandmark, deliveryPaise: fulfillDeliveryPaise } =
+    await resolveCheckoutFulfillment(db, cook, input.fulfillmentMode);
 
   const mealType = (menu.mealType ?? "LUNCH") as MealPeriod;
   const schedule = await scheduleForCook(db, cook, mealType);
@@ -2114,13 +2355,17 @@ export async function requestLateOrder(
   });
   await assertCapacity(db, cook.id, serviceDate, input.qty);
 
-  const deliveryPaise =
-    fulfillmentMode === "PICKUP" ? 0 : Math.round(Number(cook.flatSelfDeliveryFee) * 100);
-  const platformFeePaise = PLATFORM_FEE_PAISE;
+  const deliveryPaise = await applyDeliveryDistancePaise(db, {
+    cook,
+    address,
+    fulfillmentMode,
+    baseDeliveryPaise: fulfillDeliveryPaise,
+  });
+  const feePaise = platformFeePaise();
   const amountPaise = orderTotalPaise({
     foodPaise: menu.pricePaise,
     deliveryPaise,
-    platformFeePaise,
+    platformFeePaise: feePaise,
     qty: input.qty,
   });
   const idempotencyKey = buildIdempotencyKey({
@@ -2135,14 +2380,16 @@ export async function requestLateOrder(
     fulfillmentMode,
   });
 
+  let lateIdempotencyKey = idempotencyKey;
   const existing = await db.query.orders.findFirst({
-    where: (t, { eq: e }) => e(t.idempotencyKey, idempotencyKey),
+    where: (t, { eq: e }) => e(t.idempotencyKey, lateIdempotencyKey),
   });
   if (existing) {
     if (existing.status === "PENDING_APPROVAL" || existing.status === "AWAITING_PAYMENT") {
       return { ...existing, pendingApproval: existing.status === "PENDING_APPROVAL" };
     }
-    return { ...existing, pendingApproval: false };
+    // Prior late/paid order with same plate — allow another request.
+    lateIdempotencyKey = `${lateIdempotencyKey}|addl|${publicId()}`;
   }
 
   return db.transaction(async (tx) => {
@@ -2167,12 +2414,12 @@ export async function requestLateOrder(
         spice: input.spice,
         foodPaise: menu.pricePaise,
         deliveryPaise,
-        platformFeePaise,
+        platformFeePaise: feePaise,
         status: "PENDING_APPROVAL",
         fulfillmentMode,
         deliveryTargetAddress,
         channel,
-        idempotencyKey,
+        idempotencyKey: lateIdempotencyKey,
       })
       .returning();
 
@@ -2299,6 +2546,7 @@ export async function approveLateOrder(db: Db, publicId: string) {
       await enqueueOutbox(tx, "ChildPaysRequested", {
           checkoutId: null,
           orderPublicId: order.publicId,
+          orderId: order.id,
           payerMobile: order.payerMobile,
           seniorMobile: order.customerMobile,
           kitchenName: cook.kitchenName,
@@ -2306,6 +2554,18 @@ export async function approveLateOrder(db: Db, publicId: string) {
           amountPaise,
           lineCount: 1,
         });
+      await tx.insert(platformEventLedger).values({
+        associatedMobile: order.customerMobile,
+        orderId: order.id,
+        cookId: cook.id,
+        channel: order.channel,
+        eventName: "CHILD_PAYS_REQUESTED",
+        rawPayload: {
+          payerMobile: order.payerMobile,
+          publicId: order.publicId,
+          late: true,
+        },
+      });
     }
 
     return {
@@ -2381,17 +2641,41 @@ export async function transitionOrder(
   orderId: number,
   to: OrderState,
   extra?: Partial<typeof orders.$inferInsert>,
+  activity?: {
+    channel?: "VOICE_IVR" | "WHATSAPP_BOT" | "WEB_STOREFRONT" | "SYSTEM_CRON" | "ADMIN";
+  },
 ) {
   const order = await db.query.orders.findFirst({
     where: (t, { eq: e }) => e(t.id, orderId),
   });
   if (!order) throw new Error("Order not found");
-  assertTransition(order.status as OrderState, to);
+  const fromStatus = order.status as OrderState;
+  assertTransition(fromStatus, to);
   const [updated] = await db
     .update(orders)
     .set({ status: to, updatedAt: new Date(), ...extra })
     .where(eq(orders.id, orderId))
     .returning();
+
+  // Kitchen / logistics path timing for ops timeline (Admin order activity).
+  const { recordOrderActivity } = await import("./orderActivity.js");
+  await recordOrderActivity(db, {
+    orderId: order.id,
+    customerMobile: order.customerMobile,
+    cookId: order.cookId,
+    channel: activity?.channel ?? "SYSTEM_CRON",
+    eventName: `ORDER_STATUS_${to}`,
+    payload: {
+      fromStatus,
+      toStatus: to,
+      serviceDate: order.serviceDate,
+      mealType: order.mealType,
+      fulfillmentMode: order.fulfillmentMode,
+      logisticsMode: updated.logisticsMode ?? order.logisticsMode,
+      publicId: order.publicId,
+    },
+  });
+
   return updated;
 }
 
@@ -2571,6 +2855,16 @@ export async function listOrdersForCustomer(
       mealType: o.mealType,
       deliveryTargetAddress: o.deliveryTargetAddress,
       fulfillmentMode: (o.fulfillmentMode as FulfillmentMode) || "DELIVERY",
+      logisticsMode: o.logisticsMode === "PARTNER" ? "PARTNER" : "SELF",
+      kitchenDeliveryType: cook?.deliveryType === "PARTNER" ? "PARTNER" : "SELF",
+      partnerShipmentId: o.partnerShipmentId ?? null,
+      partnerTrackingUrl:
+        o.logisticsMode === "PARTNER"
+          ? o.partnerTrackingUrl?.trim() ||
+            (o.partnerShipmentId
+              ? `https://localmeals.local/track/${o.partnerShipmentId}`
+              : null)
+          : null,
       pickup: pickupRevealForOrder(o),
       deliveryWindow: cook
         ? formatDeliveryWindowLabel(

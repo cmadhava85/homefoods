@@ -10,8 +10,10 @@ import {
   cancelCheckout,
   cancelOrder,
   createOrderBatch,
+  getCheckoutById,
   getKitchenAdvanceMealOptions,
   getKitchenWeekPlan,
+  getOrderByPublicId,
   listKitchens,
   listOrdersForCustomer,
 } from "../../services/orders.js";
@@ -63,7 +65,7 @@ export async function handleOrderFlow(s: WaSession): Promise<object> {
       await wa.send({
         to: from,
         body: wt("wa.ordersEmpty"),
-        buttons: ["Menu", "Week sri-sai"],
+        buttons: ["Menu", "Week csk-homemade-delights"],
       });
       return { ok: true, intent, empty: true, replies: replies() };
     }
@@ -124,12 +126,16 @@ export async function handleOrderFlow(s: WaSession): Promise<object> {
     }
     try {
       if (intent === "FOLLOW") {
-        const res = await followKitchen(db, mobile, slug);
+        // Sending "Follow <slug>" is explicit consent for menu WhatsApp alerts.
+        const res = await followKitchen(db, mobile, slug, {
+          consent: true,
+          consentVia: "whatsapp_command",
+        });
         await wa.send({
           to: from,
           body: res.alreadyFollowing
             ? `You’re already following ${res.cook.kitchenName}. We’ll ping when they post.`
-            : `✅ Following ${res.cook.kitchenName}. You’ll get WhatsApp when they post a new plate.\nUnfollow ${slug} anytime.`,
+            : `✅ Following ${res.cook.kitchenName}. You agreed to WhatsApp when they post a new plate.\nUnfollow ${slug} anytime.`,
           buttons: [`Menu ${slug}`, `Week ${slug}`, "Orders"],
         });
       } else {
@@ -235,9 +241,11 @@ export async function handleOrderFlow(s: WaSession): Promise<object> {
     const wantsCheckout = parsed.all === true || (parsed.dayTokens && parsed.dayTokens.length > 0);
     const mealCmd = mealShort[mealType];
 
-    const weekFulfillmentEarly =
-      parsed.fulfillmentMode === "PICKUP" ? "PICKUP" : "DELIVERY";
-    if (wantsCheckout && weekFulfillmentEarly === "DELIVERY") {
+    const { normalizeFulfillmentMode, needsCheckoutAddress } = await import(
+      "@localmeals/domain"
+    );
+    const weekFulfillmentEarly = normalizeFulfillmentMode(parsed.fulfillmentMode);
+    if (wantsCheckout && needsCheckoutAddress(weekFulfillmentEarly)) {
       const addr = await resolveWaDeliveryAddress(parsed.addressLabel);
       if (addr.kind === "empty") {
         await wa.send({
@@ -246,6 +254,7 @@ export async function handleOrderFlow(s: WaSession): Promise<object> {
             "Save a delivery address before week checkout.",
             "Reply: Save HOME <tower / flat / street>",
             "Or pickup: Week <kitchen> L all PICKUP",
+            "Or arrange: Week <kitchen> L all HOME ARRANGE",
           ].join("\n"),
           buttons: ["Addresses", `Week ${parsed.slug} ${mealCmd}`, "Menu"],
         });
@@ -387,10 +396,15 @@ export async function handleOrderFlow(s: WaSession): Promise<object> {
       return { ok: true, intent, error: "no_lines", replies: replies() };
     }
 
-    const weekFulfillment = parsed.fulfillmentMode === "PICKUP" ? "PICKUP" : "DELIVERY";
+    const weekFulfillment = normalizeFulfillmentMode(parsed.fulfillmentMode);
     let weekAddressId: number | null = null;
-    let weekAddrLabel = "PICKUP";
-    if (weekFulfillment === "DELIVERY") {
+    let weekAddrLabel =
+      weekFulfillment === "PICKUP"
+        ? "PICKUP"
+        : weekFulfillment === "CUSTOMER_ARRANGE"
+          ? "ARRANGE"
+          : "HOME";
+    if (needsCheckoutAddress(weekFulfillment)) {
       const addrFinal = await resolveWaDeliveryAddress(parsed.addressLabel);
       if (addrFinal.kind !== "ok") {
         await wa.send({
@@ -427,7 +441,9 @@ export async function handleOrderFlow(s: WaSession): Promise<object> {
           `${week.cook.kitchenName} · ${week.mealLabel} · ${batch.orders.length} day(s)`,
           weekFulfillment === "PICKUP"
             ? "Pickup at kitchen landmark (after pay)"
-            : `Deliver to ${weekAddrLabel}`,
+            : weekFulfillment === "CUSTOMER_ARRANGE"
+              ? `You arrange auto/porter · ${weekAddrLabel}`
+              : `Deliver to ${weekAddrLabel}`,
           parsed.payerMobile ? `Family pays: ${parsed.payerMobile}` : null,
           ...batch.orders.map(
             (o) => `• ${o.serviceDate} · ${o.qty}× ${localizedDishName(waLocale, o)}`,
@@ -528,21 +544,32 @@ export async function handleOrderFlow(s: WaSession): Promise<object> {
     const { publicId: cancelId, checkoutId } = parseCancelCommand(text);
     try {
       if (checkoutId) {
-        const res = await cancelCheckout(db, checkoutId);
+        const checkout = await getCheckoutById(db, checkoutId);
+        const { assertCustomerOwnsCheckout } = await import("../../http/orderOwnership.js");
+        assertCustomerOwnsCheckout(checkout?.orders?.[0], mobile);
+        const res = await cancelCheckout(db, checkoutId, { channel: "WHATSAPP_BOT" });
+        const refundNote =
+          res.mode === "refunded"
+            ? "Refund initiated — usually a few hours on UPI/bank (up to 1–2 working days)."
+            : res.mode === "cancel_requested"
+              ? "Asked kitchen to cancel open paid days — waiting for Accept/Decline."
+              : "Before cut-off only. Order again from Menu anytime.";
         await wa.send({
           to: from,
           body: [
-            `🚫 Cancelled week ${checkoutId}`,
+            res.mode === "cancel_requested"
+              ? `❎ Cancel requested · week ${checkoutId}`
+              : `🚫 Cancelled week ${checkoutId}`,
             ...res.cancelled.map((o) => `• ${o.publicId}`),
             res.skipped.length
               ? `Skipped: ${res.skipped.map((s) => s.publicId).join(", ")}`
               : null,
             "",
-            "Before cut-off only. Order again from Menu anytime.",
+            refundNote,
           ]
             .filter(Boolean)
             .join("\n"),
-          buttons: ["Menu"],
+          buttons: res.mode === "cancel_requested" ? ["Orders"] : ["Menu"],
         });
         return {
           ok: true,
@@ -554,8 +581,13 @@ export async function handleOrderFlow(s: WaSession): Promise<object> {
       }
 
       if (cancelId) {
-        const updated = await cancelOrder(db, cancelId);
+        const order = await getOrderByPublicId(db, cancelId);
+        if (!order) throw new Error("Order not found");
+        const { assertCustomerOwnsOrder } = await import("../../http/orderOwnership.js");
+        assertCustomerOwnsOrder(order, mobile);
+        const updated = await cancelOrder(db, cancelId, { channel: "WHATSAPP_BOT" });
         const requested = updated.mode === "cancel_requested";
+        const refunded = updated.mode === "refunded";
         await wa.send({
           to: from,
           body: requested
@@ -563,13 +595,17 @@ export async function handleOrderFlow(s: WaSession): Promise<object> {
                 `Asked kitchen to cancel · ${updated.publicId}`,
                 `${updated.qty}× ${localizedDishName(waLocale, updated)} · ${updated.serviceDate}`,
                 "",
-                "Waiting for cook Accept (refund) or Decline (keep order).",
+                "Waiting for cook Accept or Decline. If accepted, refund usually takes a few hours.",
               ].join("\n")
             : [
-                `🚫 Cancelled ${updated.publicId}`,
+                refunded
+                  ? `🚫 Cancelled · refund started · ${updated.publicId}`
+                  : `🚫 Cancelled ${updated.publicId}`,
                 `${updated.qty}× ${localizedDishName(waLocale, updated)} · ${updated.serviceDate}`,
                 "",
-                "You can order again before cut-off from Menu.",
+                refunded
+                  ? "Money returns to the same UPI/bank — usually within a few hours (up to 1–2 working days)."
+                  : "You can order again before cut-off from Menu.",
               ].join("\n"),
           buttons: requested ? ["Orders"] : ["Menu"],
         });

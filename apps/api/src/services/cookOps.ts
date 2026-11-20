@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import {
   cookMealSettings,
+  cookMenuTemplates,
   cookProfiles,
   cookSavedPlates,
   cutoffLocks,
@@ -8,19 +9,24 @@ import {
   orders,
   outbox,
   platformEventLedger,
+  type CookMenuTemplateItem,
   type Db,
 } from "@localmeals/db";
 import { LogEvent, createServiceLogger } from "@localmeals/observability";
 import {
   assertCanAcceptPaidOrders,
+  assertFulfillmentOffersValid,
   assertValidCutoff,
   assertValidDeliveryWindow,
+  cookFulfillmentOffersFromRow,
   defaultMealSchedule,
   describeWeekDiscount,
   formatCutoffLabel,
   formatDeliveryWindowLabel,
   formatOrderPaidFeedPreview,
   isAtOrPastCutoff,
+  isIntakePausedForDate,
+  groupCookStops,
   mealLabel,
   MEAL_PERIODS,
   normalizeWeekDiscountRule,
@@ -84,6 +90,19 @@ export async function getCookMealSettings(db: Db, cookSlug: string) {
       enabled: Boolean(cook.pickupEnabled),
       landmark: cook.pickupLandmark?.trim() || null,
       platformEnabled: isFeatureEnabled(flags, "pickup_enabled"),
+    },
+    intake: {
+      paused: isIntakePausedForDate(cook.intakePausedDate, serviceDateISO()),
+      pausedDate: cook.intakePausedDate ?? null,
+      serviceDate: serviceDateISO(),
+    },
+    fulfillmentOffers: cookFulfillmentOffersFromRow(cook),
+    delivery: {
+      type: (cook.deliveryType === "PARTNER" ? "PARTNER" : "SELF") as "SELF" | "PARTNER",
+      platformPartnerEnabled: isFeatureEnabled(flags, "partner_delivery_enabled"),
+      /** Active partner path on dispatch when flag ON and type PARTNER. */
+      partnerActive:
+        isFeatureEnabled(flags, "partner_delivery_enabled") && cook.deliveryType === "PARTNER",
     },
     meals: MEAL_PERIODS.map((meal) => {
       const row = rows.find((r) => r.mealType === meal) ?? null;
@@ -224,6 +243,12 @@ export async function setCookPickupSettings(
     throw new Error("Set a pickup landmark before enabling kitchen pickup");
   }
 
+  const offers = cookFulfillmentOffersFromRow({
+    ...cook,
+    pickupEnabled: enabled,
+  });
+  assertFulfillmentOffersValid(offers);
+
   await db
     .update(cookProfiles)
     .set({
@@ -241,6 +266,83 @@ export async function setCookPickupSettings(
     pickupLandmark: landmark,
     platformEnabled,
     availableToCustomers: Boolean(platformEnabled && enabled && landmark),
+    fulfillmentOffers: offers,
+  };
+}
+
+/** One-tap pause / resume intake for today's service date only. */
+export async function setCookIntakePause(
+  db: Db,
+  cookSlug: string,
+  input: { paused: boolean },
+) {
+  const cook = await requireCookBySlug(db, cookSlug);
+  const today = serviceDateISO();
+  const intakePausedDate = input.paused ? today : null;
+  await db
+    .update(cookProfiles)
+    .set({ intakePausedDate })
+    .where(eq(cookProfiles.id, cook.id));
+  return {
+    paused: Boolean(intakePausedDate),
+    pausedDate: intakePausedDate,
+    serviceDate: today,
+  };
+}
+
+/** Town fulfillment toggles: cook delivery · pickup · customer arranges. */
+export async function setCookFulfillmentOffers(
+  db: Db,
+  cookSlug: string,
+  input: {
+    cookDelivery?: boolean;
+    customerArrange?: boolean;
+    pickupEnabled?: boolean;
+    pickupLandmark?: string | null;
+  },
+) {
+  const cook = await requireCookBySlug(db, cookSlug);
+  const landmark =
+    input.pickupLandmark !== undefined
+      ? input.pickupLandmark?.trim() || null
+      : cook.pickupLandmark?.trim() || null;
+  const pickupEnabled =
+    input.pickupEnabled !== undefined ? Boolean(input.pickupEnabled) : Boolean(cook.pickupEnabled);
+  if (pickupEnabled && !landmark) {
+    throw new Error("Set a pickup landmark before enabling kitchen pickup");
+  }
+  const offerCookDelivery =
+    input.cookDelivery !== undefined ? Boolean(input.cookDelivery) : cook.offerCookDelivery !== false;
+  const offerCustomerArrange =
+    input.customerArrange !== undefined
+      ? Boolean(input.customerArrange)
+      : Boolean(cook.offerCustomerArrange);
+
+  const offers = {
+    cookDelivery: offerCookDelivery,
+    pickup: pickupEnabled,
+    customerArrange: offerCustomerArrange,
+  };
+  assertFulfillmentOffersValid(offers);
+
+  await db
+    .update(cookProfiles)
+    .set({
+      offerCookDelivery,
+      offerCustomerArrange,
+      pickupEnabled,
+      pickupLandmark: landmark,
+    })
+    .where(eq(cookProfiles.id, cook.id));
+
+  const { getFeatureFlags } = await import("./featureFlags.js");
+  const { isFeatureEnabled } = await import("@localmeals/domain");
+  const flags = await getFeatureFlags(db);
+  return {
+    fulfillmentOffers: offers,
+    pickupEnabled,
+    pickupLandmark: landmark,
+    pickupPlatformEnabled: isFeatureEnabled(flags, "pickup_enabled"),
   };
 }
 
@@ -297,10 +399,14 @@ export async function runMealCutoff(
       }
     }
 
-    const addresses = paidOrders.map((o) => ({
-      label: o.publicId,
-      address: o.deliveryTargetAddress,
-    }));
+    // Club same customer + address into one stop (extra same-day orders stay separate rows).
+    const stopGroups = groupCookStops(paidOrders);
+    const addresses = stopGroups
+      .filter((g) => g.fulfillmentMode !== "PICKUP" && g.deliveryTargetAddress)
+      .map((g) => ({
+        label: g.orders.map((o) => o.publicId).join("+"),
+        address: g.deliveryTargetAddress,
+      }));
     const routeMapsUrl = buildMultiStopMapsUrl(addresses);
     const headcount = paidOrders.reduce((n, o) => n + o.qty, 0);
     const lessSpicy = paidOrders
@@ -336,10 +442,27 @@ export async function runMealCutoff(
     }
 
     const wa = getWhatsAppProvider();
-    const stopLines = paidOrders.map(
-      (o, i) =>
-        `${i + 1}. ${o.publicId} · ${o.qty}× ${o.itemName}\n   📍 ${o.deliveryTargetAddress}`,
-    );
+    const stopLines = stopGroups.map((g, i) => {
+      const lines = g.orders.map(
+        (o) => `   · ${o.publicId} · ${o.qty}× ${o.itemName}${o.spice === "LESS" ? " · less spicy" : ""}`,
+      );
+      const modeTag = g.fulfillmentMode === "PICKUP" ? " · pickup" : "";
+      const addr =
+        g.fulfillmentMode === "PICKUP"
+          ? "Pickup"
+          : g.deliveryTargetAddress || "Address missing";
+      const head =
+        g.orders.length > 1
+          ? `${i + 1}. Stop · ${g.totalQty} plates · ${g.orders.length} orders${modeTag}`
+          : `${i + 1}. ${g.orders[0].publicId} · ${g.orders[0].qty}× ${g.orders[0].itemName}${modeTag}`;
+      return [
+        head,
+        `   📍 ${addr}`,
+        g.orders.length > 1 ? lines.join("\n") : null,
+      ]
+        .filter(Boolean)
+        .join("\n");
+    });
     await wa.send({
       to: cook.mobileNumber,
       body: [
@@ -469,9 +592,11 @@ export async function getManifest(
           "CANCEL_REQUESTED",
           "COOKING",
           "PACKED",
+          "ASSIGNING_RIDER",
           "DISPATCHED",
           "DELAYED",
           "DELIVERED",
+          "LOGISTICS_EXCEPTION",
         ]),
       ),
   });
@@ -487,9 +612,11 @@ export async function getManifest(
           "CANCEL_REQUESTED",
           "COOKING",
           "PACKED",
+          "ASSIGNING_RIDER",
           "DISPATCHED",
           "DELAYED",
           "DELIVERED",
+          "LOGISTICS_EXCEPTION",
         ]),
       ),
   });
@@ -511,18 +638,37 @@ export async function getManifest(
   const { sumPendingClawbackPaise } = await import("./cookClawback.js");
   const pendingClawbackPaise = await sumPendingClawbackPaise(db, cook.id);
 
+  const { getFeatureFlags } = await import("./featureFlags.js");
+  const { isFeatureEnabled } = await import("@localmeals/domain");
+  const { partnerTrackingUrl } = await import("./partnerLogistics.js");
+  const flags = await getFeatureFlags(db);
+  const partnerActive =
+    isFeatureEnabled(flags, "partner_delivery_enabled") && cook.deliveryType === "PARTNER";
+
   return {
     cook: {
       id: cook.id,
       kitchenName: cook.kitchenName,
       slugHandle: cook.slugHandle,
       mobileNumber: cook.mobileNumber,
+      deliveryType: cook.deliveryType === "PARTNER" ? "PARTNER" : "SELF",
+    },
+    delivery: {
+      type: cook.deliveryType === "PARTNER" ? "PARTNER" : "SELF",
+      platformPartnerEnabled: isFeatureEnabled(flags, "partner_delivery_enabled"),
+      partnerActive,
     },
     mealType,
     mealLabel: mealLabel(mealType),
     mealEnabled: schedule.enabled,
     lock,
-    orders: orderRows,
+    orders: orderRows.map((o) => ({
+      ...o,
+      partnerTrackingUrl:
+        o.logisticsMode === "PARTNER"
+          ? partnerTrackingUrl(o.partnerShipmentId, o.partnerTrackingUrl)
+          : null,
+    })),
     lunchCutoff: formatCutoffLabel(schedule.cutoff),
     cutoff: formatCutoffLabel(schedule.cutoff),
     deliveryWindow: formatDeliveryWindowLabel(schedule.deliveryWindow),
@@ -615,12 +761,25 @@ async function notifyOrderStatus(
     qty: number;
     status: string;
     cookId: string;
+    fulfillmentMode?: string | null;
   },
   toStatus: string,
 ) {
   const cook = await db.query.cookProfiles.findFirst({
     where: (t, { eq: e }) => e(t.id, order.cookId),
   });
+  const { getFeatureFlags } = await import("./featureFlags.js");
+  const { isFeatureEnabled } = await import("@localmeals/domain");
+  const flags = await getFeatureFlags(db);
+  const leanPlatformOn = isFeatureEnabled(flags, "lean_wa_status_enabled");
+  let leanWaOptIn = false;
+  if (leanPlatformOn) {
+    const row = await db.query.users.findFirst({
+      where: (t, { eq: eqm }) => eqm(t.mobileNumber, order.customerMobile),
+    });
+    const consents = (row?.consents ?? {}) as Record<string, boolean>;
+    leanWaOptIn = consents.leanWaStatus === true;
+  }
   await enqueueOutbox(db, "OrderStatusChanged", {
       orderId: order.id,
       publicId: order.publicId,
@@ -631,7 +790,17 @@ async function notifyOrderStatus(
       qty: order.qty,
       fromStatus: order.status,
       toStatus,
+      fulfillmentMode: order.fulfillmentMode ?? "DELIVERY",
+      leanWaOptIn,
     });
+}
+
+/** Partner path: cook confirms rider found (mock or ops). */
+export async function markPartnerRiderAssigned(db: Db, publicId: string, cookId: string) {
+  const { confirmPartnerRiderAssigned } = await import("./partnerLogistics.js");
+  const updated = await confirmPartnerRiderAssigned(db, publicId, { cookId });
+  await notifyOrderStatus(db, updated, "DISPATCHED");
+  return updated;
 }
 
 /** Advance one order along the kitchen path (cook desk / WhatsApp). */
@@ -639,7 +808,10 @@ export async function advanceOrderKitchenStatus(
   db: Db,
   publicId: string,
   to: "COOKING" | "PACKED" | "DISPATCHED" | "DELIVERED",
-  opts: { cookId?: string } = {},
+  opts: {
+    cookId?: string;
+    channel?: "WHATSAPP_BOT" | "WEB_STOREFRONT" | "SYSTEM_CRON" | "ADMIN";
+  } = {},
 ) {
   const order = await db.query.orders.findFirst({
     where: (t, { eq: e }) => e(t.publicId, publicId),
@@ -648,8 +820,13 @@ export async function advanceOrderKitchenStatus(
   if (opts.cookId && order.cookId !== opts.cookId) {
     throw new Error("That order is not for your kitchen");
   }
+  const activityChannel = opts.channel ?? "WEB_STOREFRONT";
 
-  if (to === "DISPATCHED" && order.fulfillmentMode !== "PICKUP") {
+  if (
+    to === "DISPATCHED" &&
+    order.fulfillmentMode !== "PICKUP" &&
+    order.fulfillmentMode !== "CUSTOMER_ARRANGE"
+  ) {
     const cook = await db.query.cookProfiles.findFirst({
       where: (t, { eq: e }) => e(t.id, order.cookId),
     });
@@ -662,19 +839,29 @@ export async function advanceOrderKitchenStatus(
     }
   }
 
-  const updated = await transitionOrder(db, order.id, to, {
-    ...(to === "DISPATCHED" ? { logisticsMode: "SELF" as const } : {}),
-  });
+  const updated = await transitionOrder(
+    db,
+    order.id,
+    to,
+    {
+      ...(to === "DISPATCHED" ? { logisticsMode: "SELF" as const } : {}),
+    },
+    { channel: activityChannel },
+  );
   await notifyOrderStatus(db, order, to);
   return updated;
 }
+
+type OpsChannel = "WHATSAPP_BOT" | "WEB_STOREFRONT" | "SYSTEM_CRON" | "ADMIN";
 
 export async function markPacked(
   db: Db,
   cookSlug: string,
   serviceDate = serviceDateISO(),
   mealType: MealPeriod = "LUNCH",
+  opts: { channel?: OpsChannel } = {},
 ) {
+  const activityChannel = opts.channel ?? "WEB_STOREFRONT";
   const cook = await db.query.cookProfiles.findFirst({
     where: (t, { eq: e }) => e(t.slugHandle, cookSlug),
   });
@@ -689,7 +876,7 @@ export async function markPacked(
       ),
   });
   for (const o of cooking) {
-    await transitionOrder(db, o.id, "PACKED");
+    await transitionOrder(db, o.id, "PACKED", undefined, { channel: activityChannel });
     await notifyOrderStatus(db, o, "PACKED");
   }
   return { packed: cooking.length, publicIds: cooking.map((o) => o.publicId) };
@@ -700,7 +887,9 @@ export async function markDispatched(
   cookSlug: string,
   serviceDate = serviceDateISO(),
   mealType: MealPeriod = "LUNCH",
+  opts: { channel?: OpsChannel } = {},
 ) {
+  const activityChannel = opts.channel ?? "WEB_STOREFRONT";
   const cook = await db.query.cookProfiles.findFirst({
     where: (t, { eq: e }) => e(t.slugHandle, cookSlug),
   });
@@ -715,7 +904,9 @@ export async function markDispatched(
       ),
   });
   // Pickup orders skip dispatch — cook marks picked up (→ DELIVERED) instead.
-  const toDispatch = packed.filter((o) => o.fulfillmentMode !== "PICKUP");
+  const toDispatch = packed.filter(
+    (o) => o.fulfillmentMode !== "PICKUP" && o.fulfillmentMode !== "CUSTOMER_ARRANGE",
+  );
   const { cookUsesPartnerDelivery, dispatchViaPartner } = await import("./partnerLogistics.js");
   const usePartner = await cookUsesPartnerDelivery(db, cook.id);
 
@@ -728,7 +919,13 @@ export async function markDispatched(
       publicIds.push(res.order.publicId);
       partnerAssigned += 1;
     } else {
-      await transitionOrder(db, o.id, "DISPATCHED", { logisticsMode: "SELF" });
+      await transitionOrder(
+        db,
+        o.id,
+        "DISPATCHED",
+        { logisticsMode: "SELF" },
+        { channel: activityChannel },
+      );
       await notifyOrderStatus(db, o, "DISPATCHED");
       publicIds.push(o.publicId);
     }
@@ -746,7 +943,9 @@ export async function markStartCooking(
   cookSlug: string,
   serviceDate = serviceDateISO(),
   mealType: MealPeriod = "LUNCH",
+  opts: { channel?: OpsChannel } = {},
 ) {
+  const activityChannel = opts.channel ?? "WEB_STOREFRONT";
   const cook = await db.query.cookProfiles.findFirst({
     where: (t, { eq: e }) => e(t.slugHandle, cookSlug),
   });
@@ -761,13 +960,20 @@ export async function markStartCooking(
       ),
   });
   for (const o of paid) {
-    await transitionOrder(db, o.id, "COOKING");
+    await transitionOrder(db, o.id, "COOKING", undefined, { channel: activityChannel });
     await notifyOrderStatus(db, o, "COOKING");
   }
   return { cooking: paid.length, publicIds: paid.map((o) => o.publicId) };
 }
 
-export async function markDelivered(db: Db, orderPublicId: string, opts: { cookId?: string } = {}) {
+export async function markDelivered(
+  db: Db,
+  orderPublicId: string,
+  opts: {
+    cookId?: string;
+    channel?: "WHATSAPP_BOT" | "WEB_STOREFRONT" | "SYSTEM_CRON" | "ADMIN";
+  } = {},
+) {
   return advanceOrderKitchenStatus(db, orderPublicId, "DELIVERED", opts);
 }
 
@@ -1059,6 +1265,11 @@ export async function deleteCookMenuItem(db: Db, cookSlug: string, menuItemId: n
     where: (t, { eq: e, and: a }) => a(e(t.id, menuItemId), e(t.cookId, cook.id)),
   });
   if (!existing) throw new Error("Menu item not found");
+  // Orders keep itemName snapshots; clear FK so delete is allowed.
+  await db
+    .update(orders)
+    .set({ menuItemId: null })
+    .where(eq(orders.menuItemId, menuItemId));
   await db
     .delete(dailyMenus)
     .where(and(eq(dailyMenus.id, menuItemId), eq(dailyMenus.cookId, cook.id)));
@@ -1242,4 +1453,164 @@ export async function postCookSavedPlate(
     dayOfWeek: weekly ? dayOfWeek : undefined,
     saveToLibrary: false,
   });
+}
+
+function normalizeTemplateItems(raw: unknown): CookMenuTemplateItem[] {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new Error("Add at least one plate to the template");
+  }
+  if (raw.length > 12) throw new Error("Templates are limited to 12 plates");
+  return raw.map((item, i) => {
+    const row = item as Partial<CookMenuTemplateItem>;
+    const itemName = String(row.itemName ?? "").trim();
+    if (!itemName) throw new Error(`Plate ${i + 1} needs a name`);
+    const pricePaise = Number(row.pricePaise);
+    if (!Number.isFinite(pricePaise) || pricePaise < 1) {
+      throw new Error(`Plate ${i + 1} needs a price`);
+    }
+    return {
+      itemName: itemName.slice(0, 100),
+      itemNameTa: row.itemNameTa?.trim()?.slice(0, 100) || null,
+      pricePaise: Math.round(pricePaise),
+      isVeg: row.isVeg !== false,
+      imageUrl: row.imageUrl?.trim() || null,
+    };
+  });
+}
+
+export async function listCookMenuTemplates(
+  db: Db,
+  cookSlug: string,
+  mealType: MealPeriod = "LUNCH",
+) {
+  const cook = await requireCookBySlug(db, cookSlug);
+  const rows = await db.query.cookMenuTemplates.findMany({
+    where: (t, { eq: e, and: a }) => a(e(t.cookId, cook.id), e(t.mealType, mealType)),
+    orderBy: (t, { asc }) => [asc(t.name)],
+  });
+  return {
+    templates: rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      mealType: r.mealType,
+      items: (r.items ?? []) as CookMenuTemplateItem[],
+      itemCount: Array.isArray(r.items) ? r.items.length : 0,
+      updatedAt: r.updatedAt,
+    })),
+  };
+}
+
+export async function saveCookMenuTemplate(
+  db: Db,
+  cookSlug: string,
+  input: {
+    name: string;
+    mealType?: MealPeriod;
+    items?: CookMenuTemplateItem[];
+    /** Snapshot current day menu into the template. */
+    fromServiceDate?: string | null;
+  },
+) {
+  const cook = await requireCookBySlug(db, cookSlug);
+  const mealType = input.mealType ?? "LUNCH";
+  const name = input.name.trim().slice(0, 80);
+  if (name.length < 2) throw new Error("Template name must be at least 2 characters");
+
+  let items: CookMenuTemplateItem[];
+  if (input.fromServiceDate) {
+    const serviceDate = input.fromServiceDate;
+    const menus = await db.query.dailyMenus.findMany({
+      where: (t, { eq: e, and: a }) =>
+        a(e(t.cookId, cook.id), e(t.mealType, mealType), e(t.serviceDate, serviceDate)),
+    });
+    items = normalizeTemplateItems(
+      menus.map((m) => ({
+        itemName: m.itemName,
+        itemNameTa: m.itemNameTa,
+        pricePaise: m.pricePaise,
+        isVeg: m.isVeg,
+        imageUrl: m.imageUrl,
+      })),
+    );
+  } else {
+    items = normalizeTemplateItems(input.items);
+  }
+
+  const existing = await db.query.cookMenuTemplates.findFirst({
+    where: (t, { eq: e, and: a }) =>
+      a(e(t.cookId, cook.id), e(t.mealType, mealType), e(t.name, name)),
+  });
+  if (existing) {
+    const [updated] = await db
+      .update(cookMenuTemplates)
+      .set({ items, updatedAt: new Date() })
+      .where(eq(cookMenuTemplates.id, existing.id))
+      .returning();
+    return updated;
+  }
+  const [created] = await db
+    .insert(cookMenuTemplates)
+    .values({ cookId: cook.id, name, mealType, items })
+    .returning();
+  return created;
+}
+
+export async function deleteCookMenuTemplate(db: Db, cookSlug: string, templateId: number) {
+  const cook = await requireCookBySlug(db, cookSlug);
+  const existing = await db.query.cookMenuTemplates.findFirst({
+    where: (t, { eq: e, and: a }) => a(e(t.id, templateId), e(t.cookId, cook.id)),
+  });
+  if (!existing) throw new Error("Template not found");
+  await db
+    .delete(cookMenuTemplates)
+    .where(and(eq(cookMenuTemplates.id, templateId), eq(cookMenuTemplates.cookId, cook.id)));
+  return { ok: true as const, id: templateId };
+}
+
+/** One-tap: post every plate in a named template to a date or weekly day. */
+export async function postCookMenuTemplate(
+  db: Db,
+  cookSlug: string,
+  templateId: number,
+  opts: {
+    serviceDate?: string | null;
+    weekly?: boolean;
+    dayOfWeek?: number | null;
+  } = {},
+) {
+  const cook = await requireCookBySlug(db, cookSlug);
+  const template = await db.query.cookMenuTemplates.findFirst({
+    where: (t, { eq: e, and: a }) => a(e(t.id, templateId), e(t.cookId, cook.id)),
+  });
+  if (!template) throw new Error("Template not found");
+  const items = (template.items ?? []) as CookMenuTemplateItem[];
+  if (!items.length) throw new Error("Template has no plates");
+
+  const weekly = Boolean(opts.weekly);
+  const anchorDate = opts.serviceDate || serviceDateISO();
+  const serviceDate = weekly ? null : anchorDate;
+  const dayOfWeek = weekly
+    ? (opts.dayOfWeek ?? weekdayFromISO(anchorDate))
+    : undefined;
+  if (weekly && (dayOfWeek == null || dayOfWeek < 0 || dayOfWeek > 6)) {
+    throw new Error("dayOfWeek required for weekly post");
+  }
+
+  const posted = [];
+  for (const item of items) {
+    posted.push(
+      await addCookMenuItem(db, cookSlug, {
+        itemName: item.itemName,
+        itemNameTa: item.itemNameTa,
+        pricePaise: item.pricePaise,
+        isVeg: item.isVeg,
+        imageUrl: item.imageUrl,
+        mealType: template.mealType as MealPeriod,
+        serviceDate,
+        dayOfWeek: weekly ? dayOfWeek : undefined,
+        saveToLibrary: false,
+      }),
+    );
+  }
+  return { ok: true as const, count: posted.length, items: posted };
 }

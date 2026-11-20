@@ -2,12 +2,15 @@
 
 import Link from "next/link";
 import { useLocale } from "@/components/LocaleProvider";
+import { hideCookOnboard, kitchensBrowseHref } from "@/lib/soloKitchen";
 
 const HERO_IMG =
   "https://images.unsplash.com/photo-1467003909585-2f8a72700288?auto=format&fit=crop&w=2000&q=80";
 
 export default function HomePage() {
   const { t } = useLocale();
+  const browse = kitchensBrowseHref();
+  const showCookCta = !hideCookOnboard();
 
   return (
     <main className="home">
@@ -26,10 +29,10 @@ export default function HomePage() {
           <p className="hero-line">{t("home.tagline")}</p>
           <p className="hero-sub">{t("home.sub")}</p>
           <div className="hero-actions">
-            <Link className="btn mustard" href="/login?role=customer&next=/discover">
+            <Link className="btn mustard" href={`/login?role=customer&next=${encodeURIComponent(browse)}`}>
               {t("home.orderLunch")}
             </Link>
-            <Link className="btn ghost" href="/discover">
+            <Link className="btn ghost" href={browse}>
               {t("home.browse")}
             </Link>
           </div>
@@ -64,13 +67,15 @@ export default function HomePage() {
         </ol>
       </section>
 
-      <section className="home-cook-cta" aria-label="Cook enrollment">
-        <h2 className="home-promise-title">{t("home.cookCtaTitle")}</h2>
-        <p className="muted home-promise-lead">{t("home.cookCtaBody")}</p>
-        <Link className="btn" href="/cook/onboard">
-          {t("home.cookCta")}
-        </Link>
-      </section>
+      {showCookCta ? (
+        <section className="home-cook-cta" aria-label="Cook enrollment">
+          <h2 className="home-promise-title">{t("home.cookCtaTitle")}</h2>
+          <p className="muted home-promise-lead">{t("home.cookCtaBody")}</p>
+          <Link className="btn" href="/cook/onboard">
+            {t("home.cookCta")}
+          </Link>
+        </section>
+      ) : null}
     </main>
   );
 }

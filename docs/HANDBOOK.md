@@ -35,10 +35,10 @@ Product locks: [PRODUCT_DECISIONS.md](./PRODUCT_DECISIONS.md).
 | **Customer** | Web storefront, WhatsApp | Browse LIVE kitchens, order (instant / late / week cart), pay UPI, track status, review after delivery |
 | **Family payer (Child Pays)** | Web `/family`, WA `Family` / `PAY` | Accept invite; pay for senior’s order |
 | **Cook** | `/cook/:slug`, WA Status | Menu (desk **or** WA `Add …`), cut-off, week discount, pickup, cook → pack → dispatch/deliver, reviews reply, payout UPI |
-| **Admin / owner** | `/admin` | Approve cooks, features flags, settlements / Mark paid, tickets, refunds/holds, analytics turnover |
+| **Admin / owner** | `/lm-ops-k7v2m9` (or `NEXT_PUBLIC_ADMIN_PATH`) | Approve cooks, features flags, settlements / Mark paid, tickets, refunds/holds, analytics turnover |
 | **System** | Worker + Scheduler | Outbox WA/pay jobs, lunch cut-off, EOD settlements, retention |
 
-Demo (local seed): customer `+919840111111` · cook desk `/cook/sri-sai` · admin `/admin` · WA sim `/wa`.
+Demo (local seed): customer `+919840111111` · cook desk `/cook/csk-homemade-delights` · ops `/lm-ops-k7v2m9` · WA sim `/wa`.
 
 ---
 
@@ -54,9 +54,9 @@ Demo (local seed): customer `+919840111111` · cook desk `/cook/sri-sai` · admi
 
 ### Cancel
 
-- **Before cut-off:** customer Cancel on My orders (instant). Unpaid / late-pending can cancel anytime.  
+- **Before cut-off:** customer Cancel on My orders (instant). Unpaid → `CANCELLED`. Paid → **auto full refund** (`REFUNDED`, Razorpay partial of that day-line).  
 - **After cut-off (paid):** **Request cancel** → `CANCEL_REQUESTED` → cook **Accept** (full refund) or **Decline** (back to `PAID`). WA: `Cancel requests` (or Status); desk Cancel requests panel.  
-- After cooking started: use **Raise a concern** / Admin.  
+- **Admin:** `POST /orders/:publicId/refund` or `/internal/ops/refunds`. After cooking started: **Raise a concern** / Admin.  
 
 ### Late order
 
@@ -190,6 +190,7 @@ Local defaults: `MOCK_PAYMENTS=true`, `MOCK_WHATSAPP=true`, `MOCK_AUTH=true`.
 | `WEB_ORIGIN` | `http://localhost:3000` | public web URL |
 | `GCS_UPLOADS_BUCKET` | unset (disk) | set (multi-instance Run) |
 | `ADMIN_MOBILES` | seeded admin | owner mobiles |
+| `SOLO_KITCHEN_SLUG` / `NEXT_PUBLIC_SOLO_KITCHEN_SLUG` | unset (multi-cook) | optional temporary single-kitchen launch — see [PENDING.md](./PENDING.md) |
 
 Production boot refuses weak mocks/secrets (`assertProductionConfig`). See [INFRASTRUCTURE.md](./INFRASTRUCTURE.md).
 
@@ -228,7 +229,7 @@ Deploy checklist: [DEPLOY.md](./DEPLOY.md) · Terraform: [infra/terraform/README
 | `kitchen_follow_enabled` | Follow alerts (on) |
 | `eod_settlement_enabled` | EOD job (on) |
 | `pickup_enabled` | Kitchen pickup (**off** until ready) |
-| `partner_delivery_enabled` | Partner rider logistics (**off**; needs cook `deliveryType=PARTNER`) |
+| `partner_delivery_enabled` | Partner rider logistics (**off**; Admin Cooks → Delivery mode PARTNER; desk + confirm UI) |
 
 Incident response: flip flags off in Admin before code rollback when possible ([RUNBOOK.md](./RUNBOOK.md)).
 
@@ -241,6 +242,8 @@ Incident response: flip flags off in Admin before code rollback when possible ([
 | This handbook | [HANDBOOK.md](./HANDBOOK.md) |
 | Ops / incidents | [RUNBOOK.md](./RUNBOOK.md) |
 | Product decisions | [PRODUCT_DECISIONS.md](./PRODUCT_DECISIONS.md) |
+| Roadmap | [ROADMAP.md](./ROADMAP.md) · [MVP3.md](./MVP3.md) |
+| Partner logistics | [LOGISTICS.md](./LOGISTICS.md) |
 | Technical design | [TECHNICAL_DESIGN.md](./TECHNICAL_DESIGN.md) |
 | API routes | [API.md](./API.md) |
 | MVP-2 features | [MVP2.md](./MVP2.md) |

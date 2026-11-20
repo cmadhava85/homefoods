@@ -1,6 +1,5 @@
 import type { Db } from "@localmeals/db";
 import {
-  authEnforced,
   getSessionUserFromRequestAsync,
   requireKitchenStaff,
   requireRole,
@@ -52,13 +51,14 @@ export async function assertOrderKitchenStaff(db: Db, req: AuthedReq, publicId: 
   return { order, cook };
 }
 
-export function bindCustomerMobile(req: AuthedReq, customerMobile: string): string {
-  const user = currentUser(req);
-  if (user?.role === "CUSTOMER") return user.mobile;
-  if (authEnforced()) {
-    requireRole(user, ["CUSTOMER"]);
-  }
-  return customerMobile;
+/**
+ * HTTP order creates always bind to the signed-in CUSTOMER mobile.
+ * Body `customerMobile` is ignored for customers (anti-spoof). Soft AUTH_ENFORCE
+ * no longer allows anonymous / cook / admin to invent a customer mobile on HTTP.
+ */
+export function bindCustomerMobile(req: AuthedReq, _customerMobile?: string): string {
+  const user = requireRole(currentUser(req), ["CUSTOMER"]);
+  return user.mobile;
 }
 
 export type AuthHelpers = {

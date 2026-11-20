@@ -23,7 +23,26 @@ output "sql_instance_name" {
 }
 
 output "pubsub_topics" {
-  value = [for t in google_pubsub_topic.events : t.name]
+  value = var.create_pubsub ? [for t in google_pubsub_topic.events : t.name] : []
+}
+
+output "solo_kitchen_slug" {
+  value       = var.solo_kitchen_slug
+  description = "SOLO_KITCHEN_SLUG on API/web (empty = multi-cook)"
+}
+
+output "cost_profile" {
+  value = {
+    db_tier                = var.db_tier
+    api_min_instances      = var.api_min_instances
+    web_min_instances      = var.web_min_instances
+    worker_min_instances   = var.worker_min_instances
+    create_pubsub          = var.create_pubsub
+    otel_enabled           = var.otel_enabled
+    solo_kitchen_slug      = var.solo_kitchen_slug
+    uploads_delete_days    = var.uploads_delete_days
+    artifact_keep_versions = var.artifact_keep_versions
+  }
 }
 
 output "secret_ids" {

@@ -13,7 +13,7 @@ describe("cook MVP-2 settings", () => {
   const db = createDb();
   const app = buildApp(db);
   let headers: { authorization: string };
-  const slug = "sri-sai";
+  const slug = "csk-homemade-delights";
 
   before(async () => {
     await app.ready();
@@ -94,6 +94,81 @@ describe("cook MVP-2 settings", () => {
     });
     assert.equal(off.statusCode, 200, off.body);
     assert.equal(off.json().pickupEnabled, false);
+  });
+
+  it("toggles intake pause for today", async () => {
+    const on = await app.inject({
+      method: "PATCH",
+      url: `/cooks/${slug}/intake-pause`,
+      headers,
+      payload: { paused: true },
+    });
+    assert.equal(on.statusCode, 200, on.body);
+    assert.equal(on.json().paused, true);
+    assert.ok(on.json().pausedDate);
+
+    const settings = await app.inject({
+      method: "GET",
+      url: `/cooks/${slug}/meal-settings`,
+      headers,
+    });
+    assert.equal(settings.json().intake?.paused, true);
+
+    const off = await app.inject({
+      method: "PATCH",
+      url: `/cooks/${slug}/intake-pause`,
+      headers,
+      payload: { paused: false },
+    });
+    assert.equal(off.statusCode, 200, off.body);
+    assert.equal(off.json().paused, false);
+  });
+
+  it("saves fulfillment offers and named template", async () => {
+    const fulfill = await app.inject({
+      method: "PATCH",
+      url: `/cooks/${slug}/fulfillment`,
+      headers,
+      payload: {
+        cookDelivery: true,
+        customerArrange: true,
+        pickupEnabled: false,
+        pickupLandmark: "Blue gate",
+      },
+    });
+    assert.equal(fulfill.statusCode, 200, fulfill.body);
+    assert.equal(fulfill.json().fulfillmentOffers.customerArrange, true);
+
+    const none = await app.inject({
+      method: "PATCH",
+      url: `/cooks/${slug}/fulfillment`,
+      headers,
+      payload: {
+        cookDelivery: false,
+        customerArrange: false,
+        pickupEnabled: false,
+      },
+    });
+    assert.ok(none.statusCode >= 400, none.body);
+
+    const tpl = await app.inject({
+      method: "POST",
+      url: `/cooks/${slug}/menu-templates`,
+      headers,
+      payload: {
+        name: "Weekday lunch",
+        mealType: "LUNCH",
+        items: [{ itemName: "Sambar rice", pricePaise: 8000, isVeg: true }],
+      },
+    });
+    assert.equal(tpl.statusCode, 201, tpl.body);
+    const list = await app.inject({
+      method: "GET",
+      url: `/cooks/${slug}/menu-templates?meal=LUNCH`,
+      headers,
+    });
+    assert.equal(list.statusCode, 200, list.body);
+    assert.ok((list.json().templates as unknown[]).some((x: { name: string }) => x.name === "Weekday lunch"));
   });
 
   it("desk reviews include soft-launch min", async () => {

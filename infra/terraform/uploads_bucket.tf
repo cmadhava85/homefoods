@@ -14,8 +14,34 @@ resource "google_storage_bucket" "uploads" {
   # Private bucket — API proxies GET /uploads/* with the Run SA.
   public_access_prevention = "enforced"
 
+  dynamic "lifecycle_rule" {
+    for_each = var.uploads_nearline_days > 0 ? [var.uploads_nearline_days] : []
+    content {
+      action {
+        type          = "SetStorageClass"
+        storage_class = "NEARLINE"
+      }
+      condition {
+        age = lifecycle_rule.value
+      }
+    }
+  }
+
+  dynamic "lifecycle_rule" {
+    for_each = var.uploads_delete_days > 0 ? [var.uploads_delete_days] : []
+    content {
+      action {
+        type = "Delete"
+      }
+      condition {
+        age = lifecycle_rule.value
+      }
+    }
+  }
+
   labels = {
-    app = var.name_prefix
+    app  = var.name_prefix
+    cost = "solo-lean"
   }
 
   depends_on = [google_project_service.apis]

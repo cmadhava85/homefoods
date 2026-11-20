@@ -8,6 +8,21 @@ enable_apis = false
 # Admin phone(s) for first AUTH_SECRET / ADMIN_MOBILES seed
 admin_mobiles = "+919900000001"
 
+# --- Solo launch cost profile ---
+solo_kitchen_slug    = "csk-homemade-delights" # "" when multi-cook
+create_pubsub        = false                   # DB outbox only; enable later if needed
+otel_enabled         = false
+worker_min_instances = 1                       # staging idle: 0 (or ./scripts/cost-sleep-staging.sh)
+api_min_instances    = 0
+web_min_instances    = 0
+outbox_poll_ms       = 5000
+db_pool_max_api      = 5
+db_pool_max_worker   = 2
+uploads_nearline_days = 30
+uploads_delete_days   = 180
+artifact_keep_versions = 5
+db_disk_autoresize_limit_gb = 20
+
 # Flip on after first images are in Artifact Registry
 create_cloud_run = false
 # api_image    = "asia-south1-docker.pkg.dev/home-food-513806/localmeals/api:latest"
@@ -27,9 +42,8 @@ auth_enforce  = true
 
 # Optional
 # alert_email        = "you@example.com"   # creates log-based metrics + alert policies
-# otel_enabled       = false
-# otel_exporter_otlp_endpoint = ""         # e.g. https://…/v1/traces
-# confirming_stuck_ms = 900000             # 15m CONFIRMING_PAYMENT scan
+# otel_exporter_otlp_endpoint = ""         # leave empty; keep otel_enabled=false for solo
+# confirming_stuck_ms = 900000
 # api_custom_domain  = "api.localmeals.in"
 # web_custom_domain  = "app.localmeals.in"
 # create_tf_state_bucket = true

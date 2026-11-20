@@ -24,3 +24,8 @@ Follow `docs/PRODUCT_DECISIONS.md`. Summary:
 
 ## Week discounts (when building later)
 - Cook-controlled optional % for N+ days; no coupon stacks; keep simple
+
+## Roadmap (see docs/ROADMAP.md)
+- MVP-2 polish: cook sold-out toggle, fulfillment toggles, weekly templates, FSSAI enroll help, opt-in lean WA status
+- MVP-3: party/bulk catering (MOQ, 48–72h cut-off, 50% advance) — only after lunch pin is stable
+- Keep customer WA lean by default; no full-time rider fleet in near term

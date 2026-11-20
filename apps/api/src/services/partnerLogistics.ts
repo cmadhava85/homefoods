@@ -57,28 +57,66 @@ export async function dispatchViaPartner(
     notes: `${order.qty}× ${order.itemName}`,
   });
 
-  let updated = await transitionOrder(db, order.id, "ASSIGNING_RIDER", {
+  // Stay on ASSIGNING_RIDER so cook/customer can see “Finding rider”.
+  // Mock / webhook / cook “Rider assigned” advances to DISPATCHED.
+  const trackingUrl =
+    shipment.trackingUrl?.trim() ||
+    partnerTrackingUrl(shipment.partnerShipmentId);
+
+  const updated = await transitionOrder(db, order.id, "ASSIGNING_RIDER", {
     logisticsMode: "PARTNER",
     partnerShipmentId: shipment.partnerShipmentId,
+    partnerTrackingUrl: trackingUrl,
   });
 
-  // Mock (and some vendors) assign immediately — move to on-the-way.
-  if (shipment.status === "ASSIGNED" || isMockLogistics()) {
-    if (isMockLogistics() && logistics.name === "mock") {
-      const mock = logistics as {
-        setStatus?: (id: string, s: "ASSIGNED") => void;
-      };
-      mock.setStatus?.(shipment.partnerShipmentId, "ASSIGNED");
-    }
-    updated = await transitionOrder(db, order.id, "DISPATCHED");
+  if (isMockLogistics() && logistics.name === "mock") {
+    const mock = logistics as {
+      setStatus?: (id: string, s: "CREATED") => void;
+    };
+    mock.setStatus?.(shipment.partnerShipmentId, "CREATED");
   }
 
   return {
     order: updated,
     partnerShipmentId: shipment.partnerShipmentId,
-    trackingUrl: shipment.trackingUrl ?? null,
+    trackingUrl,
     status: updated.status,
   };
+}
+
+/** Tracking link for UI (stored URL preferred, else mock placeholder). */
+export function partnerTrackingUrl(
+  partnerShipmentId: string | null | undefined,
+  storedUrl?: string | null,
+): string | null {
+  if (storedUrl?.trim()) return storedUrl.trim();
+  if (!partnerShipmentId) return null;
+  return `https://localmeals.local/track/${partnerShipmentId}`;
+}
+
+/** Cook desk / mock: rider found → on the way. */
+export async function confirmPartnerRiderAssigned(
+  db: Db,
+  publicId: string,
+  opts: { cookId?: string } = {},
+) {
+  const order = await db.query.orders.findFirst({
+    where: (t, { eq: e }) => e(t.publicId, publicId),
+  });
+  if (!order) throw new Error("Order not found");
+  if (opts.cookId && order.cookId !== opts.cookId) {
+    throw new Error("That order is not for your kitchen");
+  }
+  if (order.status !== "ASSIGNING_RIDER") {
+    throw new Error("Order is not waiting for a rider");
+  }
+  if (!order.partnerShipmentId || order.logisticsMode !== "PARTNER") {
+    throw new Error("Order is not on partner delivery");
+  }
+  return applyPartnerShipmentUpdate(db, {
+    partnerShipmentId: order.partnerShipmentId,
+    status: "ASSIGNED",
+  });
 }
 
 /** Apply partner webhook / poll result onto an order. */
@@ -87,6 +125,7 @@ export async function applyPartnerShipmentUpdate(
   input: {
     partnerShipmentId: string;
     status: "CREATED" | "ASSIGNED" | "PICKED_UP" | "DELIVERED" | "FAILED";
+    trackingUrl?: string | null;
   },
 ) {
   const order = await db.query.orders.findFirst({
@@ -94,9 +133,14 @@ export async function applyPartnerShipmentUpdate(
   });
   if (!order) throw new Error("Order not found for partner shipment");
 
+  const trackingPatch =
+    input.trackingUrl?.trim()
+      ? { partnerTrackingUrl: input.trackingUrl.trim() }
+      : {};
+
   if (input.status === "FAILED") {
     if (order.status === "ASSIGNING_RIDER" || order.status === "DISPATCHED") {
-      return transitionOrder(db, order.id, "LOGISTICS_EXCEPTION");
+      return transitionOrder(db, order.id, "LOGISTICS_EXCEPTION", trackingPatch);
     }
     return order;
   }
@@ -105,18 +149,18 @@ export async function applyPartnerShipmentUpdate(
     (input.status === "ASSIGNED" || input.status === "PICKED_UP") &&
     order.status === "ASSIGNING_RIDER"
   ) {
-    return transitionOrder(db, order.id, "DISPATCHED");
+    return transitionOrder(db, order.id, "DISPATCHED", trackingPatch);
   }
 
   if (input.status === "DELIVERED" && order.status !== "DELIVERED") {
     if (order.status === "ASSIGNING_RIDER") {
-      await transitionOrder(db, order.id, "DISPATCHED");
+      await transitionOrder(db, order.id, "DISPATCHED", trackingPatch);
     }
     const current = await db.query.orders.findFirst({
       where: (t, { eq: e }) => e(t.id, order.id),
     });
     if (current && (current.status === "DISPATCHED" || current.status === "DELAYED")) {
-      return transitionOrder(db, order.id, "DELIVERED");
+      return transitionOrder(db, order.id, "DELIVERED", trackingPatch);
     }
   }
 

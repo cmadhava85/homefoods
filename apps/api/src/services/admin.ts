@@ -82,6 +82,52 @@ export async function holdSettlement(db: Db, orderId: number, reason: string) {
   return updated;
 }
 
+/** Week cart: CHARGE often sits on the first day-line; siblings share gatewayTxnId. */
+async function resolveChargePayment(db: Db, order: typeof orders.$inferSelect) {
+  const onOrder = await db.query.payments.findFirst({
+    where: (t, { eq: e, and: a }) => a(e(t.orderId, order.id), e(t.kind, "CHARGE")),
+  });
+  if (onOrder) return onOrder;
+
+  if (order.gatewayTxnId) {
+    const byTxn = await db.query.payments.findFirst({
+      where: (t, { eq: e, and: a }) =>
+        a(e(t.gatewayTxnId, order.gatewayTxnId!), e(t.kind, "CHARGE")),
+    });
+    if (byTxn) return byTxn;
+  }
+
+  if (order.checkoutId) {
+    const siblings = await db.query.orders.findMany({
+      where: (t, { eq: e }) => e(t.checkoutId, order.checkoutId!),
+      columns: { id: true },
+    });
+    for (const sib of siblings) {
+      const row = await db.query.payments.findFirst({
+        where: (t, { eq: e, and: a }) => a(e(t.orderId, sib.id), e(t.kind, "CHARGE")),
+      });
+      if (row) return row;
+    }
+  }
+  return null;
+}
+
+export async function refundOrderByPublicId(
+  db: Db,
+  publicId: string,
+  input: {
+    mode: "FULL" | "FOOD_ONLY";
+    reason: string;
+    ticketId?: number;
+  },
+) {
+  const order = await db.query.orders.findFirst({
+    where: (t, { eq: e }) => e(t.publicId, publicId),
+  });
+  if (!order) throw new Error("Order not found");
+  return refundOrder(db, { orderId: order.id, ...input });
+}
+
 export async function refundOrder(
   db: Db,
   input: {
@@ -105,10 +151,7 @@ export async function refundOrder(
         order.platformFeePaise
       : Math.max(0, order.foodPaise * order.qty - (order.foodDiscountPaise ?? 0));
 
-  const charge = await db.query.payments.findFirst({
-    where: (t, { eq: e, and: a }) =>
-      a(e(t.orderId, order.id), e(t.kind, "CHARGE")),
-  });
+  const charge = await resolveChargePayment(db, order);
   const chargePayload = (charge?.rawPayload ?? {}) as { razorpayPaymentId?: string };
   const pay = getPaymentProvider();
   const paymentRef =
@@ -186,6 +229,24 @@ export async function refundOrder(
       refundId: gatewayRefund?.refundId ?? null,
     });
 
+  const { recordOrderActivity } = await import("./orderActivity.js");
+  await recordOrderActivity(db, {
+    orderId: order.id,
+    customerMobile: order.customerMobile,
+    cookId: order.cookId,
+    channel: input.ticketId != null || /admin/i.test(input.reason) ? "ADMIN" : "SYSTEM_CRON",
+    eventName: "ORDER_REFUNDED",
+    payload: {
+      mode: input.mode,
+      reason: input.reason,
+      amountPaise,
+      refundId: gatewayRefund?.refundId ?? null,
+      paymentRef,
+      ticketId: input.ticketId ?? null,
+      fromStatus: order.status,
+    },
+  });
+
   // If cook already received this plate in an EOD batch, queue food for next-EOD netting.
   const { enqueueCookClawback } = await import("./cookClawback.js");
   const clawback = await enqueueCookClawback(db, {
@@ -230,6 +291,7 @@ export async function adminSetCookPayoutDetails(
     payoutBeneficiaryRef?: string | null;
     pickupLandmark?: string | null;
     pickupEnabled?: boolean;
+    deliveryType?: "SELF" | "PARTNER";
   },
 ) {
   const cook = await db.query.cookProfiles.findFirst({
@@ -243,6 +305,7 @@ export async function adminSetCookPayoutDetails(
     payoutBeneficiaryRef?: string | null;
     pickupLandmark?: string | null;
     pickupEnabled?: boolean;
+    deliveryType?: "SELF" | "PARTNER";
   } = {};
 
   if (input.payoutUpiId !== undefined) {
@@ -263,6 +326,9 @@ export async function adminSetCookPayoutDetails(
   }
   if (input.pickupEnabled !== undefined) {
     patch.pickupEnabled = Boolean(input.pickupEnabled);
+  }
+  if (input.deliveryType !== undefined) {
+    patch.deliveryType = input.deliveryType;
   }
 
   const [updated] = await db

@@ -9,8 +9,10 @@
     "src/lib/**/*.ts",
     "!src/lib/**/*.test.ts",
     "!src/lib/api.ts",
-    "!src/lib/auth.ts"
+    "!src/lib/auth.ts",
+    "!src/lib/features.ts"
   ],
+  "ignoreMethods": ["useFeatureFlags"],
   "ignorePatterns": [
     ".next",
     "reports",

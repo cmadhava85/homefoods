@@ -12,7 +12,7 @@ Product scope from [PRODUCT_DECISIONS.md](./PRODUCT_DECISIONS.md) and [TECHNICAL
 | **Child Pays** | **Complete** — `/family` web + WA `Family` / `Accept family` + `PAY <mobile>` on Order/Week/Late |
 | **Post–cut-off cancel request** | **Complete** — paid order after cut-off → `CANCEL_REQUESTED`; cook Accept (full refund) / Decline (back to `PAID`); WA + desk |
 | **Cook WA menu post** | **Complete** — `Add <dish> <₹> [nonveg]` + optional photo; `My menu`; desk remains fallback |
-| Shadowfax / partner delivery | **Scaffolded** — `ASSIGNING_RIDER`, `orders.partner_shipment_id`, flag `partner_delivery_enabled` (default OFF), mock provider (`MOCK_LOGISTICS`), `POST /webhooks/logistics`. Real Shadowfax adapter still needs vendor contract |
+| Shadowfax / partner delivery | **Mock + HTTP provider** — Admin flag + cook PARTNER mode; desk/customer UI; `HttpLogisticsProvider` via `LOGISTICS_API_BASE_URL`; webhook HMAC/secret. Thin gateway — [Shadowfax](./LOGISTICS.md#shadowfax-hyperlocal-marketplace--step-by-step) · backup [Porter](./LOGISTICS.md#porter-backup-partner--step-by-step) |
 | IVR (Exotel/Twilio) | Adapter stub only (`packages/adapters/src/ivr.ts`) — needs vendor |
 
 ## Reviews behaviour
@@ -65,15 +65,33 @@ See [PENDING.md](./PENDING.md) for full backlog.
 
 ## Partner delivery (how to try locally)
 
-1. Migrate through `0024_partner_delivery`  
+Full guide: [LOGISTICS.md](./LOGISTICS.md).
+
+1. Migrate through `0024_partner_delivery` + `0026_partner_tracking_url`  
 2. Admin → Features → enable **Partner delivery**  
-3. Set cook `delivery_type = PARTNER` (DB or Admin cooks tooling)  
-4. Keep `MOCK_LOGISTICS` unset/true → dispatch creates `shp_mock_…` and moves PACKED → ASSIGNING_RIDER → DISPATCHED  
-5. Webhook: `POST /webhooks/logistics` `{ partnerShipmentId, status }` (+ `X-Logistics-Secret` when set)
+3. Admin → Cooks → **Delivery mode** = Partner rider → Save  
+4. Cook desk → Pack → **Dispatched** → order shows **Finding rider** + shipment id  
+5. Cook taps **Rider assigned** (or `POST /webhooks/logistics`) → on the way  
+6. Customer: order confirmed / My orders shows partner logistics card  
+7. Local: `MOCK_LOGISTICS=true`. Real: `MOCK_LOGISTICS=false` + `LOGISTICS_API_BASE_URL` + webhook secret  
+
+
+## Cook desk polish (shipped)
+
+| Slice | Notes |
+|-------|--------|
+| Pause today’s intake | Desk green/red toggle → `PATCH /cooks/:slug/intake-pause`; date-scoped; auto-clears next day |
+| Fulfillment offers | Cook delivery · pickup · customer arranges (`PATCH /cooks/:slug/fulfillment`); checkout modes `DELIVERY` / `PICKUP` / `CUSTOMER_ARRANGE` |
+| Named meal plans | `cook_menu_templates` + desk one-tap post (`/cooks/:slug/menu-templates`) |
+| FSSAI enroll help | Checklist + FoSCoS link on `/cook/onboard` |
+| Lean WA status (opt-in) | Admin flag `lean_wa_status_enabled` (default OFF) + My orders preference; COOKING / Ready pings only when opted in |
+
+Migration: `0027_mvp2_polish.sql`.
 
 ## Next recommended
 
-1. Migrate Cloud SQL through latest (`0024+`) and deploy api/web/worker  
-2. Turn on Admin → Features `pickup_enabled` when cooks have landmarks  
-3. Wire real Shadowfax (or Porter) behind `LogisticsProvider` when contracted; then IVR after volume
+1. Deploy api/web/worker with polish + migrate `0027`  
+2. Turn on Admin → Features `pickup_enabled` / `lean_wa_status_enabled` when ready  
+3. Wire real Shadowfax (or Porter) behind `LogisticsProvider` when contracted; then IVR after volume  
+4. **MVP-3** party / bulk catering when lunch pin is stable — [MVP3.md](./MVP3.md)
  

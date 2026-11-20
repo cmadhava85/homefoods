@@ -50,9 +50,9 @@ Thresholds are advisory (`break: null`) so mutation runs don’t fail CI while y
 
 | Package | Mutation score | Notes |
 |---------|----------------|-------|
-| `@localmeals/domain` | **90.4%** | cookGates / reviews / weekDiscount at 100% |
-| `@localmeals/api` (default) | **74.4%** | Pure helpers; DB/GCS I/O in `getTurnoverReport` / `uploadsIo` not mutated |
-| `@localmeals/web` | **92.5%** | `src/lib/**` helpers only |
+| `@localmeals/domain` | **91.7%** | cookGates / featureFlags / money / orderState / reviews / weekDiscount at 100%; cutoff + orderPaidNotify hold remaining survivors (mostly equivalent string/date mutants) |
+| `@localmeals/api` (default) | **75.0%** | Pure helpers; remaining survivors are mostly magic-byte / regex-equivalent mutants in `uploads` + `httpErrors`, plus `turnoverReports` formatting. WA handlers (`src/wa/**`) are **not** in the default mutate set |
+| `@localmeals/web` | **89.7%** | `src/lib/**` helpers; React `features.ts` hook excluded from mutate (tested `flagOn` separately) |
 
 ## CI
 

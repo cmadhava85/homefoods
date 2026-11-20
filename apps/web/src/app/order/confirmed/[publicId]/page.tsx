@@ -8,6 +8,20 @@ import {
   type ConfirmedOrderView,
 } from "./ConfirmedClient";
 
+function shouldRedirectToPay(view: {
+  status: string;
+  awaitingFamilyPay?: boolean | null;
+  paymentUrl?: string;
+  gatewayTxnId?: string | null;
+}): boolean {
+  const pending =
+    view.status === "AWAITING_PAYMENT" || view.status === "CONFIRMING_PAYMENT";
+  if (!pending) return false;
+  // Child Pays: senior waits on confirmed; payer/open links still go to UPI.
+  if (view.awaitingFamilyPay) return false;
+  return true;
+}
+
 export default async function ConfirmedPage({
   params,
 }: {
@@ -17,9 +31,11 @@ export default async function ConfirmedPage({
   const isCheckout = publicId.startsWith("CHK-");
 
   if (isCheckout) {
-    const checkout = await api<ConfirmedCheckoutView>(`/checkouts/${publicId}`);
+    const checkout = await api<
+      ConfirmedCheckoutView & { awaitingFamilyPay?: boolean }
+    >(`/checkouts/${publicId}`);
 
-    if (checkout.status === "AWAITING_PAYMENT" || checkout.status === "CONFIRMING_PAYMENT") {
+    if (shouldRedirectToPay(checkout)) {
       if (isExternalPaymentUrl(checkout.paymentUrl)) {
         redirect(checkout.paymentUrl!);
       }
@@ -29,9 +45,11 @@ export default async function ConfirmedPage({
     return <ConfirmedCheckoutClient checkout={checkout} />;
   }
 
-  const order = await api<ConfirmedOrderView>(`/orders/${publicId}`);
+  const order = await api<ConfirmedOrderView & { awaitingFamilyPay?: boolean }>(
+    `/orders/${publicId}`,
+  );
 
-  if (order.status === "AWAITING_PAYMENT" || order.status === "CONFIRMING_PAYMENT") {
+  if (shouldRedirectToPay(order)) {
     if (isExternalPaymentUrl(order.paymentUrl)) {
       redirect(order.paymentUrl!);
     }

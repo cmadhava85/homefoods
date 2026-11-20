@@ -14,7 +14,7 @@ LocalMeals is a hyper-local **Zero-UI** food platform for Tamil Nadu home kitche
 - **Customers** order via web, WhatsApp, or IVR (seniors)
 - **Cooks** operate mainly via WhatsApp (+ light web desk)
 - **Family (Child Pays)** approves UPI for parents
-- **Owner** resolves disputes via `/admin`
+- **Owner** resolves disputes via the obscure ops console path (default `/lm-ops-k7v2m9`)
 - **Delivery partners** (later) use *their* apps; we integrate via API/webhooks
 
 This document describes **architecture, components, data flows, and implementation boundaries** so a developer can implement without re-deriving decisions from the long product blueprint.
@@ -158,7 +158,7 @@ flowchart TB
 
 | Container | Responsibility |
 |-----------|----------------|
-| **Next.js** | Customer discover/storefront, Child-Pays, cook light desk, `/admin` |
+| **Next.js** | Customer discover/storefront, Child-Pays, cook light desk, ops console |
 | **API** | Authz, commands/queries, webhook verify + fast ACK, write DB + outbox |
 | **Worker** | Notifications, cut-off freeze side-effects, refunds, EOD settlement, partner calls |
 | **Postgres** | System of record (orders, money, ledgers, geo) |
@@ -499,8 +499,10 @@ Later / not MVP-1:
 | Phase | Scope |
 |-------|-------|
 | **MVP-1** | One pin, lunch, web+WA, SELF delivery, cut-offs, UPI, EOD settle, KYC/FSSAI, admin refunds/tickets |
-| **MVP-2** | IVR + Child-Pays hardening, partner delivery APIs, ratings throttle |
-| **MVP-3** | Pantry shipping, tiffin loop, catering RFQ |
+| **MVP-2** | Reviews, week discount, pickup, Child Pays (shipped); cook sold-out toggle; fulfillment toggles; weekly templates; FSSAI enroll help; opt-in WA status; partner delivery APIs; IVR |
+| **MVP-3** | Party/bulk catering (MOQ, 48–72h cut-off, 50% advance UPI); catering RFQ; radius/PostGIS; pantry; tiffin loop |
+
+Product roadmap detail: [ROADMAP.md](./ROADMAP.md) · [MVP3.md](./MVP3.md).
 
 Prototype shortcut (optional): Next.js + managed Postgres for UI/pilot — **move money workers to Cloud Run before scale**.
 
@@ -525,7 +527,7 @@ Prototype shortcut (optional): Next.js + managed Postgres for UI/pilot — **mov
 - Customer can pay once; double-tap cannot double-charge  
 - After cut-off, cook receives **one** manifest  
 - EOD produces one clean cook credit (or explicit failure + retry)  
-- Owner can refund/hold from `/admin` with audit log  
+- Owner can refund/hold from the ops console with audit log  
 - Cook cannot go LIVE without FSSAI + payout details (UPI / bank note; Route optional while blocked)  
 
 ---

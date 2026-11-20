@@ -162,6 +162,25 @@ export default function CookOnboardPage() {
             disabled={busy}
           />
         </label>
+        <details className="onboard-fssai-help">
+          <summary>{t("onboard.fssaiHelpTitle")}</summary>
+          <p className="muted">{t("onboard.fssaiHelpLead")}</p>
+          <ol className="onboard-points">
+            <li>{t("onboard.fssaiStep1")}</li>
+            <li>{t("onboard.fssaiStep2")}</li>
+            <li>{t("onboard.fssaiStep3")}</li>
+            <li>{t("onboard.fssaiStep4")}</li>
+          </ol>
+          <p>
+            <a
+              href="https://foscos.fssai.gov.in/"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {t("onboard.fssaiLink")}
+            </a>
+          </p>
+        </details>
         <label className="order-field" style={{ marginTop: "0.65rem" }}>
           {t("onboard.upi")}
           <input

@@ -84,7 +84,8 @@ export const users = pgTable("users", {
   primaryAddress: text("primary_address").notNull(),
   officeAddress: text("office_address"),
   pinCode: varchar("pin_code", { length: 6 }),
-  consents: jsonb("consents").$type<Record<string, boolean>>().default({}).notNull(),
+  /** Opt-ins + audit (e.g. leanWaStatus, menuWaAlerts, menuWaAlertsAt). */
+  consents: jsonb("consents").$type<Record<string, unknown>>().default({}).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -150,6 +151,15 @@ export const cookProfiles = pgTable("cook_profiles", {
   pickupLandmark: text("pickup_landmark"),
   /** Cook opts into pickup when platform `pickup_enabled` flag is on. */
   pickupEnabled: boolean("pickup_enabled").default(false).notNull(),
+  /**
+   * When set to a service date (YYYY-MM-DD), kitchen rejects new intake for that day only.
+   * Clears automatically the next calendar day (no cron).
+   */
+  intakePausedDate: varchar("intake_paused_date", { length: 10 }),
+  /** Cook / family delivers (SELF Maps). Default on. */
+  offerCookDelivery: boolean("offer_cook_delivery").default(true).notNull(),
+  /** Customer arranges their own auto / porter — ₹0 platform delivery. */
+  offerCustomerArrange: boolean("offer_customer_arrange").default(false).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -301,6 +311,8 @@ export const orders = pgTable(
     logisticsMode: logisticsModeEnum("logistics_mode").default("SELF").notNull(),
     /** Partner shipment id when logisticsMode=PARTNER. */
     partnerShipmentId: varchar("partner_shipment_id", { length: 100 }),
+    /** Vendor tracking URL snapshot at create / last webhook. */
+    partnerTrackingUrl: text("partner_tracking_url"),
     deliveryTargetAddress: text("delivery_target_address").notNull(),
     channel: platformChannelEnum("channel").default("WEB_STOREFRONT").notNull(),
     /** Shared id when several day-lines are paid in one checkout (CHK-xxxx). */
@@ -547,6 +559,34 @@ export const cookSavedPlates = pgTable(
   (t) => [
     uniqueIndex("cook_saved_plates_cook_meal_name_uidx").on(t.cookId, t.mealType, t.itemName),
     index("cook_saved_plates_cook_idx").on(t.cookId),
+  ],
+);
+
+export type CookMenuTemplateItem = {
+  itemName: string;
+  itemNameTa?: string | null;
+  pricePaise: number;
+  isVeg: boolean;
+  imageUrl?: string | null;
+};
+
+/** Named multi-plate plans (e.g. “Weekday lunch”) posted in one tap. */
+export const cookMenuTemplates = pgTable(
+  "cook_menu_templates",
+  {
+    id: serial("id").primaryKey(),
+    cookId: uuid("cook_id")
+      .notNull()
+      .references(() => cookProfiles.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 80 }).notNull(),
+    mealType: mealPeriodEnum("meal_type").default("LUNCH").notNull(),
+    items: jsonb("items").$type<CookMenuTemplateItem[]>().notNull().default([]),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("cook_menu_templates_cook_meal_name_uidx").on(t.cookId, t.mealType, t.name),
+    index("cook_menu_templates_cook_idx").on(t.cookId),
   ],
 );
 

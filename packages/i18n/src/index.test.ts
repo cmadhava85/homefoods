@@ -21,7 +21,9 @@ describe("parseLocale", () => {
 describe("t", () => {
   it("interpolates and falls back", () => {
     assert.match(t("en", "pay.mockCta", { amount: "120" }), /₹120/);
-    assert.match(t("ta", "nav.account"), /கணக்கு/);
+    // Everyday Tamil keeps common EN product words (Account, Orders, Login…).
+    assert.equal(t("ta", "nav.account"), "Account");
+    assert.match(t("ta", "home.tagline"), /lunch/);
   });
 });
 

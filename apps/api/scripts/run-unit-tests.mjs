@@ -7,7 +7,9 @@ const files = [
   "src/httpErrors.test.ts",
   "src/prodConfig.test.ts",
   "src/http/orderViews.test.ts",
+  "src/http/orderOwnership.test.ts",
   "src/uploads.test.ts",
+  "src/soloKitchen.test.ts",
   "src/services/turnoverReports.test.ts",
   "src/services/publicCookDto.test.ts",
 ];

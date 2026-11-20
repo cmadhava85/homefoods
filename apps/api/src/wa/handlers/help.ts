@@ -21,7 +21,7 @@ export async function handleHelp(s: WaSession): Promise<object> {
       await wa.send({
         to: from,
         body: wt("wa.helpBody", { id: ticket.id }),
-        buttons: ["Menu", "Family", "Week sri-sai"],
+        buttons: ["Menu", "Family", "Week csk-homemade-delights"],
       });
       return { ok: true, intent, ticketId: ticket.id, replies: replies() };
     });

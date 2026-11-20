@@ -14,6 +14,8 @@ resource "google_sql_database_instance" "postgres" {
     availability_type = "ZONAL"
     disk_size         = var.db_disk_size_gb
     disk_autoresize   = true
+    # Solo launch: stop unbounded disk growth on f1-micro.
+    disk_autoresize_limit = var.db_disk_autoresize_limit_gb
 
     backup_configuration {
       enabled    = true

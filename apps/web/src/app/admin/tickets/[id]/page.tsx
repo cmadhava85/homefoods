@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useLocale } from "@/components/LocaleProvider";
 import { authFetch } from "@/lib/auth";
+import { adminHref } from "@/lib/adminPath";
 import { type MsgKey } from "@localmeals/i18n";
 
 type TicketDetail = {
@@ -171,7 +172,7 @@ function TicketDetailInner() {
   return (
     <main>
       <p className="muted">
-        <Link href="/admin">{t("admin.back")}</Link>
+        <Link href={adminHref()}>{t("admin.back")}</Link>
       </p>
       <h1>{t("admin.ticket", { id: ticket.id })}</h1>
       <p>{ticket.summary}</p>

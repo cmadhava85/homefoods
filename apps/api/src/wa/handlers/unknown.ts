@@ -19,7 +19,7 @@ export async function handleUnknown(s: WaSession): Promise<object> {
         : wt("wa.unknownCustomer"),
       buttons: cookSender
         ? ["Status", "Cancel requests", "My menu"]
-        : ["Menu", "Orders", "Week sri-sai"],
+        : ["Menu", "Orders", "Week csk-homemade-delights"],
     });
     return { ok: true, intent: "UNKNOWN", replies: replies() };
   });

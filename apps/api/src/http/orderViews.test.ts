@@ -25,7 +25,7 @@ const order = {
 
 describe("orderAudience", () => {
   it("is public without a session", () => {
-    assert.equal(orderAudience(null, order, "sri-sai"), "public");
+    assert.equal(orderAudience(null, order, "csk-homemade-delights"), "public");
   });
 
   it("is owner for matching customer", () => {
@@ -34,7 +34,7 @@ describe("orderAudience", () => {
       role: "CUSTOMER",
       fullName: "A",
     };
-    assert.equal(orderAudience(user, order, "sri-sai"), "owner");
+    assert.equal(orderAudience(user, order, "csk-homemade-delights"), "owner");
   });
 
   it("is owner for matching payer", () => {
@@ -43,7 +43,7 @@ describe("orderAudience", () => {
       role: "CUSTOMER",
       fullName: "Payer",
     };
-    assert.equal(orderAudience(user, order, "sri-sai"), "owner");
+    assert.equal(orderAudience(user, order, "csk-homemade-delights"), "owner");
   });
 
   it("is staff for matching cook", () => {
@@ -51,9 +51,9 @@ describe("orderAudience", () => {
       mobile: "+919876543210",
       role: "COOK",
       fullName: "Cook",
-      cookSlug: "sri-sai",
+      cookSlug: "csk-homemade-delights",
     };
-    assert.equal(orderAudience(user, order, "sri-sai"), "staff");
+    assert.equal(orderAudience(user, order, "csk-homemade-delights"), "staff");
   });
 
   it("is staff for admin", () => {
@@ -62,7 +62,7 @@ describe("orderAudience", () => {
       role: "ADMIN",
       fullName: "Admin",
     };
-    assert.equal(orderAudience(user, order, "sri-sai"), "staff");
+    assert.equal(orderAudience(user, order, "csk-homemade-delights"), "staff");
   });
 
   it("is public for wrong cook or unrelated customer", () => {
@@ -72,13 +72,13 @@ describe("orderAudience", () => {
       fullName: "Cook",
       cookSlug: "other-kitchen",
     };
-    assert.equal(orderAudience(cook, order, "sri-sai"), "public");
+    assert.equal(orderAudience(cook, order, "csk-homemade-delights"), "public");
     const customer: SessionUser = {
       mobile: "+919333333333",
       role: "CUSTOMER",
       fullName: "X",
     };
-    assert.equal(orderAudience(customer, order, "sri-sai"), "public");
+    assert.equal(orderAudience(customer, order, "csk-homemade-delights"), "public");
     assert.equal(orderAudience(cook, order, null), "public");
   });
 });

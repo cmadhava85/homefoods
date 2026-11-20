@@ -6,10 +6,13 @@ import { CancelOrderButton } from "@/components/CancelOrderButton";
 import { RequireAuth } from "@/components/RequireAuth";
 import { ReviewForm } from "@/components/ReviewForm";
 import { useLocale } from "@/components/LocaleProvider";
+import { API_BASE } from "@/lib/api";
 import { authFetch } from "@/lib/auth";
 import { isExternalPaymentUrl, payPageHref } from "@/lib/payments";
 import { customerStatusLabel, statusTone } from "@/lib/orderStatus";
 import { localizedDishName, type MsgKey } from "@localmeals/i18n";
+import { kitchenOrderHref } from "@/lib/kitchenHref";
+import { kitchensBrowseHref } from "@/lib/soloKitchen";
 
 type HistoryOrder = {
   id: number;
@@ -31,6 +34,10 @@ type HistoryOrder = {
   deliveryWindow?: string | null;
   kitchenName: string | null;
   cookSlug: string | null;
+  logisticsMode?: string | null;
+  kitchenDeliveryType?: string | null;
+  partnerShipmentId?: string | null;
+  partnerTrackingUrl?: string | null;
   canReorder?: boolean;
   paymentUrl?: string;
   gatewayTxnId?: string | null;
@@ -73,6 +80,7 @@ const CONCERN_STATUSES = new Set([
   "PAID",
   "COOKING",
   "PACKED",
+  "ASSIGNING_RIDER",
   "DISPATCHED",
   "DELIVERED",
   "DELAYED",
@@ -163,6 +171,9 @@ function OrdersInner() {
   const [concernText, setConcernText] = useState("");
   const [concernPhotoUrl, setConcernPhotoUrl] = useState<string | null>(null);
   const [concernPhotoName, setConcernPhotoName] = useState<string | null>(null);
+  const [leanWaStatus, setLeanWaStatus] = useState(false);
+  const [leanWaPlatformOn, setLeanWaPlatformOn] = useState(false);
+  const [savingLeanWa, setSavingLeanWa] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -179,6 +190,43 @@ function OrdersInner() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    authFetch("/me/profile")
+      .then(async (r) => {
+        const json = await r.json();
+        if (!r.ok) return;
+        setLeanWaStatus(Boolean(json.leanWaStatus));
+      })
+      .catch(() => undefined);
+    fetch(`${API_BASE}/meta/features`)
+      .then(async (r) => (r.ok ? r.json() : null))
+      .then((json: { flags?: Record<string, boolean> } | null) => {
+        if (json?.flags && typeof json.flags.lean_wa_status_enabled === "boolean") {
+          setLeanWaPlatformOn(Boolean(json.flags.lean_wa_status_enabled));
+        }
+      })
+      .catch(() => undefined);
+  }, []);
+
+  async function toggleLeanWa() {
+    setSavingLeanWa(true);
+    setErr(null);
+    try {
+      const res = await authFetch("/me/profile", {
+        method: "PATCH",
+        body: JSON.stringify({ leanWaStatus: !leanWaStatus }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Could not save preference");
+      setLeanWaStatus(Boolean(json.leanWaStatus));
+      setMsg(t("orders.leanWaSaved"));
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setSavingLeanWa(false);
+    }
+  }
 
   async function uploadConcernPhoto(publicId: string, file: File) {
     setBusyId(`photo-${publicId}`);
@@ -390,6 +438,16 @@ function OrdersInner() {
                 {t("orders.childPaysLine", { mobile: o.payerMobile })}
               </p>
             ) : null}
+            {o.kitchenDeliveryType === "PARTNER" ||
+            o.logisticsMode === "PARTNER" ||
+            o.status === "ASSIGNING_RIDER" ? (
+              <p className="order-row-note">
+                {o.status === "ASSIGNING_RIDER"
+                  ? t("confirmed.partnerFinding")
+                  : t("confirmed.deliveredByPartner")}
+                {o.partnerShipmentId ? ` · ${o.partnerShipmentId}` : ""}
+              </p>
+            ) : null}
           </div>
           <div className="order-row-aside">
             <div className="order-row-price">₹{(o.totalPaise / 100).toFixed(0)}</div>
@@ -406,7 +464,15 @@ function OrdersInner() {
               {t("common.details")}
             </Link>
             {showReorder ? (
-              <Link className="order-action-link" href={`/kitchen/${o.cookSlug}`}>
+              <Link
+                className="order-action-link"
+                href={kitchenOrderHref({
+                  slug: o.cookSlug!,
+                  mealType: o.mealType,
+                  afterServiceDate: o.serviceDate,
+                  again: true,
+                })}
+              >
                 {t("orders.reorder")}
               </Link>
             ) : null}
@@ -419,7 +485,9 @@ function OrdersInner() {
                 setMsg(
                   mode === "cancel_requested"
                     ? t("orders.cancelRequested", { id: o.publicId })
-                    : t("orders.cancelled", { id: o.publicId }),
+                    : mode === "refunded"
+                      ? t("orders.refunded", { id: o.publicId })
+                      : t("orders.cancelled", { id: o.publicId }),
                 );
                 load();
               }}
@@ -463,6 +531,21 @@ function OrdersInner() {
       <header className="orders-hero">
         <h1>{t("orders.title")}</h1>
         <p className="muted">{t("orders.blurbShort")}</p>
+        {leanWaPlatformOn ? (
+          <div className="order-lean-wa">
+            <p className="muted" style={{ marginBottom: "0.35rem" }}>
+              {t("orders.leanWaHelp")}
+            </p>
+            <button
+              type="button"
+              className="btn sm secondary"
+              disabled={savingLeanWa}
+              onClick={() => void toggleLeanWa()}
+            >
+              {leanWaStatus ? t("orders.leanWaOn") : t("orders.leanWaOff")}
+            </button>
+          </div>
+        ) : null}
       </header>
 
       {orders.length > 0 ? (
@@ -505,7 +588,7 @@ function OrdersInner() {
         <div className="orders-empty">
           <h2>{t("orders.emptyTitle")}</h2>
           <p className="muted">{t("orders.emptyBody")}</p>
-          <Link className="btn" href="/discover">
+          <Link className="btn" href={kitchensBrowseHref()}>
             {t("account.findKitchens")}
           </Link>
         </div>
@@ -557,7 +640,9 @@ function OrdersInner() {
                       setMsg(
                         mode === "cancel_requested"
                           ? t("orders.cancelRequested", { id: checkoutId })
-                          : t("orders.cancelled", { id: checkoutId }),
+                          : mode === "refunded"
+                            ? t("orders.refunded", { id: checkoutId })
+                            : t("orders.cancelled", { id: checkoutId }),
                       );
                       load();
                     }}

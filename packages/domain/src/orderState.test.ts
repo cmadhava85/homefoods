@@ -50,6 +50,7 @@ describe("order state machine", () => {
     assert.equal(canTransition("PACKED", "ASSIGNING_RIDER"), true);
     assert.equal(canTransition("ASSIGNING_RIDER", "DISPATCHED"), true);
     assert.equal(canTransition("ASSIGNING_RIDER", "LOGISTICS_EXCEPTION"), true);
+    assert.equal(canTransition("ASSIGNING_RIDER", "REFUNDED"), true);
     assert.equal(canTransition("DISPATCHED", "DELAYED"), true);
     assert.equal(canTransition("DISPATCHED", "RETURNED_TO_KITCHEN"), true);
     assert.equal(canTransition("DISPATCHED", "LOGISTICS_EXCEPTION"), true);
@@ -64,12 +65,14 @@ describe("order state machine", () => {
     assert.equal(canTransition("FAILED", "CANCELLED"), true);
   });
 
-  it("blocks reverse and terminal mutations", () => {
+  it("blocks reverse, unknown from-state, and terminal mutations", () => {
     assert.equal(canTransition("DELIVERED", "PAID"), false);
     assert.equal(canTransition("REFUNDED", "PAID"), false);
     assert.equal(canTransition("CANCELLED", "PAID"), false);
     assert.equal(canTransition("FAILED", "PAID"), false);
+    assert.equal(canTransition("NOT_A_STATE" as OrderState, "PAID"), false);
     assert.throws(() => assertTransition("DELIVERED", "COOKING"), /can’t move|can't move/i);
+    assert.doesNotThrow(() => assertTransition("PAID", "COOKING"));
   });
 
   it("marks terminal states", () => {

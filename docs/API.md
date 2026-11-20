@@ -15,13 +15,15 @@ Base: `http://127.0.0.1:4000`
 | POST | `/orders/batch` | Multi-day cart, one payment (optional `Idempotency-Key`) |
 | GET | `/me/orders` | Customer order history (Bearer CUSTOMER; `?limit=&offset=`) |
 | GET | `/orders/:publicId` | Order detail (address/mobiles redacted unless owner/staff) |
-| POST | `/orders/:publicId/cancel` | Cancel before cut-off, or request cancel after cut-off if `PAID` |
+| POST | `/orders/:publicId/cancel` | Before cut-off: cancel (unpaid) or **auto full refund** (paid). After cut-off if `PAID`: request cancel |
 | POST | `/orders/:publicId/cancel-accept` | Cook: accept cancel → full refund |
 | POST | `/orders/:publicId/cancel-decline` | Cook: decline → back to `PAID` |
+| POST | `/orders/:publicId/refund` | Admin: `{ mode: FULL\|FOOD_ONLY, reason, ticketId? }` — Razorpay partial refund of that day-line |
 | GET | `/cooks/:slug/cancel-pending` | Cook desk cancel asks |
 | POST | `/payments/mock-confirm` | Simulate UPI capture |
 | POST | `/webhooks/payments` | Payment provider webhook |
 | GET/POST | `/webhooks/whatsapp` | WA verify + inbound |
+| POST | `/webhooks/logistics` | Partner shipment status (secret / HMAC) — [LOGISTICS.md](./LOGISTICS.md) |
 | GET | `/cooks/:slug/manifest` | Cut-off manifest + orders (+ cook lunchCutoff) |
 | GET | `/cooks/:slug/menu?date=&view=day\|week` | Cook desk menu (dated + weekly templates) |
 | POST | `/cooks/:slug/menu` | Add plate `{ itemName, priceRupees, serviceDate?, weekly?, dayOfWeek?, imageUrl?, saveToLibrary? }` |
@@ -46,10 +48,11 @@ Base: `http://127.0.0.1:4000`
 | POST | `/internal/settlements/eod` | Mock EOD payouts |
 | GET | `/admin/tickets` | Ticket inbox |
 | GET | `/admin/tickets/:id` | Ticket detail |
+| GET | `/admin/orders/:key` | Ops support: LM-… / checkoutId / trc_… / gatewayTxnId → order, payments, outbox, activity, Cloud Logging hint |
 | GET | `/admin/cooks` | Cook list |
 | GET | `/admin/analytics/turnover?period=week\|month\|year\|custom&from=&to=&cookId=` | Route/RBI turnover by cook (food GMV, fees, settlements) |
 | POST | `/internal/ops/holds` | settlement_hold=true |
-| POST | `/internal/ops/refunds` | FULL / FOOD_ONLY |
+| POST | `/internal/ops/refunds` | Admin: `{ orderId, mode, reason }` (numeric id; prefer `/orders/:publicId/refund`) |
 | POST | `/internal/ops/cooks/:id/pause` | is_active=false |
 
 ## WhatsApp inbound contract
@@ -66,8 +69,8 @@ Response includes `replies[]` (mock outbound) so the simulator can show the bot.
 
 **Order path**
 
-1. `Menu` → kitchens + buttons (`sri-sai`, …)
-2. `Order sri-sai` or tap `sri-sai` (optional `Order sri-sai 2` for item #)
+1. `Menu` → kitchens + buttons (`csk-homemade-delights`, …)
+2. `Order csk-homemade-delights` or tap `csk-homemade-delights` (optional `Order csk-homemade-delights 2` for item #)
 3. `Pay` → payment URL + `gatewayTxnId`
 4. Simulator: **Confirm mock pay** → `POST /payments/mock-confirm`
 

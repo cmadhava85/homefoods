@@ -39,8 +39,14 @@ export function buildIdempotencyKey(parts: {
   menuItemId?: number | string;
   spice?: string;
   late?: boolean;
-  fulfillmentMode?: "DELIVERY" | "PICKUP";
+  fulfillmentMode?: "DELIVERY" | "PICKUP" | "CUSTOMER_ARRANGE";
 }): string {
+  const fulfill =
+    parts.fulfillmentMode === "PICKUP"
+      ? "pickup"
+      : parts.fulfillmentMode === "CUSTOMER_ARRANGE"
+        ? "arrange"
+        : "delivery";
   return [
     parts.late ? "late" : "std",
     parts.customerMobile,
@@ -50,6 +56,6 @@ export function buildIdempotencyKey(parts: {
     String(parts.amountPaise),
     parts.menuItemId != null ? String(parts.menuItemId) : "",
     parts.spice ?? "",
-    parts.fulfillmentMode === "PICKUP" ? "pickup" : "delivery",
+    fulfill,
   ].join("|");
 }

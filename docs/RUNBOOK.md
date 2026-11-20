@@ -5,6 +5,14 @@
 
 Use this under pressure. Prefer **feature flags** and **Admin tools** before redeploying.
 
+## Solo launch go-live (short)
+
+1. Commit + push → wait for CI.
+2. Deploy Cloud Run (api / web / worker) with solo slug env set.
+3. Smoke: CSK kitchen → address → pay → cook desk → deliver.
+4. WhatsApp: your Meta test number → inbound menu / status ping.
+5. Admin → Features: leave **Self delivery fee** and **Delivery distance limits** OFF until ready; use Features to kill ordering if needed.
+
 ---
 
 ## 1. Service map
@@ -83,7 +91,31 @@ Checklist: [DEPLOY.md](./DEPLOY.md) · infra: [INFRASTRUCTURE.md](./INFRASTRUCTU
 
 ---
 
-## 5. Incident playbooks
+## 5. Order support lookup (first tool)
+
+Admin → **Orders** → paste any of:
+
+| Key | Example |
+|-----|---------|
+| publicId | `LM-…` |
+| checkoutId | week cart id |
+| traceId | `trc_…` |
+| gatewayTxnId | Razorpay payment / link id |
+
+Bundle shows status, address, payments, **outbox** (WA notify pending/failed), activity, and a Cloud Logging filter.
+
+| Symptom | Where to look |
+|---------|----------------|
+| Paid but cook quiet | Outbox `OrderPaid` failed / `OUTBOX_NOTIFY_FAILED` + Meta allowlist |
+| Refund unclear | Activity `ORDER_REFUNDED` + payments REFUND row |
+| UPI paid, still CONFIRMING | Activity `PAYMENT_CONFIRMING_STUCK` + Razorpay webhook §B |
+| Child Pays waiting | `CHILD_PAYS_REQUESTED` + payer mobile on card |
+
+Full log join: [OBSERVABILITY.md](./OBSERVABILITY.md).
+
+---
+
+## 6. Incident playbooks
 
 ### A. “Nobody can order”
 
@@ -161,7 +193,7 @@ Multi-instance without GCS loses local disk files. Set `GCS_UPLOADS_BUCKET` (Ter
 
 ---
 
-## 6. Webhooks (must stay green)
+## 7. Webhooks (must stay green)
 
 | Provider | URL | Auth |
 |----------|-----|------|
@@ -172,7 +204,7 @@ After URL or secret change: update dashboard **and** Secret Manager **and** Clou
 
 ---
 
-## 7. Feature-flag kill switches
+## 8. Feature-flag kill switches
 
 | Symptom | Flag to disable |
 |---------|-----------------|
@@ -187,7 +219,7 @@ After URL or secret change: update dashboard **and** Secret Manager **and** Clou
 
 ---
 
-## 8. First LIVE cook checklist
+## 9. First LIVE cook checklist
 
 - [ ] FSSAI number set  
 - [ ] Payout UPI or bank note (Route optional)  
@@ -198,7 +230,7 @@ After URL or secret change: update dashboard **and** Secret Manager **and** Clou
 
 ---
 
-## 9. Observability & smoke
+## 10. Observability & smoke
 
 | Check | Command / place |
 |-------|-----------------|
@@ -211,7 +243,7 @@ After URL or secret change: update dashboard **and** Secret Manager **and** Clou
 
 ---
 
-## 10. Security ops
+## 11. Security ops
 
 - Never set `MOCK_*=true` or default `AUTH_SECRET` in production (boot will refuse).  
 - `AUTH_ENFORCE` must not be `false` in prod.  
@@ -224,7 +256,7 @@ After URL or secret change: update dashboard **and** Secret Manager **and** Clou
 
 ---
 
-## 11. Escalation order
+## 12. Escalation order
 
 1. Feature flag / Admin Mark paid / pause cook  
 2. Manual Scheduler curl  

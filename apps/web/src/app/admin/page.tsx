@@ -5,6 +5,7 @@ import Link from "next/link";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useLocale } from "@/components/LocaleProvider";
 import { authFetch } from "@/lib/auth";
+import { adminHref } from "@/lib/adminPath";
 
 type Ticket = {
   id: number;
@@ -27,6 +28,7 @@ type Cook = {
   fssaiNumber?: string | null;
   pickupLandmark?: string | null;
   pickupEnabled?: boolean;
+  deliveryType?: "SELF" | "PARTNER";
 };
 
 type Settlement = {
@@ -102,7 +104,81 @@ type TurnoverReport = {
   cooks: TurnoverCook[];
 };
 
-type Tab = "payouts" | "analytics" | "cooks" | "tickets" | "features";
+type Tab = "payouts" | "analytics" | "cooks" | "tickets" | "orders" | "features";
+
+type SupportActivity = {
+  source: string;
+  id: string;
+  at: string;
+  orderId: number | null;
+  eventName: string;
+  channel: string;
+  actor: string | null;
+  payload: unknown;
+};
+
+type SupportOutbox = {
+  id: number;
+  eventName: string;
+  attempts: number;
+  lastError: string | null;
+  processedAt: string | null;
+  createdAt: string;
+  status: "pending" | "failed" | "ok";
+  publicId: string | null;
+  checkoutId: string | null;
+  traceId: string | null;
+};
+
+type SupportBundle = {
+  matchedBy?: string;
+  order: {
+    publicId: string;
+    checkoutId: string | null;
+    traceId?: string;
+    status: string;
+    customerMobile: string;
+    payerMobile: string | null;
+    mealType: string;
+    serviceDate: string;
+    itemName: string;
+    qty: number;
+    totalPaise: number;
+    foodDiscountPaise: number;
+    gatewayTxnId: string | null;
+    channel: string;
+    deliveryTargetAddress?: string | null;
+    settlementHold: boolean;
+  };
+  cook: { kitchenName: string; slugHandle: string; mobileNumber: string } | null;
+  checkout: {
+    checkoutId: string;
+    lines: Array<{
+      publicId: string;
+      status: string;
+      serviceDate: string;
+      mealType: string;
+      itemName: string;
+      qty: number;
+      totalPaise: number;
+    }>;
+  } | null;
+  payments: Array<{
+    id: number;
+    kind: string;
+    status: string;
+    amountPaise: number;
+    gatewayTxnId: string | null;
+    createdAt: string;
+  }>;
+  outbox?: SupportOutbox[];
+  cloudLogging?: {
+    byTraceId: string;
+    byPublicId: string;
+    byCheckoutId: string | null;
+  };
+  activity: SupportActivity[];
+};
 type AnalyticsPeriod = "week" | "month" | "year";
 
 function rupees(paise: number) {
@@ -124,11 +200,14 @@ function AdminInner() {
   const [routeDraft, setRouteDraft] = useState<Record<string, string>>({});
   const [landmarkDraft, setLandmarkDraft] = useState<Record<string, string>>({});
   const [pickupOnDraft, setPickupOnDraft] = useState<Record<string, boolean>>({});
+  const [deliveryTypeDraft, setDeliveryTypeDraft] = useState<Record<string, "SELF" | "PARTNER">>({});
   const [utrDraft, setUtrDraft] = useState<Record<number, string>>({});
   const [payNoteDraft, setPayNoteDraft] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [orderLookup, setOrderLookup] = useState("");
+  const [supportBundle, setSupportBundle] = useState<SupportBundle | null>(null);
 
   const refreshCooks = useCallback(() => {
     return authFetch("/admin/cooks")
@@ -140,18 +219,21 @@ function AdminInner() {
         const route: Record<string, string> = {};
         const landmark: Record<string, string> = {};
         const pickupOn: Record<string, boolean> = {};
+        const deliveryType: Record<string, "SELF" | "PARTNER"> = {};
         for (const c of rows) {
           upi[c.id] = c.payoutUpiId ?? "";
           note[c.id] = c.payoutAccountNote ?? "";
           route[c.id] = c.payoutBeneficiaryRef ?? "";
           landmark[c.id] = c.pickupLandmark ?? "";
           pickupOn[c.id] = Boolean(c.pickupEnabled);
+          deliveryType[c.id] = c.deliveryType === "PARTNER" ? "PARTNER" : "SELF";
         }
         setUpiDraft(upi);
         setNoteDraft(note);
         setRouteDraft(route);
         setLandmarkDraft(landmark);
         setPickupOnDraft(pickupOn);
+        setDeliveryTypeDraft(deliveryType);
       });
   }, []);
 
@@ -324,6 +406,7 @@ function AdminInner() {
           payoutBeneficiaryRef: (routeDraft[cookId] ?? "").trim() || null,
           pickupLandmark: (landmarkDraft[cookId] ?? "").trim() || null,
           pickupEnabled: Boolean(pickupOnDraft[cookId]),
+          deliveryType: deliveryTypeDraft[cookId] === "PARTNER" ? "PARTNER" : "SELF",
         }),
       });
       const json = await res.json();
@@ -403,12 +486,32 @@ function AdminInner() {
   const overdueRows = openRows.filter((s) => s.overdue);
   const overdueTotal = overdueRows.reduce((n, s) => n + s.netPaise, 0);
 
+  async function lookupOrder() {
+    const id = orderLookup.trim();
+    if (!id) return;
+    setBusy("order-lookup");
+    setErr(null);
+    setMsg(null);
+    try {
+      const res = await authFetch(`/admin/orders/${encodeURIComponent(id)}`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Order not found");
+      setSupportBundle(json as SupportBundle);
+    } catch (e) {
+      setSupportBundle(null);
+      setErr((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
   const tabLabels: Record<Tab, string> = {
     payouts: t("admin.tabPayouts"),
     analytics: t("admin.tabAnalytics"),
     features: t("admin.tabFeatures"),
     cooks: t("admin.tabCooks"),
     tickets: t("admin.tabTickets"),
+    orders: t("admin.tabOrders"),
   };
 
   return (
@@ -419,7 +522,7 @@ function AdminInner() {
       </header>
 
       <div className="seg desk-tabs" role="tablist" aria-label={t("admin.title")}>
-        {(["payouts", "analytics", "features", "cooks", "tickets"] as const).map((id) => (
+        {(["payouts", "analytics", "features", "cooks", "tickets", "orders"] as const).map((id) => (
           <button
             key={id}
             type="button"
@@ -806,6 +909,19 @@ function AdminInner() {
                   {c.onboardingStatus} · {c.isActive ? t("admin.active") : t("admin.paused")}
                 </span>
               </div>
+              <p style={{ margin: "0.35rem 0 0", display: "flex", flexWrap: "wrap", gap: "0.35rem" }}>
+                <span
+                  className={`chip ${
+                    (deliveryTypeDraft[c.id] ?? c.deliveryType) === "PARTNER"
+                      ? "tone-done"
+                      : "tone-neutral"
+                  }`}
+                >
+                  {(deliveryTypeDraft[c.id] ?? c.deliveryType) === "PARTNER"
+                    ? t("admin.badgePartner")
+                    : t("admin.badgeSelf")}
+                </span>
+              </p>
               {c.onboardingStatus !== "LIVE" ? (
                 <p className="muted" style={{ margin: "0.25rem 0 0" }}>
                   {t("admin.pendingApply")}
@@ -869,6 +985,26 @@ function AdminInner() {
                 />
                 {t("admin.offerPickup")}
               </label>
+              <label className="order-field" style={{ marginTop: "0.55rem" }}>
+                {t("admin.deliveryType")}
+                <select
+                  value={deliveryTypeDraft[c.id] ?? "SELF"}
+                  onChange={(e) =>
+                    setDeliveryTypeDraft((prev) => ({
+                      ...prev,
+                      [c.id]: e.target.value === "PARTNER" ? "PARTNER" : "SELF",
+                    }))
+                  }
+                >
+                  <option value="SELF">{t("admin.deliverySelf")}</option>
+                  <option value="PARTNER">{t("admin.deliveryPartner")}</option>
+                </select>
+              </label>
+              {deliveryTypeDraft[c.id] === "PARTNER" ? (
+                <p className="muted" style={{ margin: "0.35rem 0 0", fontSize: "0.85rem" }}>
+                  {t("admin.deliveryPartnerHint")}
+                </p>
+              ) : null}
               <div className="actions">
                 <button
                   className="btn"
@@ -938,11 +1074,215 @@ function AdminInner() {
                   >
                     {t("admin.holdSettlement")}
                   </button>
-                  <Link href={`/admin/tickets/${ticket.id}`}>{t("admin.detail")}</Link>
+                  <Link href={adminHref(`tickets/${ticket.id}`)}>{t("admin.detail")}</Link>
                 </div>
               ) : null}
             </div>
           ))}
+        </section>
+      ) : null}
+
+      {tab === "orders" ? (
+        <section>
+          <div className="card">
+            <strong>{t("admin.orderSupportTitle")}</strong>
+            <p className="muted" style={{ margin: "0.35rem 0 0.75rem" }}>
+              {t("admin.orderSupportBlurb")}
+            </p>
+            <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap" }}>
+              <input
+                value={orderLookup}
+                placeholder="LM-… / checkout / trc_… / txn"
+                onChange={(e) => setOrderLookup(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void lookupOrder();
+                }}
+                style={{ flex: "1 1 12rem", minWidth: "10rem" }}
+              />
+              <button
+                className="btn"
+                type="button"
+                disabled={busy === "order-lookup" || !orderLookup.trim()}
+                onClick={() => void lookupOrder()}
+              >
+                {busy === "order-lookup" ? "…" : t("admin.lookupOrder")}
+              </button>
+            </div>
+          </div>
+
+          {supportBundle ? (
+            <>
+              <div className="card" style={{ marginTop: "0.75rem" }}>
+                <div className="row">
+                  <strong>
+                    {supportBundle.order.publicId} · {supportBundle.order.qty}×{" "}
+                    {supportBundle.order.itemName}
+                  </strong>
+                  <span className="chip">{supportBundle.order.status}</span>
+                </div>
+                <p className="muted" style={{ margin: "0.35rem 0 0" }}>
+                  {supportBundle.order.serviceDate} · {supportBundle.order.mealType} ·{" "}
+                  {rupees(supportBundle.order.totalPaise)}
+                  {supportBundle.order.foodDiscountPaise > 0
+                    ? ` (−${rupees(supportBundle.order.foodDiscountPaise)} week off)`
+                    : ""}
+                  {supportBundle.matchedBy ? ` · matched ${supportBundle.matchedBy}` : ""}
+                </p>
+                <p className="muted" style={{ margin: "0.25rem 0 0" }}>
+                  {t("admin.customer")}: {supportBundle.order.customerMobile}
+                  {supportBundle.order.payerMobile
+                    ? ` · payer ${supportBundle.order.payerMobile}`
+                    : ""}
+                </p>
+                {supportBundle.cook ? (
+                  <p className="muted" style={{ margin: "0.25rem 0 0" }}>
+                    {supportBundle.cook.kitchenName} · /{supportBundle.cook.slugHandle} ·{" "}
+                    {supportBundle.cook.mobileNumber}
+                  </p>
+                ) : null}
+                {supportBundle.order.traceId ? (
+                  <p className="muted" style={{ margin: "0.25rem 0 0", wordBreak: "break-all" }}>
+                    {t("admin.traceId")}: <code>{supportBundle.order.traceId}</code>
+                  </p>
+                ) : null}
+                {supportBundle.order.gatewayTxnId ? (
+                  <p className="muted" style={{ margin: "0.25rem 0 0", wordBreak: "break-all" }}>
+                    txn {supportBundle.order.gatewayTxnId}
+                  </p>
+                ) : null}
+                {supportBundle.order.deliveryTargetAddress ? (
+                  <p className="muted" style={{ margin: "0.25rem 0 0" }}>
+                    {supportBundle.order.deliveryTargetAddress}
+                  </p>
+                ) : null}
+                {supportBundle.cloudLogging ? (
+                  <p className="muted" style={{ margin: "0.35rem 0 0", fontSize: "0.85rem" }}>
+                    {t("admin.cloudLoggingHint")}:{" "}
+                    <code>{supportBundle.cloudLogging.byTraceId}</code>
+                  </p>
+                ) : null}
+                {supportBundle.order.settlementHold ? (
+                  <p className="err" style={{ margin: "0.35rem 0 0" }}>
+                    {t("admin.onHold")}
+                  </p>
+                ) : null}
+                <div className="actions" style={{ marginTop: "0.65rem" }}>
+                  <button
+                    className="btn"
+                    type="button"
+                    disabled={busy === `refund-${supportBundle.order.publicId}`}
+                    onClick={() => {
+                      // reuse numeric refund via publicId endpoint
+                      void (async () => {
+                        setBusy(`refund-${supportBundle.order.publicId}`);
+                        setErr(null);
+                        try {
+                          const res = await authFetch(
+                            `/orders/${supportBundle.order.publicId}/refund`,
+                            {
+                              method: "POST",
+                              body: JSON.stringify({
+                                mode: "FULL",
+                                reason: "Admin support refund",
+                              }),
+                            },
+                          );
+                          const json = await res.json();
+                          if (!res.ok) throw new Error(json.error ?? "Refund failed");
+                          setMsg(t("admin.refunded"));
+                          await lookupOrder();
+                        } catch (e) {
+                          setErr((e as Error).message);
+                        } finally {
+                          setBusy(null);
+                        }
+                      })();
+                    }}
+                  >
+                    {t("admin.fullRefund")}
+                  </button>
+                </div>
+              </div>
+
+              {supportBundle.checkout ? (
+                <div className="card" style={{ marginTop: "0.75rem" }}>
+                  <strong>
+                    {t("admin.weekCheckout")} {supportBundle.checkout.checkoutId}
+                  </strong>
+                  <ul className="meta-list" style={{ marginTop: "0.5rem" }}>
+                    {supportBundle.checkout.lines.map((line) => (
+                      <li key={line.publicId}>
+                        {line.publicId} · {line.serviceDate} · {line.mealType} · {line.status} ·{" "}
+                        {rupees(line.totalPaise)}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              <div className="card" style={{ marginTop: "0.75rem" }}>
+                <strong>{t("admin.payments")}</strong>
+                {supportBundle.payments.length === 0 ? (
+                  <p className="muted">{t("admin.noPayments")}</p>
+                ) : (
+                  <ul className="meta-list" style={{ marginTop: "0.5rem" }}>
+                    {supportBundle.payments.map((p) => (
+                      <li key={p.id}>
+                        {p.kind} · {p.status} · {rupees(p.amountPaise)}
+                        {p.gatewayTxnId ? ` · ${p.gatewayTxnId}` : ""}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <div className="card" style={{ marginTop: "0.75rem" }}>
+                <strong>{t("admin.outbox")}</strong>
+                {!supportBundle.outbox?.length ? (
+                  <p className="muted">{t("admin.noOutbox")}</p>
+                ) : (
+                  <ul className="meta-list" style={{ marginTop: "0.5rem" }}>
+                    {supportBundle.outbox.map((o) => (
+                      <li key={o.id} style={{ marginBottom: "0.35rem" }}>
+                        <span className="chip" style={{ marginRight: "0.35rem" }}>
+                          {o.status}
+                        </span>
+                        {o.eventName}
+                        <span className="muted">
+                          {" "}
+                          · try {o.attempts}
+                          {o.lastError ? ` · ${o.lastError}` : ""}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <div className="card" style={{ marginTop: "0.75rem" }}>
+                <strong>{t("admin.activityTimeline")}</strong>
+                {supportBundle.activity.length === 0 ? (
+                  <p className="muted">{t("admin.noActivity")}</p>
+                ) : (
+                  <ol className="meta-list" style={{ marginTop: "0.5rem" }}>
+                    {supportBundle.activity.map((a) => (
+                      <li key={a.id} style={{ marginBottom: "0.45rem" }}>
+                        <span className="chip" style={{ marginRight: "0.35rem" }}>
+                          {a.source}
+                        </span>
+                        <strong>{a.eventName}</strong>
+                        <span className="muted">
+                          {" "}
+                          · {new Date(a.at).toLocaleString()} · {a.channel}
+                          {a.actor ? ` · ${a.actor}` : ""}
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
+            </>
+          ) : null}
         </section>
       ) : null}
     </main>

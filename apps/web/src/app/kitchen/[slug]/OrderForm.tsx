@@ -6,6 +6,7 @@ import { useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { useLocale } from "@/components/LocaleProvider";
 import { authFetch, loginPath } from "@/lib/auth";
+import { needsCheckoutAddress, type FulfillmentMode } from "@/lib/fulfillment";
 import { isExternalPaymentUrl, payPageHref } from "@/lib/payments";
 import { localizedDishName } from "@localmeals/i18n";
 
@@ -28,6 +29,7 @@ export function OrderForm({
   pricePaise,
   orderingOpen = true,
   onAddToCart,
+  confirmBeforeOrder,
   addressId,
   needsAddress = true,
   fulfillmentMode = "DELIVERY",
@@ -42,10 +44,12 @@ export function OrderForm({
   orderingOpen?: boolean;
   /** When set and ordering is open, primary action adds to week cart instead of paying now. */
   onAddToCart?: (line: CartAddPayload) => void;
+  /** Soft gate when customer already has an order that day. */
+  confirmBeforeOrder?: () => boolean;
   /** Selected saved address — required for delivery / late. */
   addressId?: string;
   needsAddress?: boolean;
-  fulfillmentMode?: "DELIVERY" | "PICKUP";
+  fulfillmentMode?: FulfillmentMode;
   payerMobile?: string | null;
 }) {
   const router = useRouter();
@@ -67,12 +71,14 @@ export function OrderForm({
       setError(t("address.chooseFirst"));
       return;
     }
+    if (confirmBeforeOrder && !confirmBeforeOrder()) return;
     setLoading(true);
     setError(null);
     try {
       const path = orderingOpen ? "/orders" : "/orders/late-request";
       const res = await authFetch(path, {
         method: "POST",
+        headers: { "Idempotency-Key": crypto.randomUUID() },
         body: JSON.stringify({
           customerMobile: user.mobile,
           cookSlug,
@@ -83,7 +89,7 @@ export function OrderForm({
           fulfillmentMode,
           payerMobile: payerMobile || null,
           addressId:
-            fulfillmentMode === "DELIVERY" && addressId ? Number(addressId) : null,
+            needsCheckoutAddress(fulfillmentMode) && addressId ? Number(addressId) : null,
         }),
       });
       const data = await res.json();

@@ -7,100 +7,17 @@ import { useAuth } from "@/components/AuthProvider";
 import { useLocale } from "@/components/LocaleProvider";
 import { API_BASE } from "@/lib/api";
 import { authFetch } from "@/lib/auth";
+import { prepareMenuPhoto } from "@/lib/menuImage";
+import { groupCookStops } from "@/lib/cookStops";
 import { cookNextAction, customerStatusLabel, statusTone } from "@/lib/orderStatus";
 import type { MsgKey } from "@localmeals/i18n";
-
-type CookEarnings = {
-  serviceDate: string;
-  note: string;
-  meal: { mealType: string; plates: number; foodPaise: number };
-  day: {
-    plates: number;
-    foodPaise: number;
-    deliveredPlates: number;
-    deliveredFoodPaise: number;
-    heldPlates: number;
-    pendingClawbackPaise?: number;
-    clawbackPaise?: number;
-  };
-  payout: {
-    status: string;
-    label: string;
-    detail: string | null;
-    netPaise: number | null;
-    orderCount: number | null;
-    manualPaidAt: string | null;
-    manualUtr: string | null;
-    settlementStatus: string | null;
-    clawbackPaise?: number;
-  };
-};
-
-type Manifest = {
-  cook: { kitchenName: string; id: string; mobileNumber?: string };
-  lunchCutoff?: string;
-  deliveryWindow?: string;
-  deliveryWindowParts?: {
-    startHour: number;
-    startMinute: number;
-    endHour: number;
-    endMinute: number;
-  };
-  whatsapp?: { cookMobile: string; note: string };
-  lock: { headcount: number; routeMapsUrl: string | null } | null;
-  earnings?: CookEarnings;
-  orders: Array<{
-    id: number;
-    publicId: string;
-    itemName: string;
-    qty: number;
-    spice: string;
-    status: string;
-    customerMobile: string;
-    deliveryTargetAddress: string;
-    fulfillmentMode?: string | null;
-    routeMapsUrl?: string | null;
-  }>;
-};
-
-type WaFeedItem = {
-  id: number;
-  eventName: string;
-  preview: string;
-  to: string;
-  processedAt: string | null;
-  createdAt: string;
-};
-
-type DeskReview = {
-  id: number;
-  rating: number;
-  comment: string | null;
-  cookReply: string | null;
-  createdAt: string;
-  customerLabel: string;
-  orderPublicId: string;
-  itemName: string;
-  serviceDate: string;
-};
+import { CookDeskHero } from "./CookDeskHero";
+import { CookSettingsCards } from "./CookSettingsCards";
+import type { DeskReview, Manifest, MealType, MenuItem, WaFeedItem } from "./types";
 
 function mapsLinkForAddress(address: string) {
   return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`;
 }
-
-type MenuItem = {
-  id: number;
-  itemName: string;
-  itemNameTa?: string | null;
-  pricePaise: number;
-  isVeg: boolean;
-  isAvailable: boolean;
-  allergens: string[];
-  serviceDate: string | null;
-  dayOfWeek: number | null;
-  imageUrl: string | null;
-  totalStockAvailable: number;
-};
 
 const DAY_KEYS = [
   "day.sun",
@@ -111,7 +28,6 @@ const DAY_KEYS = [
   "day.fri",
   "day.sat",
 ] as const satisfies readonly MsgKey[];
-type MealType = "BREAKFAST" | "LUNCH" | "DINNER";
 const MEAL_IDS: MealType[] = ["BREAKFAST", "LUNCH", "DINNER"];
 const MEAL_KEYS: Record<MealType, MsgKey> = {
   BREAKFAST: "meal.breakfast",
@@ -191,7 +107,20 @@ function CookDeskInner() {
   const [pickupOn, setPickupOn] = useState(false);
   const [pickupLandmark, setPickupLandmark] = useState("");
   const [pickupPlatformOn, setPickupPlatformOn] = useState(false);
+  const [partnerActive, setPartnerActive] = useState(false);
+  const [partnerPlatformOn, setPartnerPlatformOn] = useState(false);
+  const [deliveryType, setDeliveryType] = useState<"SELF" | "PARTNER">("SELF");
   const [savingPickup, setSavingPickup] = useState(false);
+  const [intakePaused, setIntakePaused] = useState(false);
+  const [togglingPause, setTogglingPause] = useState(false);
+  const [offerCookDelivery, setOfferCookDelivery] = useState(true);
+  const [offerCustomerArrange, setOfferCustomerArrange] = useState(false);
+  const [savingFulfillment, setSavingFulfillment] = useState(false);
+  const [menuTemplates, setMenuTemplates] = useState<
+    Array<{ id: number; name: string; itemCount: number }>
+  >([]);
+  const [templateName, setTemplateName] = useState("");
+  const [postingTemplateId, setPostingTemplateId] = useState<number | null>(null);
 
   const [itemName, setItemName] = useState("");
   const [itemNameTa, setItemNameTa] = useState("");
@@ -201,6 +130,7 @@ function CookDeskInner() {
   const [dayOfWeek, setDayOfWeek] = useState(1);
   const [postMode, setPostMode] = useState<"date" | "weekly">("date");
   const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoBusyId, setPhotoBusyId] = useState<number | null>(null);
   const [savingMenu, setSavingMenu] = useState(false);
   const [saveToLibrary, setSaveToLibrary] = useState(true);
   const [savedPlates, setSavedPlates] = useState<
@@ -266,6 +196,24 @@ function CookDeskInner() {
       .catch(() => setSavedPlates([]));
   }, [slug, mealType]);
 
+  const loadMenuTemplates = useCallback(() => {
+    authFetch(`/cooks/${slug}/menu-templates?meal=${mealType}`)
+      .then(async (r) => {
+        const json = await r.json();
+        if (!r.ok) throw new Error(json.error ?? "Failed to load templates");
+        setMenuTemplates(
+          (json.templates ?? []).map(
+            (t: { id: number; name: string; itemCount?: number; items?: unknown[] }) => ({
+              id: t.id,
+              name: t.name,
+              itemCount: t.itemCount ?? (Array.isArray(t.items) ? t.items.length : 0),
+            }),
+          ),
+        );
+      })
+      .catch(() => setMenuTemplates([]));
+  }, [slug, mealType]);
+
   const loadLatePending = useCallback(() => {
     const date = targetDate || serviceDate;
     const q = date ? `?date=${encodeURIComponent(date)}` : "";
@@ -300,20 +248,83 @@ function CookDeskInner() {
   }, [slug]);
 
   const loadKitchenExtras = useCallback(() => {
-    authFetch(`/cooks/${slug}/meal-settings`)
-      .then(async (r) => {
+    void Promise.all([
+      authFetch(`/cooks/${slug}/meal-settings`).then(async (r) => {
         const json = await r.json();
-        if (!r.ok) return;
-        if (json.weekDiscount) {
+        if (!r.ok) return null;
+        return json as {
+          weekDiscount?: { percent?: number; minDays?: number; platformEnabled?: boolean };
+          pickup?: { enabled?: boolean; landmark?: string | null; platformEnabled?: boolean };
+          intake?: { paused?: boolean };
+          fulfillmentOffers?: {
+            cookDelivery?: boolean;
+            pickup?: boolean;
+            customerArrange?: boolean;
+          };
+          delivery?: {
+            type?: string;
+            platformPartnerEnabled?: boolean;
+            partnerActive?: boolean;
+          };
+        };
+      }),
+      // Platform kill switches (authoritative).
+      fetch(`${API_BASE}/meta/features`)
+        .then(async (r) => (r.ok ? ((await r.json()) as { flags?: Record<string, boolean> }) : null))
+        .catch(() => null),
+      // Kitchen deliveryType is on the public cook DTO even when meal-settings omits delivery.
+      fetch(`${API_BASE}/kitchens/${slug}/menu`)
+        .then(async (r) =>
+          r.ok
+            ? ((await r.json()) as { cook?: { deliveryType?: string } })
+            : null,
+        )
+        .catch(() => null),
+    ])
+      .then(([json, meta, kitchen]) => {
+        const flags = meta?.flags ?? {};
+        if (typeof flags.pickup_enabled === "boolean") {
+          setPickupPlatformOn(flags.pickup_enabled);
+        }
+        const platformPartner =
+          typeof flags.partner_delivery_enabled === "boolean"
+            ? flags.partner_delivery_enabled
+            : Boolean(json?.delivery?.platformPartnerEnabled);
+        setPartnerPlatformOn(platformPartner);
+
+        if (json?.weekDiscount) {
           setWeekPct(json.weekDiscount.percent ?? 0);
           setWeekMinDays(json.weekDiscount.minDays ?? 3);
           setWeekPlatformOn(json.weekDiscount.platformEnabled !== false);
         }
-        if (json.pickup) {
+        if (json?.pickup) {
           setPickupOn(Boolean(json.pickup.enabled));
           setPickupLandmark(json.pickup.landmark ?? "");
-          setPickupPlatformOn(Boolean(json.pickup.platformEnabled));
+          if (typeof json.pickup.platformEnabled === "boolean") {
+            setPickupPlatformOn(Boolean(json.pickup.platformEnabled));
+          }
         }
+        if (json?.intake) {
+          setIntakePaused(Boolean(json.intake.paused));
+        }
+        if (json?.fulfillmentOffers) {
+          setOfferCookDelivery(json.fulfillmentOffers.cookDelivery !== false);
+          setOfferCustomerArrange(Boolean(json.fulfillmentOffers.customerArrange));
+          if (typeof json.fulfillmentOffers.pickup === "boolean") {
+            setPickupOn(Boolean(json.fulfillmentOffers.pickup));
+          }
+        }
+
+        const typeFromSettings = json?.delivery?.type;
+        const typeFromKitchen = kitchen?.cook?.deliveryType;
+        const type: "SELF" | "PARTNER" =
+          typeFromSettings === "PARTNER" || typeFromKitchen === "PARTNER"
+            ? "PARTNER"
+            : "SELF";
+        setDeliveryType(type);
+        setPartnerActive(
+          Boolean(json?.delivery?.partnerActive) || (platformPartner && type === "PARTNER"),
+        );
       })
       .catch(() => undefined);
   }, [slug]);
@@ -367,6 +378,13 @@ function CookDeskInner() {
         }
         setData({ ...json, orders: json.orders });
         setMealEnabled(json.mealEnabled !== false);
+        if (json.delivery) {
+          setDeliveryType(json.delivery.type === "PARTNER" ? "PARTNER" : "SELF");
+          setPartnerPlatformOn(Boolean(json.delivery.platformPartnerEnabled));
+          setPartnerActive(Boolean(json.delivery.partnerActive));
+        } else if (json.cook?.deliveryType === "PARTNER") {
+          setDeliveryType("PARTNER");
+        }
         const cutoffLabel = json.cutoff ?? json.lunchCutoff;
         if (cutoffLabel) {
           const [h, m] = cutoffLabel.split(":").map(Number);
@@ -386,6 +404,7 @@ function CookDeskInner() {
     loadLatePending();
     loadCancelPending();
     loadSavedPlates();
+    loadMenuTemplates();
   }, [
     slug,
     user,
@@ -394,6 +413,7 @@ function CookDeskInner() {
     loadLatePending,
     loadCancelPending,
     loadSavedPlates,
+    loadMenuTemplates,
     tab,
     targetDate,
     mealType,
@@ -421,7 +441,14 @@ function CookDeskInner() {
     }
     if (path.includes("/dispatch") || "dispatched" in json) {
       const n = typeof json.dispatched === "number" ? json.dispatched : ids;
-      return n > 0 ? t("cook.dispatched", { n }) : t("cook.done");
+      const partner =
+        typeof json.partnerAssigned === "number" && json.partnerAssigned > 0
+          ? ` · ${t("cook.partnerActive")}`
+          : "";
+      return n > 0 ? `${t("cook.dispatched", { n })}${partner}` : t("cook.done");
+    }
+    if (path.includes("/rider-assigned")) {
+      return t("status.cook.riderAssigned");
     }
     if (path.includes("/delivered") || json.status === "DELIVERED") {
       return t("cook.markedDelivered", { n: 1 });
@@ -534,6 +561,121 @@ function CookDeskInner() {
     }
   }
 
+  async function toggleIntakePause() {
+    setTogglingPause(true);
+    setErr(null);
+    try {
+      const res = await authFetch(`/cooks/${slug}/intake-pause`, {
+        method: "PATCH",
+        body: JSON.stringify({ paused: !intakePaused }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Could not update pause");
+      setIntakePaused(Boolean(json.paused));
+      setMsg(t("cook.pauseSaved"));
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setTogglingPause(false);
+    }
+  }
+
+  async function saveFulfillmentOffers() {
+    const landmark = pickupLandmark.trim();
+    if (pickupOn && !landmark) {
+      setErr(t("cook.pickupNeedsLandmark"));
+      return;
+    }
+    setSavingFulfillment(true);
+    setErr(null);
+    try {
+      const res = await authFetch(`/cooks/${slug}/fulfillment`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          cookDelivery: offerCookDelivery,
+          customerArrange: offerCustomerArrange,
+          pickupEnabled: pickupOn,
+          pickupLandmark: landmark || null,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Could not save fulfillment");
+      const offers = json.fulfillmentOffers ?? {};
+      setOfferCookDelivery(offers.cookDelivery !== false);
+      setOfferCustomerArrange(Boolean(offers.customerArrange));
+      setPickupOn(Boolean(json.pickupEnabled ?? offers.pickup));
+      setPickupLandmark(json.pickupLandmark ?? landmark);
+      if (typeof json.pickupPlatformEnabled === "boolean") {
+        setPickupPlatformOn(Boolean(json.pickupPlatformEnabled));
+      }
+      setMsg(t("cook.fulfillmentSaved"));
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setSavingFulfillment(false);
+    }
+  }
+
+  async function saveTemplateFromDay() {
+    const name = templateName.trim();
+    if (name.length < 2) {
+      setErr(t("cook.templateName"));
+      return;
+    }
+    setErr(null);
+    try {
+      const res = await authFetch(`/cooks/${slug}/menu-templates`, {
+        method: "POST",
+        body: JSON.stringify({
+          name,
+          mealType,
+          fromServiceDate: menuDate || serviceDate || undefined,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Could not save plan");
+      setTemplateName("");
+      setMsg(t("cook.templateSaved"));
+      loadMenuTemplates();
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+  }
+
+  async function postMenuTemplate(id: number) {
+    setPostingTemplateId(id);
+    setErr(null);
+    try {
+      const res = await authFetch(`/cooks/${slug}/menu-templates/${id}/post`, {
+        method: "POST",
+        body: JSON.stringify({
+          serviceDate: menuDate || serviceDate || undefined,
+          weekly: postMode === "weekly",
+          dayOfWeek: postMode === "weekly" ? dayOfWeek : undefined,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Could not post plan");
+      setMsg(t("cook.templatePosted", { n: json.count ?? 0 }));
+      loadMenu();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setPostingTemplateId(null);
+    }
+  }
+
+  async function removeMenuTemplate(id: number, name: string) {
+    if (!confirm(t("cook.removeSavedConfirm", { name }))) return;
+    const res = await authFetch(`/cooks/${slug}/menu-templates/${id}`, { method: "DELETE" });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      setErr(json.error ?? "Could not remove plan");
+      return;
+    }
+    loadMenuTemplates();
+  }
+
   useEffect(() => {
     loadKitchenExtras();
   }, [loadKitchenExtras]);
@@ -556,8 +698,9 @@ function CookDeskInner() {
 
   async function uploadPhoto(): Promise<string | null> {
     if (!photoFile) return null;
+    const prepared = await prepareMenuPhoto(photoFile);
     const fd = new FormData();
-    fd.append("file", photoFile);
+    fd.append("file", prepared);
     const res = await authFetch(`/cooks/${slug}/menu/photo`, {
       method: "POST",
       body: fd,
@@ -707,9 +850,12 @@ function CookDeskInner() {
 
   async function attachPhoto(item: MenuItem, file: File) {
     setErr(null);
+    setMsg(null);
+    setPhotoBusyId(item.id);
     try {
+      const prepared = await prepareMenuPhoto(file);
       const fd = new FormData();
-      fd.append("file", file);
+      fd.append("file", prepared);
       const up = await authFetch(`/cooks/${slug}/menu/photo`, {
         method: "POST",
         body: fd,
@@ -722,9 +868,13 @@ function CookDeskInner() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Could not save photo");
+      setMsg(`Photo saved · ${item.itemName}`);
       loadMenu(tab, targetDate || undefined);
+      loadSavedPlates();
     } catch (e) {
       setErr((e as Error).message);
+    } finally {
+      setPhotoBusyId(null);
     }
   }
 
@@ -755,12 +905,13 @@ function CookDeskInner() {
             {weekly ? ` · ${t("cook.everyDay", { day: dayLabels[m.dayOfWeek!] })}` : ""}
           </p>
           <div className="cook-plate-actions">
-            <label className="cook-plate-link">
-              {t("cook.photo")}
+            <label className={`cook-plate-link${photoBusyId === m.id ? " is-busy" : ""}`}>
+              {photoBusyId === m.id ? t("cook.sending") : t("cook.photo")}
               <input
                 type="file"
-                accept="image/jpeg,image/png,image/webp,image/gif"
-                hidden
+                accept="image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif"
+                className="cook-file-input"
+                disabled={photoBusyId === m.id}
                 onChange={(e) => {
                   const f = e.target.files?.[0];
                   if (f) void attachPhoto(m, f);
@@ -844,20 +995,25 @@ function CookDeskInner() {
     paid: orders.filter((o) => o.status === "PAID").length,
     cooking: orders.filter((o) => o.status === "COOKING").length,
     packed: orders.filter((o) => o.status === "PACKED").length,
-    out: orders.filter((o) => o.status === "DISPATCHED" || o.status === "DELAYED").length,
+    out: orders.filter(
+      (o) =>
+        o.status === "ASSIGNING_RIDER" ||
+        o.status === "DISPATCHED" ||
+        o.status === "DELAYED",
+    ).length,
     done: orders.filter((o) => o.status === "DELIVERED").length,
   };
 
   return (
     <main className="cook-desk">
-      <header className="cook-hero">
-        <p className="chip">{t("cook.desk")}</p>
-        <h1>{data.cook.kitchenName}</h1>
-        <p className="muted">
-          {t("cook.selfDelivery")} · WA →{" "}
-          <strong>{data.whatsapp?.cookMobile ?? data.cook.mobileNumber ?? cookMobile}</strong>
-        </p>
-      </header>
+      <CookDeskHero
+        kitchenName={data.cook.kitchenName}
+        partnerActive={partnerActive || Boolean(data.delivery?.partnerActive)}
+        cookMobile={data.whatsapp?.cookMobile ?? data.cook.mobileNumber ?? cookMobile}
+        intakePaused={intakePaused}
+        togglingPause={togglingPause}
+        onTogglePause={() => void toggleIntakePause()}
+      />
 
       <div className="seg desk-tabs" role="tablist" aria-label={t("cook.desk")}>
         <button
@@ -1129,6 +1285,8 @@ function CookDeskInner() {
       </details>
 
       <div className="card cook-menu-card">
+        {err ? <p className="err cook-menu-banner">{err}</p> : null}
+        {msg ? <p className="ok cook-menu-banner">{msg}</p> : null}
         <div className="cook-menu-head">
           <div>
             <p className="cook-menu-kicker">{mealLabel}</p>
@@ -1258,6 +1416,61 @@ function CookDeskInner() {
           )}
         </div>
 
+        <div className="cook-saved-block">
+          <div className="cook-add-plate-head">
+            <strong>{t("cook.templates")}</strong>
+            <p className="muted">{t("cook.templatesHint")}</p>
+          </div>
+          <label className="cook-add-field">
+            <span>{t("cook.templateName")}</span>
+            <input
+              value={templateName}
+              onChange={(e) => setTemplateName(e.target.value)}
+              placeholder={t("cook.templateNamePlaceholder")}
+              maxLength={80}
+            />
+          </label>
+          <button
+            type="button"
+            className="btn sm"
+            disabled={!templateName.trim()}
+            onClick={() => void saveTemplateFromDay()}
+          >
+            {t("cook.saveTemplateFromDay")}
+          </button>
+          {menuTemplates.length === 0 ? (
+            <p className="muted cook-saved-empty">{t("cook.templatesEmpty")}</p>
+          ) : (
+            <ul className="cook-saved-list">
+              {menuTemplates.map((tpl) => (
+                <li key={tpl.id} className="cook-saved-row">
+                  <div className="cook-saved-meta">
+                    <strong>{tpl.name}</strong>
+                    <span className="muted">{tpl.itemCount} plates</span>
+                  </div>
+                  <div className="cook-saved-actions">
+                    <button
+                      type="button"
+                      className="btn sm"
+                      disabled={postingTemplateId === tpl.id}
+                      onClick={() => void postMenuTemplate(tpl.id)}
+                    >
+                      {postingTemplateId === tpl.id ? t("cook.sending") : t("cook.postTemplate")}
+                    </button>
+                    <button
+                      type="button"
+                      className="cook-plate-link cook-plate-link-danger"
+                      onClick={() => void removeMenuTemplate(tpl.id, tpl.name)}
+                    >
+                      {t("cook.removeTemplate")}
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
         <div className="cook-add-plate">
           <div className="cook-add-plate-head">
             <strong>{t("cook.addPlate")}</strong>
@@ -1349,8 +1562,8 @@ function CookDeskInner() {
               {photoFile ? photoFile.name.slice(0, 22) : t("cook.addPhoto")}
               <input
                 type="file"
-                accept="image/jpeg,image/png,image/webp,image/gif"
-                hidden
+                accept="image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif"
+                className="cook-file-input"
                 onChange={(e) => setPhotoFile(e.target.files?.[0] ?? null)}
               />
             </label>
@@ -1366,200 +1579,46 @@ function CookDeskInner() {
         </div>
       </div>
 
-      <h2 style={{ marginTop: "0.5rem" }}>{t("cook.kitchenSettings")}</h2>
-
-      <div className="card cook-settings-card">
-        <div className="cook-setting-row">
-          <div className="cook-setting-copy">
-            <strong>
-              {mealLabel} · {t("cook.cutoff")}
-            </strong>
-            <span className="muted">{data.lunchCutoff ?? "08:00"}</span>
-          </div>
-          <div className="cook-setting-controls">
-            <label className="cook-time-field">
-              <span className="cook-time-label">{t("cook.cutoff")}</span>
-              <div className="cook-time-pair">
-                <input
-                  type="number"
-                  min={0}
-                  max={23}
-                  value={String(hour).padStart(2, "0")}
-                  onChange={(e) => setHour(Number(e.target.value))}
-                  aria-label="Hour"
-                />
-                <span aria-hidden>:</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={59}
-                  value={String(minute).padStart(2, "0")}
-                  onChange={(e) => setMinute(Number(e.target.value))}
-                  aria-label="Minute"
-                />
-              </div>
-            </label>
-            <button className="btn sm cook-setting-save" type="button" onClick={saveCutoff}>
-              {t("cook.save")}
-            </button>
-          </div>
-        </div>
-
-        <div className="cook-setting-row">
-          <div className="cook-setting-copy">
-            <strong>
-              {mealLabel} · {t("cook.deliveryEta")}
-            </strong>
-            <span className="muted">{data.deliveryWindow ?? "12:00–13:00"}</span>
-          </div>
-          <div className="cook-setting-controls cook-setting-controls-eta">
-            <label className="cook-time-field">
-              <span className="cook-time-label">{t("cook.from")}</span>
-              <div className="cook-time-pair">
-                <input
-                  type="number"
-                  min={0}
-                  max={23}
-                  value={String(winStartH).padStart(2, "0")}
-                  onChange={(e) => setWinStartH(Number(e.target.value))}
-                  aria-label="Start hour"
-                />
-                <span aria-hidden>:</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={59}
-                  value={String(winStartM).padStart(2, "0")}
-                  onChange={(e) => setWinStartM(Number(e.target.value))}
-                  aria-label="Start minute"
-                />
-              </div>
-            </label>
-            <label className="cook-time-field">
-              <span className="cook-time-label">{t("cook.to")}</span>
-              <div className="cook-time-pair">
-                <input
-                  type="number"
-                  min={0}
-                  max={23}
-                  value={String(winEndH).padStart(2, "0")}
-                  onChange={(e) => setWinEndH(Number(e.target.value))}
-                  aria-label="End hour"
-                />
-                <span aria-hidden>:</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={59}
-                  value={String(winEndM).padStart(2, "0")}
-                  onChange={(e) => setWinEndM(Number(e.target.value))}
-                  aria-label="End minute"
-                />
-              </div>
-            </label>
-            <button
-              className="btn sm cook-setting-save"
-              type="button"
-              onClick={saveDeliveryWindow}
-            >
-              {t("cook.saveEta")}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="card cook-pref-card">
-        <div className="cook-pref-head">
-          <div>
-            <p className="cook-menu-kicker">{t("cook.kitchenSettings")}</p>
-            <strong>{t("cook.weekDiscount")}</strong>
-          </div>
-          <span className={`chip ${weekPct > 0 ? "tone-done" : "tone-neutral"}`}>
-            {weekPct > 0 ? `${weekPct}%` : t("cook.off")}
-          </span>
-        </div>
-        <p className="cook-pref-help">{t("cook.weekDiscountHelp")}</p>
-        {!weekPlatformOn ? (
-          <p className="cook-pref-banner">{t("cook.weekDiscountPaused")}</p>
-        ) : null}
-        <div className="cook-pref-controls">
-          <label className="cook-pref-field">
-            <span className="cook-time-label">%</span>
-            <div className="cook-pref-input">
-              <input
-                type="number"
-                min={0}
-                max={15}
-                value={weekPct}
-                onChange={(e) => setWeekPct(Number(e.target.value))}
-              />
-            </div>
-          </label>
-          <label className="cook-pref-field">
-            <span className="cook-time-label">{t("cook.minDays")}</span>
-            <div className="cook-pref-input">
-              <input
-                type="number"
-                min={2}
-                max={14}
-                value={weekMinDays}
-                onChange={(e) => setWeekMinDays(Number(e.target.value))}
-              />
-            </div>
-          </label>
-          <button className="btn sm cook-setting-save" type="button" onClick={saveWeekDiscount}>
-            {t("cook.save")}
-          </button>
-        </div>
-      </div>
-
-      <div className="card cook-pref-card">
-        <div className="cook-pref-head">
-          <div>
-            <p className="cook-menu-kicker">{t("cook.pickupSettings")}</p>
-            <strong>{t("cook.pickupOffer")}</strong>
-          </div>
-          <span className={`chip ${pickupOn ? "tone-done" : "tone-neutral"}`}>
-            {pickupOn ? t("cook.on") : t("cook.off")}
-          </span>
-        </div>
-        <p className="cook-pref-help">{t("cook.pickupHelp")}</p>
-        {!pickupPlatformOn ? (
-          <p className="cook-pref-banner">{t("cook.pickupPlatformOff")}</p>
-        ) : null}
-        <button
-          type="button"
-          className={`cook-toggle ${pickupOn ? "on" : ""}`}
-          role="switch"
-          aria-checked={pickupOn}
-          disabled={!pickupPlatformOn}
-          onClick={() => setPickupOn((v) => !v)}
-        >
-          <span className="cook-toggle-knob" aria-hidden />
-          <span className="cook-toggle-text">
-            {pickupOn ? t("cook.on") : t("cook.off")}
-          </span>
-        </button>
-        <label className="cook-pref-field cook-pref-field-full">
-          <span className="cook-time-label">{t("cook.pickupLandmark")}</span>
-          <input
-            className="cook-pref-text"
-            type="text"
-            value={pickupLandmark}
-            maxLength={300}
-            placeholder={t("cook.pickupLandmarkPlaceholder")}
-            onChange={(e) => setPickupLandmark(e.target.value)}
-          />
-        </label>
-        <button
-          className="btn cook-setting-save cook-pref-save"
-          type="button"
-          disabled={savingPickup}
-          onClick={savePickupSettings}
-        >
-          {savingPickup ? t("cook.sending") : t("cook.save")}
-        </button>
-      </div>
+      <CookSettingsCards
+        mealLabel={mealLabel}
+        lunchCutoff={data.lunchCutoff}
+        deliveryWindow={data.deliveryWindow}
+        hour={hour}
+        minute={minute}
+        onHourChange={setHour}
+        onMinuteChange={setMinute}
+        onSaveCutoff={saveCutoff}
+        winStartH={winStartH}
+        winStartM={winStartM}
+        winEndH={winEndH}
+        winEndM={winEndM}
+        onWinStartHChange={setWinStartH}
+        onWinStartMChange={setWinStartM}
+        onWinEndHChange={setWinEndH}
+        onWinEndMChange={setWinEndM}
+        onSaveDeliveryWindow={saveDeliveryWindow}
+        weekPct={weekPct}
+        weekMinDays={weekMinDays}
+        weekPlatformOn={weekPlatformOn}
+        onWeekPctChange={setWeekPct}
+        onWeekMinDaysChange={setWeekMinDays}
+        onSaveWeekDiscount={saveWeekDiscount}
+        offerCookDelivery={offerCookDelivery}
+        pickupOn={pickupOn}
+        pickupPlatformOn={pickupPlatformOn}
+        offerCustomerArrange={offerCustomerArrange}
+        pickupLandmark={pickupLandmark}
+        savingFulfillment={savingFulfillment}
+        savingPickup={savingPickup}
+        onToggleOfferCookDelivery={() => setOfferCookDelivery((v) => !v)}
+        onTogglePickup={() => setPickupOn((v) => !v)}
+        onToggleOfferCustomerArrange={() => setOfferCustomerArrange((v) => !v)}
+        onPickupLandmarkChange={setPickupLandmark}
+        onSaveFulfillmentOffers={() => void saveFulfillmentOffers()}
+        partnerActive={partnerActive}
+        deliveryType={deliveryType}
+        partnerPlatformOn={partnerPlatformOn}
+      />
         </>
       ) : null}
 
@@ -1578,13 +1637,24 @@ function CookDeskInner() {
             </p>
           ) : null}
           <ol style={{ margin: "0.5rem 0 0", paddingLeft: "1.2rem" }}>
-            {orders
-              .filter((o) => !["DELIVERED", "REFUNDED", "CANCELLED"].includes(o.status))
-              .map((o) => (
-                <li key={o.id} style={{ marginBottom: "0.35rem" }}>
-                  <strong>{o.publicId}</strong> — {o.deliveryTargetAddress || t("cook.noAddress")}
-                </li>
-              ))}
+            {groupCookStops(
+              orders.filter((o) => !["DELIVERED", "REFUNDED", "CANCELLED"].includes(o.status)),
+            ).map((stop) => (
+              <li key={stop.key} style={{ marginBottom: "0.35rem" }}>
+                <strong>
+                  {stop.orders.length > 1
+                    ? `${stop.totalQty} plates · ${stop.orders.length} orders`
+                    : stop.orders[0].publicId}
+                </strong>{" "}
+                — {stop.deliveryTargetAddress || t("cook.noAddress")}
+                {stop.orders.length > 1 ? (
+                  <span className="muted">
+                    {" "}
+                    ({stop.orders.map((o) => o.publicId).join(", ")})
+                  </span>
+                ) : null}
+              </li>
+            ))}
           </ol>
         </div>
       ) : (
@@ -1639,77 +1709,131 @@ function CookDeskInner() {
           <p className="muted">{t("cook.noPaidOrders", { meal: mealLabel })}</p>
         </div>
       ) : null}
-      {[...orders]
-        .sort((a, b) => Number(b.status === "CANCEL_REQUESTED") - Number(a.status === "CANCEL_REQUESTED"))
-        .map((o, i) => {
-        const fulfillmentMode = o.fulfillmentMode;
-        const next = cookNextAction(t, o.status, fulfillmentMode);
-        const cancelAsk = o.status === "CANCEL_REQUESTED";
+      {groupCookStops(
+        [...orders].sort(
+          (a, b) =>
+            Number(b.status === "CANCEL_REQUESTED") - Number(a.status === "CANCEL_REQUESTED"),
+        ),
+      ).map((stop, i) => {
+        const fulfillmentMode = stop.fulfillmentMode;
+        const partnerOrder = stop.orders.some(
+          (o) => o.logisticsMode === "PARTNER" || o.status === "ASSIGNING_RIDER",
+        );
+        const multi = stop.orders.length > 1;
         return (
-          <div key={o.id} className="card cook-stop">
+          <div key={stop.key} className="card cook-stop">
             <div className="row" style={{ borderBottom: 0 }}>
               <strong>
-                {t("cook.stop", { n: i + 1 })} · {o.qty}× {o.itemName}
+                {multi
+                  ? t("cook.stopGrouped", {
+                      n: i + 1,
+                      plates: stop.totalQty,
+                      orders: stop.orders.length,
+                    })
+                  : `${t("cook.stop", { n: i + 1 })} · ${stop.orders[0].qty}× ${stop.orders[0].itemName}`}
                 {fulfillmentMode === "PICKUP" ? ` · ${t("cook.pickup")}` : ""}
+                {partnerOrder ? ` · ${t("cook.partnerDelivery")}` : ""}
               </strong>
-              <span className={`chip tone-${statusTone(o.status)}`}>
-                {customerStatusLabel(t, o.status, { fulfillmentMode })}
-              </span>
             </div>
-            <p className="muted" style={{ margin: "0 0 0.35rem", fontSize: "0.8rem" }}>
-              {o.publicId}
-              {fulfillmentMode === "PICKUP" ? ` · ${t("cook.showCode")}` : ""}
-            </p>
             <p className="cook-stop-addr">
               {fulfillmentMode === "PICKUP"
-                ? o.deliveryTargetAddress || t("cook.pickup")
-                : o.deliveryTargetAddress || t("cook.addressMissing")}
+                ? stop.deliveryTargetAddress || t("cook.pickup")
+                : stop.deliveryTargetAddress || t("cook.addressMissing")}
             </p>
             <p className="muted" style={{ margin: "0.25rem 0 0" }}>
-              {o.customerMobile} · spice {o.spice}
+              {stop.customerMobile}
+              {fulfillmentMode === "PICKUP" ? ` · ${t("cook.showCode")}` : ""}
             </p>
-            <div className="actions cook-stop-actions">
-              {cancelAsk ? (
-                <>
-                  <button
-                    className="btn"
-                    type="button"
-                    onClick={() => post(`/orders/${o.publicId}/cancel-accept`)}
-                  >
-                    {t("cook.acceptCancelRefund")}
-                  </button>
-                  <button
-                    className="btn secondary"
-                    type="button"
-                    onClick={() =>
-                      post(`/orders/${o.publicId}/cancel-decline`, {
-                        reason: "Kitchen could not cancel — food is being prepared",
-                      })
-                    }
-                  >
-                    {t("cook.keepCooking")}
-                  </button>
-                </>
-              ) : next ? (
-                <button
-                  className="btn"
-                  type="button"
-                  onClick={() => post(`/orders/${o.publicId}/${next.pathSuffix}`)}
+            {stop.orders.map((o) => {
+              const next = cookNextAction(t, o.status, o.fulfillmentMode);
+              const cancelAsk = o.status === "CANCEL_REQUESTED";
+              const linePartner =
+                o.logisticsMode === "PARTNER" || o.status === "ASSIGNING_RIDER";
+              return (
+                <div
+                  key={o.id}
+                  style={{
+                    marginTop: "0.65rem",
+                    paddingTop: multi ? "0.55rem" : 0,
+                    borderTop: multi ? "1px solid var(--line)" : undefined,
+                  }}
                 >
-                  {next.label}
-                </button>
-              ) : null}
-              {!cancelAsk && fulfillmentMode !== "PICKUP" && o.deliveryTargetAddress ? (
+                  <div className="row" style={{ borderBottom: 0 }}>
+                    <strong style={{ fontWeight: 600 }}>
+                      {o.qty}× {o.itemName}
+                      {o.spice === "LESS" ? " · less spicy" : ""}
+                    </strong>
+                    <span className={`chip tone-${statusTone(o.status)}`}>
+                      {customerStatusLabel(t, o.status, {
+                        fulfillmentMode: o.fulfillmentMode,
+                      })}
+                    </span>
+                  </div>
+                  <p className="muted" style={{ margin: "0 0 0.35rem", fontSize: "0.8rem" }}>
+                    {o.publicId}
+                  </p>
+                  {linePartner && o.partnerShipmentId ? (
+                    <p className="cook-partner-ship" style={{ margin: "0.25rem 0 0" }}>
+                      <span className="chip tone-progress">
+                        {t("cook.shipment")} · {o.partnerShipmentId}
+                      </span>
+                      {o.partnerTrackingUrl ? (
+                        <>
+                          {" "}
+                          <a href={o.partnerTrackingUrl} target="_blank" rel="noreferrer">
+                            {t("cook.trackRider")}
+                          </a>
+                        </>
+                      ) : null}
+                    </p>
+                  ) : null}
+                  <div className="actions cook-stop-actions">
+                    {cancelAsk ? (
+                      <>
+                        <button
+                          className="btn"
+                          type="button"
+                          onClick={() => post(`/orders/${o.publicId}/cancel-accept`)}
+                        >
+                          {t("cook.acceptCancelRefund")}
+                        </button>
+                        <button
+                          className="btn secondary"
+                          type="button"
+                          onClick={() =>
+                            post(`/orders/${o.publicId}/cancel-decline`, {
+                              reason: "Kitchen could not cancel — food is being prepared",
+                            })
+                          }
+                        >
+                          {t("cook.keepCooking")}
+                        </button>
+                      </>
+                    ) : next ? (
+                      <button
+                        className="btn"
+                        type="button"
+                        onClick={() => post(`/orders/${o.publicId}/${next.pathSuffix}`)}
+                      >
+                        {next.label}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
+            {fulfillmentMode !== "PICKUP" && stop.deliveryTargetAddress ? (
+              <div className="actions cook-stop-actions" style={{ marginTop: "0.5rem" }}>
                 <a
                   className="btn secondary"
-                  href={mapsLinkForAddress(o.deliveryTargetAddress)}
+                  href={mapsLinkForAddress(stop.deliveryTargetAddress)}
                   target="_blank"
                   rel="noreferrer"
                 >
                   {t("cook.maps")}
                 </a>
-              ) : null}
-            </div>
+              </div>
+            ) : null}
           </div>
         );
       })}

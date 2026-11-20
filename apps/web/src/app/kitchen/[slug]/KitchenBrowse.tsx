@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import {
@@ -11,8 +11,16 @@ import {
 import { useLocale } from "@/components/LocaleProvider";
 import { API_BASE } from "@/lib/api";
 import { authFetch, loginPath } from "@/lib/auth";
+import { FulfillmentChooser } from "@/components/FulfillmentChooser";
 import { flagOn, useFeatureFlags } from "@/lib/features";
+import {
+  needsCheckoutAddress,
+  resolveEffectiveFulfillment,
+  type FulfillmentMode,
+} from "@/lib/fulfillment";
+import { resolveSelfDeliveryPaise } from "@/lib/deliveryDistance";
 import { isExternalPaymentUrl, payPageHref } from "@/lib/payments";
+import { isSoloKitchenMode, platformFeePaise } from "@/lib/soloKitchen";
 import { localizedDishName } from "@localmeals/i18n";
 import { OrderForm, type CartAddPayload } from "./OrderForm";
 
@@ -45,6 +53,9 @@ type WeekPayload = {
     slugHandle: string;
     fssaiNumber: string | null;
     flatSelfDeliveryFee?: string | number;
+    deliveryType?: string | null;
+    lat?: string | number | null;
+    lng?: string | number | null;
   };
   mealType?: MealType;
   mealLabel?: string;
@@ -53,8 +64,14 @@ type WeekPayload = {
   cutoff?: string;
   deliveryWindow?: string;
   orderingOpen?: boolean;
+  intakePaused?: boolean;
   nextServiceDate?: string | null;
   openStatusLabel?: string;
+  fulfillmentOffers?: {
+    cookDelivery?: boolean;
+    pickup?: boolean;
+    customerArrange?: boolean;
+  };
   pickup?: { available: boolean; window: string; hint: string | null };
   plan: DayPlan[];
   weekDiscount?: { percent: number; minDays: number; label: string | null };
@@ -72,8 +89,6 @@ type PublicReview = {
 
 type CartLine = CartAddPayload & { mealType: MealType; mealLabel: string };
 
-const PLATFORM_FEE_PAISE = 700; // ₹7 platform fee — keep in sync with @localmeals/domain
-
 function imgSrc(url: string | null | undefined) {
   if (!url) return null;
   if (url.startsWith("http")) return url;
@@ -82,12 +97,19 @@ function imgSrc(url: string | null | undefined) {
 
 export function KitchenBrowse({ slug }: { slug: string }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user } = useAuth();
   const { t, locale } = useLocale();
   const flags = useFeatureFlags();
   const childPaysOn = flagOn(flags, "child_pays_enabled");
   const followOn = flagOn(flags, "kitchen_follow_enabled");
   const reviewsOn = flagOn(flags, "reviews_enabled");
+  const distanceLimitsOn = flagOn(flags, "delivery_distance_limits_enabled");
+  const selfDeliveryFeeOn = flagOn(flags, "self_delivery_fee_enabled");
+
+  const mealParam = (searchParams.get("meal") ?? "").trim().toUpperCase();
+  const afterDate = searchParams.get("after");
+  const againMode = searchParams.get("again") === "1" || Boolean(afterDate);
 
   const MEALS: { id: MealType; label: string }[] = [
     { id: "BREAKFAST", label: t("meal.breakfast") },
@@ -100,7 +122,11 @@ export function KitchenBrowse({ slug }: { slug: string }) {
     const when = day.isToday ? t("common.today") : day.dayLabel;
     return `${when} · ${Number(d)}/${Number(m)}`;
   }
-  const [mealType, setMealType] = useState<MealType>("LUNCH");
+  const [mealType, setMealType] = useState<MealType>(() =>
+    mealParam === "BREAKFAST" || mealParam === "LUNCH" || mealParam === "DINNER"
+      ? mealParam
+      : "LUNCH",
+  );
   const [availableMeals, setAvailableMeals] = useState<
     Array<{ mealType: MealType; mealLabel: string; openDayCount: number }>
   >([]);
@@ -120,9 +146,15 @@ export function KitchenBrowse({ slug }: { slug: string }) {
   const [addressId, setAddressId] = useState("");
   const [following, setFollowing] = useState(false);
   const [followBusy, setFollowBusy] = useState(false);
-  const [fulfillmentMode, setFulfillmentMode] = useState<"DELIVERY" | "PICKUP">("DELIVERY");
+  const [fulfillmentMode, setFulfillmentMode] = useState<FulfillmentMode>("DELIVERY");
   /** Days already covered by an active order for this kitchen + meal. */
   const [orderedDates, setOrderedDates] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (mealParam === "BREAKFAST" || mealParam === "LUNCH" || mealParam === "DINNER") {
+      setMealType(mealParam);
+    }
+  }, [mealParam]);
 
   useEffect(() => {
     let cancelled = false;
@@ -160,11 +192,13 @@ export function KitchenBrowse({ slug }: { slug: string }) {
         if (!res.ok) throw new Error(json.error ?? "Could not load menu");
         if (!cancelled) {
           setData(json as WeekPayload);
-          const firstWithItems =
-            (json as WeekPayload).plan.find((d) => d.itemCount > 0)?.serviceDate ??
-            (json as WeekPayload).plan[0]?.serviceDate ??
-            null;
-          setSelected(firstWithItems);
+          if (!againMode) {
+            const firstWithItems =
+              (json as WeekPayload).plan.find((d) => d.itemCount > 0)?.serviceDate ??
+              (json as WeekPayload).plan[0]?.serviceDate ??
+              null;
+            setSelected(firstWithItems);
+          }
         }
       })
       .catch((e) => {
@@ -173,7 +207,28 @@ export function KitchenBrowse({ slug }: { slug: string }) {
     return () => {
       cancelled = true;
     };
-  }, [slug, mealType]);
+  }, [slug, mealType, againMode]);
+
+  /** From “Order another day”: land on the next free day, not the one already ordered. */
+  useEffect(() => {
+    if (!againMode || !data?.plan.length) return;
+    const after = afterDate && /^\d{4}-\d{2}-\d{2}$/.test(afterDate) ? afterDate : "";
+    const nextFree =
+      data.plan.find(
+        (d) =>
+          d.itemCount > 0 &&
+          !orderedDates.has(d.serviceDate) &&
+          (!after || d.serviceDate > after),
+      ) ??
+      data.plan.find((d) => d.itemCount > 0 && !orderedDates.has(d.serviceDate)) ??
+      data.plan.find((d) => d.itemCount > 0) ??
+      data.plan[0];
+    if (!nextFree) return;
+    setSelected((cur) => {
+      if (cur && !orderedDates.has(cur)) return cur;
+      return nextFree.serviceDate;
+    });
+  }, [againMode, afterDate, data, orderedDates]);
 
   useEffect(() => {
     let cancelled = false;
@@ -265,7 +320,6 @@ export function KitchenBrowse({ slug }: { slug: string }) {
             .map((o) => o.serviceDate),
         );
         setOrderedDates(dates);
-        setCart((prev) => prev.filter((line) => !dates.has(line.serviceDate)));
       })
       .catch(() => undefined);
     return () => {
@@ -278,12 +332,19 @@ export function KitchenBrowse({ slug }: { slug: string }) {
       router.push(loginPath("CUSTOMER", `/kitchen/${slug}`));
       return;
     }
+    if (!following) {
+      const ok = window.confirm(t("kitchen.followConsent"));
+      if (!ok) return;
+    }
     setFollowBusy(true);
     try {
       const path = following
         ? `/me/kitchens/${slug}/unfollow`
         : `/me/kitchens/${slug}/follow`;
-      const res = await authFetch(path, { method: "POST", body: "{}" });
+      const res = await authFetch(path, {
+        method: "POST",
+        body: following ? "{}" : JSON.stringify({ consent: true }),
+      });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Could not update follow");
       setFollowing(!following);
@@ -299,20 +360,53 @@ export function KitchenBrowse({ slug }: { slug: string }) {
     [data, selected],
   );
 
-  const pickupOk = Boolean(data?.pickup?.available);
-  const effectiveFulfillment =
-    pickupOk && fulfillmentMode === "PICKUP" ? "PICKUP" : "DELIVERY";
+  const offers = data?.fulfillmentOffers;
+  const pickupOk = Boolean(data?.pickup?.available ?? offers?.pickup);
+  const effectiveFulfillment = resolveEffectiveFulfillment(
+    fulfillmentMode,
+    offers,
+    Boolean(data?.pickup?.available),
+  );
+  const selectedAddress = addresses.find((a) => String(a.id) === addressId) ?? null;
+  const flatDeliveryPaise = selfDeliveryFeeOn
+    ? Math.round(Number(data?.cook.flatSelfDeliveryFee ?? 25) * 100)
+    : 0;
+  const deliveryQuote = resolveSelfDeliveryPaise({
+    distanceLimitsEnabled: distanceLimitsOn,
+    fulfillmentMode: effectiveFulfillment,
+    flatSelfDeliveryFeePaise: flatDeliveryPaise,
+    cookLat: data?.cook.lat,
+    cookLng: data?.cook.lng,
+    addressLat: selectedAddress?.lat,
+    addressLng: selectedAddress?.lng,
+    addressPinCode: selectedAddress?.pinCode,
+  });
+  // Until an address is chosen, show flat fee estimate; after quote resolves FREE/PAID use that.
   const deliveryPaise =
-    effectiveFulfillment === "PICKUP"
+    deliveryQuote.band === "FREE"
       ? 0
-      : Math.round(Number(data?.cook.flatSelfDeliveryFee ?? 25) * 100);
+      : deliveryQuote.band === "PAID" || deliveryQuote.band === "FLAT"
+        ? deliveryQuote.deliveryPaise
+        : deliveryQuote.band === "ZERO_FULFILLMENT"
+          ? 0
+          : flatDeliveryPaise;
+  const deliveryBlocked =
+    effectiveFulfillment === "DELIVERY" &&
+    distanceLimitsOn &&
+    (deliveryQuote.band === "TOO_FAR" ||
+      (Boolean(addressId) && deliveryQuote.band === "MISSING_COORDS"));
+  const needsAddress = needsCheckoutAddress(effectiveFulfillment);
 
   const weekRule = data?.weekDiscount;
-  const weekDiscountOn =
-    Boolean(weekRule && weekRule.percent > 0 && cart.length >= (weekRule.minDays ?? 3));
+  const cartDayCount = useMemo(
+    () => new Set(cart.map((c) => c.serviceDate)).size,
+    [cart],
+  );
+  const weekDiscountOn = Boolean(
+    weekRule && weekRule.percent > 0 && cartDayCount >= (weekRule.minDays ?? 3),
+  );
 
   const cartTotalPaise = useMemo(() => {
-    const dayCount = cart.length;
     const pct = weekDiscountOn ? (weekRule?.percent ?? 0) : 0;
     const linesPaise = cart.reduce((s, line) => {
       const food = line.pricePaise * line.qty;
@@ -320,7 +414,7 @@ export function KitchenBrowse({ slug }: { slug: string }) {
       return s + food - discount + deliveryPaise;
     }, 0);
     // ₹7 once per week checkout (matches API createOrderBatch)
-    const fee = cart.length > 0 ? PLATFORM_FEE_PAISE : 0;
+    const fee = cart.length > 0 ? platformFeePaise() : 0;
     return linesPaise + fee;
   }, [cart, deliveryPaise, weekDiscountOn, weekRule?.percent, fulfillmentMode]);
 
@@ -337,32 +431,43 @@ export function KitchenBrowse({ slug }: { slug: string }) {
     [cart],
   );
   const cartDeliveryPaise = deliveryPaise * cart.length;
-  const cartPlatformPaise = cart.length > 0 ? PLATFORM_FEE_PAISE : 0;
+  const cartPlatformPaise = cart.length > 0 ? platformFeePaise() : 0;
+
+  function confirmAnotherOrderIfNeeded(serviceDate: string): boolean {
+    if (!orderedDates.has(serviceDate)) return true;
+    return window.confirm(t("kitchen.confirmAnotherOrder"));
+  }
 
   function addToCart(line: CartAddPayload) {
-    if (orderedDates.has(line.serviceDate)) {
-      setCheckoutErr(t("kitchen.alreadyOrderedDay"));
-      setCartExpanded(true);
-      return;
-    }
+    if (!confirmAnotherOrderIfNeeded(line.serviceDate)) return;
     setCheckoutErr(null);
     setCart((prev) => {
-      const withoutDay = prev.filter((p) => p.serviceDate !== line.serviceDate);
+      // One plate per meal per day — breakfast + lunch + dinner same date is OK.
+      const withoutSlot = prev.filter(
+        (p) => !(p.serviceDate === line.serviceDate && p.mealType === mealType),
+      );
+      const mealRank: Record<MealType, number> = { BREAKFAST: 0, LUNCH: 1, DINNER: 2 };
       return [
-        ...withoutDay,
+        ...withoutSlot,
         {
           ...line,
           mealType,
           mealLabel: MEALS.find((m) => m.id === mealType)?.label ?? t("meal.lunch"),
         },
-      ].sort((a, b) => a.serviceDate.localeCompare(b.serviceDate));
+      ].sort((a, b) => {
+        const byDate = a.serviceDate.localeCompare(b.serviceDate);
+        if (byDate !== 0) return byDate;
+        return mealRank[a.mealType] - mealRank[b.mealType];
+      });
     });
     // Keep dock collapsed so the day strip stays tappable for more days.
     setCartExpanded(false);
   }
 
-  function removeFromCart(serviceDate: string) {
-    setCart((prev) => prev.filter((p) => p.serviceDate !== serviceDate));
+  function removeFromCart(serviceDate: string, lineMeal: MealType = mealType) {
+    setCart((prev) =>
+      prev.filter((p) => !(p.serviceDate === serviceDate && p.mealType === lineMeal)),
+    );
   }
 
   function selectServiceDay(serviceDate: string) {
@@ -381,7 +486,7 @@ export function KitchenBrowse({ slug }: { slug: string }) {
   }, [checkoutErr]);
 
   useEffect(() => {
-    if (addressId || effectiveFulfillment === "PICKUP") setCheckoutErr(null);
+    if (addressId || !needsAddress) setCheckoutErr(null);
   }, [addressId, effectiveFulfillment]);
 
   async function checkout() {
@@ -390,21 +495,32 @@ export function KitchenBrowse({ slug }: { slug: string }) {
       return;
     }
     if (!cart.length) return;
-    if (effectiveFulfillment === "DELIVERY" && !addressId) {
+    if (needsAddress && !addressId) {
       setCheckoutErr(t("address.chooseFirst"));
       return;
     }
+    if (deliveryBlocked) {
+      setCheckoutErr(
+        deliveryQuote.band === "TOO_FAR"
+          ? t("cart.deliveryTooFar")
+          : t("cart.deliveryDistanceUnavailable"),
+      );
+      return;
+    }
+    const overlaps = cart.some((c) => orderedDates.has(c.serviceDate));
+    if (overlaps && !window.confirm(t("kitchen.confirmAnotherOrder"))) return;
     setCheckingOut(true);
     setCheckoutErr(null);
     try {
       const res = await authFetch("/orders/batch", {
         method: "POST",
+        headers: { "Idempotency-Key": crypto.randomUUID() },
         body: JSON.stringify({
           customerMobile: user.mobile,
           cookSlug: slug,
           payerMobile: payerMobile || null,
           fulfillmentMode: effectiveFulfillment,
-          addressId: effectiveFulfillment === "DELIVERY" ? Number(addressId) : null,
+          addressId: needsAddress ? Number(addressId) : null,
           lines: cart.map((c) => ({
             menuItemId: c.menuItemId,
             serviceDate: c.serviceDate,
@@ -440,7 +556,9 @@ export function KitchenBrowse({ slug }: { slug: string }) {
   const cutoff = data.cutoff ?? data.lunchCutoff ?? "08:00";
   const mealName =
     MEALS.find((m) => m.id === mealType)?.label ?? data.mealLabel ?? t("meal.lunch");
-  const inCartForDay = cart.find((c) => c.serviceDate === day.serviceDate);
+  const inCartForDay = cart.find(
+    (c) => c.serviceDate === day.serviceDate && c.mealType === mealType,
+  );
 
   const statusText =
     data.openStatusLabel ??
@@ -496,7 +614,19 @@ export function KitchenBrowse({ slug }: { slug: string }) {
             <span className="kitchen-fact-inline-label">{t("kitchen.window")}</span>{" "}
             {data.deliveryWindow ?? "12:00–13:00"}
           </li>
+          {data.cook.deliveryType === "PARTNER" ? (
+            <li>
+              <span className="kitchen-fact-inline-label">{t("confirmed.partnerLogistics")}</span>{" "}
+              {t("confirmed.deliveredByPartner")}
+            </li>
+          ) : null}
         </ul>
+
+        {data.cook.deliveryType === "PARTNER" ? (
+          <p className="muted kitchen-partner-note" style={{ margin: "0.35rem 0 0" }}>
+            {t("kitchen.partnerDeliveryNote")}
+          </p>
+        ) : null}
 
         {data.weekDiscount?.label ? (
           <p className="ok kitchen-discount">{data.weekDiscount.label}</p>
@@ -504,28 +634,19 @@ export function KitchenBrowse({ slug }: { slug: string }) {
 
         {user?.role === "CUSTOMER" ? (
           <div className="kitchen-order-bar">
-            {pickupOk ? (
-              <div className="seg kitchen-fulfill-seg" role="group" aria-label="Fulfillment">
-                <button
-                  type="button"
-                  className={effectiveFulfillment === "DELIVERY" ? "on" : ""}
-                  onClick={() => setFulfillmentMode("DELIVERY")}
-                >
-                  {t("cart.delivery")}
-                </button>
-                <button
-                  type="button"
-                  className={effectiveFulfillment === "PICKUP" ? "on" : ""}
-                  onClick={() => setFulfillmentMode("PICKUP")}
-                >
-                  {t("cart.pickup")}
-                </button>
-              </div>
+            {data?.intakePaused ? (
+              <p className="err">{t("cart.kitchenPaused")}</p>
             ) : null}
+            <FulfillmentChooser
+              value={effectiveFulfillment}
+              onChange={setFulfillmentMode}
+              offers={offers}
+              pickupAvailable={Boolean(data?.pickup?.available)}
+            />
             {effectiveFulfillment === "PICKUP" && data?.pickup?.hint ? (
               <p className="muted kitchen-pickup-hint">{data.pickup.hint}</p>
             ) : null}
-            {effectiveFulfillment === "DELIVERY" ? (
+            {needsAddress ? (
               <CheckoutAddressPicker
                 addresses={addresses}
                 addressId={addressId}
@@ -576,10 +697,18 @@ export function KitchenBrowse({ slug }: { slug: string }) {
             </button>
           ))}
         </div>
+        {againMode ? (
+          <p className="muted kitchen-reorder-hint" style={{ margin: "0.35rem 0 0.5rem" }}>
+            {t("kitchen.reorderHint")}
+          </p>
+        ) : null}
+
         {data.mealEnabled !== false ? (
           <div className="day-strip" role="tablist" aria-label="Service days">
             {data.plan.map((d) => {
-              const carted = cart.some((c) => c.serviceDate === d.serviceDate);
+              const carted = cart.some(
+                (c) => c.serviceDate === d.serviceDate && c.mealType === mealType,
+              );
               const alreadyOrdered = orderedDates.has(d.serviceDate);
               return (
                 <button
@@ -642,10 +771,11 @@ export function KitchenBrowse({ slug }: { slug: string }) {
               <div className="cart-day-banner tone-warn">
                 <span>{t("kitchen.alreadyOrderedDay")}</span>
                 <Link className="btn sm secondary" href="/orders">
-                  {t("nav.orders")}
+                  {t("orders.title")}
                 </Link>
               </div>
-            ) : inCartForDay ? (
+            ) : null}
+            {inCartForDay ? (
               <div className="ok cart-day-banner">
                 <span>
                   {t("kitchen.inWeekCart", {
@@ -656,7 +786,7 @@ export function KitchenBrowse({ slug }: { slug: string }) {
                 <button
                   type="button"
                   className="btn sm secondary"
-                  onClick={() => removeFromCart(day.serviceDate)}
+                  onClick={() => removeFromCart(day.serviceDate, mealType)}
                 >
                   {t("common.remove")}
                 </button>
@@ -685,10 +815,12 @@ export function KitchenBrowse({ slug }: { slug: string }) {
                     style={{ animationDelay: `${Math.min(day.menus.indexOf(m), 4) * 60}ms` }}
                   >
                     {src ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img className="menu-thumb lg" src={src} alt={dish} />
+                      <div className="plate-media">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img className="plate-photo" src={src} alt={dish} />
+                      </div>
                     ) : (
-                      <div className="menu-thumb lg plate-fallback" aria-hidden>
+                      <div className="plate-fallback" aria-hidden>
                         <span className="plate-fallback-mark">{t("common.plate")}</span>
                         <span className="plate-fallback-name">{dish}</span>
                       </div>
@@ -704,22 +836,25 @@ export function KitchenBrowse({ slug }: { slug: string }) {
                         </div>
                         <strong className="plate-price">₹{(m.pricePaise / 100).toFixed(0)}</strong>
                       </div>
-                      {orderedDates.has(day.serviceDate) ? null : (
-                        <OrderForm
-                          cookSlug={slug}
-                          menuItemId={m.id}
-                          itemName={m.itemName}
-                          itemNameTa={m.itemNameTa}
-                          serviceDate={day.serviceDate}
-                          pricePaise={m.pricePaise}
-                          orderingOpen={day.orderingOpen}
-                          onAddToCart={day.orderingOpen ? addToCart : undefined}
-                          addressId={addressId}
-                          needsAddress={effectiveFulfillment === "DELIVERY"}
-                          fulfillmentMode={effectiveFulfillment}
-                          payerMobile={payerMobile || null}
-                        />
-                      )}
+                      <OrderForm
+                        cookSlug={slug}
+                        menuItemId={m.id}
+                        itemName={m.itemName}
+                        itemNameTa={m.itemNameTa}
+                        serviceDate={day.serviceDate}
+                        pricePaise={m.pricePaise}
+                        orderingOpen={day.orderingOpen}
+                        onAddToCart={day.orderingOpen ? addToCart : undefined}
+                        confirmBeforeOrder={
+                          orderedDates.has(day.serviceDate)
+                            ? () => window.confirm(t("kitchen.confirmAnotherOrder"))
+                            : undefined
+                        }
+                        addressId={addressId}
+                        needsAddress={needsAddress}
+                        fulfillmentMode={effectiveFulfillment}
+                        payerMobile={payerMobile || null}
+                      />
                     </div>
                   </article>
                 );
@@ -765,9 +900,9 @@ export function KitchenBrowse({ slug }: { slug: string }) {
           className={`cart-dock${cartExpanded ? " is-expanded" : " is-collapsed"}`}
           role="dialog"
           aria-label={
-            cart.length === 1
-              ? t("cart.title", { n: cart.length })
-              : t("cart.title_plural", { n: cart.length })
+            cartDayCount === 1
+              ? t("cart.title", { n: cartDayCount })
+              : t("cart.title_plural", { n: cartDayCount })
           }
           aria-expanded={cartExpanded}
         >
@@ -780,9 +915,9 @@ export function KitchenBrowse({ slug }: { slug: string }) {
               >
                 <span className="cart-dock-compact-copy">
                   <strong className="cart-dock-title">
-                    {cart.length === 1
-                      ? t("cart.title", { n: cart.length })
-                      : t("cart.title_plural", { n: cart.length })}
+                    {cartDayCount === 1
+                      ? t("cart.title", { n: cartDayCount })
+                      : t("cart.title_plural", { n: cartDayCount })}
                   </strong>
                   <span className="muted cart-dock-compact-hint">{t("cart.addMoreDays")}</span>
                 </span>
@@ -803,9 +938,9 @@ export function KitchenBrowse({ slug }: { slug: string }) {
               <div className="cart-dock-sum">
                 <div>
                   <strong className="cart-dock-title">
-                    {cart.length === 1
-                      ? t("cart.title", { n: cart.length })
-                      : t("cart.title_plural", { n: cart.length })}
+                    {cartDayCount === 1
+                      ? t("cart.title", { n: cartDayCount })
+                      : t("cart.title_plural", { n: cartDayCount })}
                   </strong>
                   <button
                     type="button"
@@ -821,15 +956,17 @@ export function KitchenBrowse({ slug }: { slug: string }) {
                     <p className="ok" style={{ margin: "0.15rem 0 0", fontSize: "0.82rem" }}>
                       {t("cart.weekOff", { amount: (cartDiscountPaise / 100).toFixed(0) })}
                     </p>
-                  ) : weekRule?.percent && cart.length > 0 && cart.length < weekRule.minDays ? (
+                  ) : weekRule?.percent &&
+                    cartDayCount > 0 &&
+                    cartDayCount < weekRule.minDays ? (
                     <p className="muted" style={{ margin: "0.15rem 0 0", fontSize: "0.78rem" }}>
-                      {weekRule.minDays - cart.length === 1
+                      {weekRule.minDays - cartDayCount === 1
                         ? t("cart.addMore", {
-                            n: weekRule.minDays - cart.length,
+                            n: weekRule.minDays - cartDayCount,
                             pct: weekRule.percent,
                           })
                         : t("cart.addMore_plural", {
-                            n: weekRule.minDays - cart.length,
+                            n: weekRule.minDays - cartDayCount,
                             pct: weekRule.percent,
                           })}
                     </p>
@@ -837,16 +974,17 @@ export function KitchenBrowse({ slug }: { slug: string }) {
                 </div>
               </div>
               <ul className="cart-dock-lines" aria-label={t("cart.orderDetails")}>
-                {[...cart]
-                  .sort((a, b) => a.serviceDate.localeCompare(b.serviceDate))
-                  .map((line) => {
+                {[...cart].map((line) => {
                     const dayMeta = data.plan.find((d) => d.serviceDate === line.serviceDate);
                     const dayTitle = dayMeta
                       ? formatDayTitle(dayMeta)
                       : line.serviceDate.slice(5);
                     const lineFood = line.pricePaise * line.qty;
                     return (
-                      <li key={`${line.serviceDate}-${line.menuItemId}`} className="cart-dock-line">
+                      <li
+                        key={`${line.serviceDate}-${line.mealType}-${line.menuItemId}`}
+                        className="cart-dock-line"
+                      >
                         <div className="cart-dock-line-main">
                           <strong className="cart-dock-line-item">
                             {localizedDishName(locale, line)}
@@ -863,7 +1001,7 @@ export function KitchenBrowse({ slug }: { slug: string }) {
                             type="button"
                             className="cart-dock-line-remove"
                             aria-label={`${t("cart.removeLine")} ${localizedDishName(locale, line)}`}
-                            onClick={() => removeFromCart(line.serviceDate)}
+                            onClick={() => removeFromCart(line.serviceDate, line.mealType)}
                           >
                             {t("cart.removeLine")}
                           </button>
@@ -872,30 +1010,20 @@ export function KitchenBrowse({ slug }: { slug: string }) {
                     );
                   })}
               </ul>
-              {pickupOk ? (
-                <div className="seg" role="group" aria-label="Fulfillment" style={{ marginTop: "0.55rem" }}>
-                  <button
-                    type="button"
-                    className={effectiveFulfillment === "DELIVERY" ? "on" : ""}
-                    onClick={() => setFulfillmentMode("DELIVERY")}
-                  >
-                    {t("cart.delivery")}
-                  </button>
-                  <button
-                    type="button"
-                    className={effectiveFulfillment === "PICKUP" ? "on" : ""}
-                    onClick={() => setFulfillmentMode("PICKUP")}
-                  >
-                    {t("cart.pickup")}
-                  </button>
-                </div>
-              ) : null}
+              <FulfillmentChooser
+                value={effectiveFulfillment}
+                onChange={setFulfillmentMode}
+                offers={offers}
+                pickupAvailable={Boolean(data?.pickup?.available)}
+                className="seg"
+                style={{ marginTop: "0.55rem" }}
+              />
               {effectiveFulfillment === "PICKUP" && data?.pickup?.hint ? (
                 <p className="muted" style={{ margin: "0.4rem 0 0", fontSize: "0.82rem" }}>
                   {data.pickup.hint}
                 </p>
               ) : null}
-              {effectiveFulfillment === "DELIVERY" ? (
+              {needsAddress ? (
                 <div
                   className={`cart-dock-address${
                     checkoutErr && !addressId ? " needs-address" : ""
@@ -922,9 +1050,29 @@ export function KitchenBrowse({ slug }: { slug: string }) {
                 <li>
                   {effectiveFulfillment === "PICKUP"
                     ? t("cart.pickupFee")
-                    : t("cart.deliveryFee", { amount: (cartDeliveryPaise / 100).toFixed(0) })}
+                    : effectiveFulfillment === "CUSTOMER_ARRANGE"
+                      ? t("cart.customerArrangeFee")
+                      : deliveryQuote.band === "FREE"
+                        ? t("cart.deliveryFree")
+                        : t("cart.deliveryFee", {
+                            amount: (cartDeliveryPaise / 100).toFixed(0),
+                          })}
                 </li>
-                <li>{t("cart.platform", { amount: (cartPlatformPaise / 100).toFixed(0) })}</li>
+                {distanceLimitsOn && effectiveFulfillment === "DELIVERY" ? (
+                  <li className="muted">{t("cart.deliveryDistanceHint")}</li>
+                ) : null}
+                {deliveryBlocked ? (
+                  <li className="tone-warn">
+                    {deliveryQuote.band === "TOO_FAR"
+                      ? t("cart.deliveryTooFar")
+                      : t("cart.deliveryDistanceUnavailable")}
+                  </li>
+                ) : null}
+                {!isSoloKitchenMode() ? (
+                  <li>
+                    {t("cart.platform", { amount: (cartPlatformPaise / 100).toFixed(0) })}
+                  </li>
+                ) : null}
               </ul>
               {childPaysOn && payers.length > 0 ? (
                 <label className="cart-dock-payer muted">
@@ -958,7 +1106,7 @@ export function KitchenBrowse({ slug }: { slug: string }) {
                 <button
                   className="btn mustard"
                   type="button"
-                  disabled={checkingOut}
+                  disabled={checkingOut || deliveryBlocked}
                   onClick={checkout}
                 >
                   {checkingOut

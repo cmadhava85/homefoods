@@ -1,5 +1,7 @@
 # API architecture
 
+For a full walkthrough (boot → every module → web/WA/pay flows), see **[CODE_TOUR.md](./CODE_TOUR.md)**.
+
 LocalMeals API is a **modular monolith**: Fastify HTTP/WhatsApp wiring → `apps/api/src/services/*` → `@localmeals/domain` + `@localmeals/adapters`.
 
 ## Composition root

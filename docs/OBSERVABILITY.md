@@ -16,6 +16,23 @@ How to debug money, WhatsApp, and cut-off/EOD issues in staging/prod.
 
 Package: [`packages/observability`](../packages/observability).
 
+## Support first (Admin) — then logs
+
+For “where is my order / refund / WhatsApp?” start in **Admin → Orders**:
+
+1. Paste **LM-…**, **checkout id**, **`trc_…`**, or Razorpay **txn id**.
+2. Read the bundle: status, payments, **WhatsApp/outbox** (pending/failed), activity timeline.
+3. Copy `traceId` from the card → Cloud Logging (filter is shown on the card).
+
+Ledger events that matter for ops:
+
+| `eventName` | Meaning |
+|-------------|---------|
+| `ORDER_*` / `CHILD_PAYS_REQUESTED` | Customer/cook journey on the order |
+| `OUTBOX_NOTIFY_FAILED` | Worker could not send WA (flag off, allowlist, max retries) |
+| `PAYMENT_CONFIRMING_STUCK` | Paid link open too long without webhook (deduped 6h) |
+| `GATEWAY_*` | Raw payment webhook kinds |
+
 ## Trace an order (ops) — prefer `traceId`
 
 Each checkout/order gets one durable **`traceId`** (`trc_…`) at create time. It is:
@@ -24,10 +41,11 @@ Each checkout/order gets one durable **`traceId`** (`trc_…`) at create time. I
 - sent to Razorpay as payment-link `notes.traceId` (comes back on webhooks)
 - embedded on outbox `_corr.traceId`
 - returned as response header **`X-Trace-Id`** (and in create/batch JSON when present)
+- shown on Admin order support
 
 `requestId` still changes on every HTTP call (including each webhook delivery). **Use `traceId` to join create → pay webhook → outbox → worker.**
 
-1. Get `traceId` from Admin/order JSON, `X-Trace-Id`, or `publicId` if older rows were backfilled.
+1. Get `traceId` from Admin order support, `X-Trace-Id`, or `publicId` if older rows were backfilled.
 2. Cloud Logging:
 
 ```text
@@ -40,6 +58,8 @@ jsonPayload.traceId="trc_…"
 ```text
 jsonPayload.publicId="LM-…"
 ```
+
+OpenTelemetry (`OTEL_ENABLED=true`) is optional for latency/infra — **not** the primary support tool.
 
 ## Stable `event` values
 

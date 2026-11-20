@@ -72,6 +72,7 @@ export async function getCustomerProfile(db: Db, mobile: string) {
   });
   if (!row) throw new Error("Customer not found");
   const addressList = await listAddressesForMobile(db, userMobile);
+  const consents = (row.consents ?? {}) as Record<string, boolean>;
   return {
     mobile: row.mobileNumber,
     fullName: row.fullName,
@@ -79,6 +80,7 @@ export async function getCustomerProfile(db: Db, mobile: string) {
     preferredLanguage: row.preferredLanguage,
     addresses: addressList,
     needsName: !row.fullName || row.fullName === "Guest",
+    leanWaStatus: consents.leanWaStatus === true,
   };
 }
 
@@ -89,6 +91,7 @@ export async function updateCustomerProfile(
     fullName?: string;
     pinCode?: string;
     preferredLanguage?: string;
+    leanWaStatus?: boolean;
   },
 ) {
   const userMobile = normalizeMobile(input.mobile);
@@ -111,6 +114,13 @@ export async function updateCustomerProfile(
     if (lang !== "en" && lang !== "ta") throw new Error("Language must be en or ta");
     patch.preferredLanguage = lang;
   }
+  if (input.leanWaStatus !== undefined) {
+    const consents: Record<string, unknown> = {
+      ...((row.consents ?? {}) as Record<string, unknown>),
+      leanWaStatus: Boolean(input.leanWaStatus),
+    };
+    patch.consents = consents;
+  }
   if (!Object.keys(patch).length) throw new Error("Nothing to update");
 
   const [updated] = await db
@@ -119,11 +129,13 @@ export async function updateCustomerProfile(
     .where(eq(users.mobileNumber, userMobile))
     .returning();
 
+  const consents = (updated.consents ?? {}) as Record<string, boolean>;
   return {
     mobile: updated.mobileNumber,
     fullName: updated.fullName,
     pinCode: updated.pinCode,
     preferredLanguage: updated.preferredLanguage,
     needsName: !updated.fullName || updated.fullName === "Guest",
+    leanWaStatus: consents.leanWaStatus === true,
   };
 }

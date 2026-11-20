@@ -33,13 +33,13 @@ const PERSONA_MOBILES: Record<Persona, string> = {
 const PERSONA_QUICK: Record<Persona, string[]> = {
   customer: [
     "Menu",
-    "Week sri-sai",
+    "Week csk-homemade-delights",
     "Orders",
-    "Follow sri-sai",
+    "Follow csk-homemade-delights",
     "Pay",
     "Cancel",
     "Family",
-    "Order sri-sai 1 PICKUP",
+    "Order csk-homemade-delights 1 PICKUP",
   ],
   cook: [
     "Add Sambar rice 80",
@@ -88,7 +88,7 @@ export default function WhatsAppSimPage() {
       id: mid(),
       role: "bot",
       text: "Hi! Menu · Week <kitchen> all · Orders · Follow <kitchen> · Pay / Cancel.",
-      buttons: ["Menu", "Orders", "Week sri-sai"],
+      buttons: ["Menu", "Orders", "Week csk-homemade-delights"],
     },
   ]);
 

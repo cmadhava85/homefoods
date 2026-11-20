@@ -419,7 +419,7 @@ export function parsePayCommand(text: string): { publicId?: string; checkoutId?:
   return { publicId: id };
 }
 
-/** Parse "Follow sri-sai" / "Unfollow sri-sai". */
+/** Parse "Follow csk-homemade-delights" / "Unfollow csk-homemade-delights". */
 export function parseFollowCommand(text: string): { slug?: string } {
   const m = text.trim().match(/^(?:un)?follow(?:\s+([a-z0-9-]+))?$/i);
   return { slug: m?.[1]?.toLowerCase() };
@@ -438,17 +438,17 @@ const WEEK_MEAL_ALIAS: Record<string, "BREAKFAST" | "LUNCH" | "DINNER"> = {
 
 /**
  * Parse week / advance cart commands:
- * - Week sri-sai
- * - Week sri-sai lunch
- * - Week sri-sai lunch all
- * - Week sri-sai L all 2
- * - Week sri-sai dinner Mon Wed Fri
+ * - Week csk-homemade-delights
+ * - Week csk-homemade-delights lunch
+ * - Week csk-homemade-delights lunch all
+ * - Week csk-homemade-delights L all 2
+ * - Week csk-homemade-delights dinner Mon Wed Fri
  */
 export function parseWeekCommand(text: string): {
   slug?: string;
   mealType?: "BREAKFAST" | "LUNCH" | "DINNER";
   addressLabel?: WaAddressLabel;
-  fulfillmentMode?: "DELIVERY" | "PICKUP";
+  fulfillmentMode?: "DELIVERY" | "PICKUP" | "CUSTOMER_ARRANGE";
   payerMobile?: string;
   all?: boolean;
   itemIndex?: number;
@@ -502,11 +502,11 @@ export function parseWeekCommand(text: string): {
   };
 }
 
-/** Trailing HOME|PICKUP and optional PAY +mobile on order/week/late commands. */
+/** Trailing HOME|PICKUP|ARRANGE and optional PAY +mobile on order/week/late commands. */
 export function stripWaCheckoutExtras(rest: string): {
   rest: string;
   addressLabel?: WaAddressLabel;
-  fulfillmentMode?: "DELIVERY" | "PICKUP";
+  fulfillmentMode?: "DELIVERY" | "PICKUP" | "CUSTOMER_ARRANGE";
   payerMobile?: string;
 } {
   let s = rest.trim();
@@ -516,8 +516,14 @@ export function stripWaCheckoutExtras(rest: string): {
     payerMobile = payTail[1];
     s = s.slice(0, s.length - payTail[0].length).trim();
   }
-  let fulfillmentMode: "DELIVERY" | "PICKUP" | undefined;
+  let fulfillmentMode: "DELIVERY" | "PICKUP" | "CUSTOMER_ARRANGE" | undefined;
   let addressLabel: WaAddressLabel | undefined;
+  // ARRANGE / PORTER = customer arranges auto; may appear with HOME (address still needed).
+  const arrangeTail = s.match(/(?:^|\s+)(arrange|porter|customer_arrange)$/i);
+  if (arrangeTail) {
+    fulfillmentMode = "CUSTOMER_ARRANGE";
+    s = s.slice(0, s.length - arrangeTail[0].length).trim();
+  }
   const placeTail = s.match(/(?:^|\s+)(home|office|other|house|work|pickup)$/i);
   if (placeTail) {
     const tok = placeTail[1].toLowerCase();
@@ -538,7 +544,7 @@ export function parseCancelCommand(text: string): { publicId?: string; checkoutI
   return { publicId: id };
 }
 
-/** "Menu", "Menu sri-sai", or bare "sri-sai". */
+/** "Menu", "Menu csk-homemade-delights", or bare "csk-homemade-delights". */
 export function parseMenuCommand(text: string): { slug?: string } {
   const raw = text.trim();
   const withMenu = raw.match(/^menu(?:\s+([a-z0-9-]+))?$/i);
@@ -550,12 +556,12 @@ export function parseMenuCommand(text: string): { slug?: string } {
   return {};
 }
 
-/** Parse "Order sri-sai", "Order sri-sai 1 HOME", "Order sri-sai 1 PICKUP PAY 98…". */
+/** Parse "Order csk-homemade-delights", "Order csk-homemade-delights 1 HOME", "Order csk-homemade-delights 1 PICKUP PAY 98…". */
 export function parseOrderCommand(text: string): {
   slug?: string;
   itemIndex?: number;
   addressLabel?: WaAddressLabel;
-  fulfillmentMode?: "DELIVERY" | "PICKUP";
+  fulfillmentMode?: "DELIVERY" | "PICKUP" | "CUSTOMER_ARRANGE";
   payerMobile?: string;
 } {
   const raw = text.trim();
@@ -571,12 +577,12 @@ export function parseOrderCommand(text: string): {
   };
 }
 
-/** Parse "Late sri-sai", "late sri-sai 2 HOME", "Late sri-sai 1 PICKUP". */
+/** Parse "Late csk-homemade-delights", "late csk-homemade-delights 2 HOME", "Late csk-homemade-delights 1 PICKUP". */
 export function parseLateCommand(text: string): {
   slug?: string;
   itemIndex?: number;
   addressLabel?: WaAddressLabel;
-  fulfillmentMode?: "DELIVERY" | "PICKUP";
+  fulfillmentMode?: "DELIVERY" | "PICKUP" | "CUSTOMER_ARRANGE";
   payerMobile?: string;
 } {
   const raw = text.trim();

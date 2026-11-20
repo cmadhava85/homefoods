@@ -28,6 +28,13 @@ describe("resolveRequestLocale", () => {
     const req = { headers: {} } as unknown as FastifyRequest;
     assert.equal(resolveRequestLocale(req), "en");
   });
+
+  it("reads first x-locale array value", () => {
+    const req = {
+      headers: { "x-locale": ["ta", "en"] },
+    } as unknown as FastifyRequest;
+    assert.equal(resolveRequestLocale(req), "ta");
+  });
 });
 
 describe("publicErrorMessage", () => {
@@ -46,6 +53,15 @@ describe("publicErrorMessage", () => {
       const msg = publicErrorMessage(e, "en");
       assert.match(msg, /qty|Required|required/i);
     }
+  });
+
+  it("formats nested Zod path and empty ZodError", () => {
+    try {
+      z.object({ address: z.object({ pin: z.string().min(1) }) }).parse({ address: { pin: "" } });
+    } catch (e) {
+      assert.match(publicErrorMessage(e, "en"), /address\.pin|String|pin/i);
+    }
+    assert.equal(publicErrorMessage(new ZodError([]), "en"), t("en", "error.generic"));
   });
 
   it("hides database internals and localizes", () => {
@@ -89,9 +105,26 @@ describe("httpStatusForError", () => {
     assert.equal(httpStatusForError(new Error("not your kitchen")), 403);
     assert.equal(httpStatusForError(new Error("not your order")), 403);
     assert.equal(httpStatusForError(new Error("mock-confirm disabled")), 403);
+    assert.equal(httpStatusForError(new Error("disabled when ordering is off")), 403);
+    assert.equal(httpStatusForError(new Error("not allowed for this role")), 403);
+    assert.equal(httpStatusForError(new Error("error.mockPayOff")), 403);
     assert.equal(httpStatusForError(new Error("amount does not match")), 409);
+    // "not allowed" also matches the 403 regex — CORS message is intentionally 403 today.
+    assert.equal(httpStatusForError(new Error("CORS origin not allowed")), 403);
     assert.equal(httpStatusForError(new Error("ECONNREFUSED postgres")), 500);
     assert.equal(httpStatusForError(new Error("duplicate key value")), 500);
+    assert.equal(httpStatusForError(new Error("violates foreign key constraint")), 500);
+    assert.equal(httpStatusForError(new Error("connection refused")), 500);
+    assert.equal(httpStatusForError(new Error("drizzle query failed")), 500);
+    assert.equal(httpStatusForError(new Error("error.kitchenNotFound")), 404);
+    assert.equal(httpStatusForError(new Error("error.customerNotFound")), 404);
+    assert.equal(httpStatusForError(new Error("error.notFound")), 404);
+    assert.equal(httpStatusForError(new Error("Sign in as a cook")), 401);
+  });
+
+  it("stringifies non-Error status mapping", () => {
+    assert.equal(httpStatusForError("plain failure"), 400);
+    assert.equal(httpStatusForError(null), 400);
   });
 
   it("honours statusCode on thrown objects", () => {

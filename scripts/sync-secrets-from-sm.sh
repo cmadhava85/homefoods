@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Pull Razorpay + WhatsApp secrets from GCP Secret Manager into local .env.
 # Does NOT flip MOCK_* (keeps local simulator / mock-confirm usable).
+# Compatible with macOS /bin/bash 3.2 (no associative arrays).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="$ROOT/.env"
@@ -20,23 +21,16 @@ need=(
   RAZORPAY_WEBHOOK_SECRET
 )
 
-declare -A VALS=()
 for s in "${need[@]}"; do
-  VALS["$s"]="$(gcloud secrets versions access latest --secret="$s")"
-  if [[ -z "${VALS[$s]}" || "${VALS[$s]}" == "REPLACE_ME" ]]; then
+  val="$(gcloud secrets versions access latest --secret="$s")"
+  if [[ -z "$val" || "$val" == "REPLACE_ME" ]]; then
     echo "BAD secret: $s (empty or REPLACE_ME)" >&2
     exit 1
   fi
-  echo "OK  $s (len=${#VALS[$s]})"
+  echo "OK  $s (len=${#val})"
+  export "SYNC_${s}=${val}"
 done
 
-export SYNC_WHATSAPP_VERIFY_TOKEN="${VALS[WHATSAPP_VERIFY_TOKEN]}"
-export SYNC_WHATSAPP_APP_SECRET="${VALS[WHATSAPP_APP_SECRET]}"
-export SYNC_WHATSAPP_ACCESS_TOKEN="${VALS[WHATSAPP_ACCESS_TOKEN]}"
-export SYNC_WHATSAPP_PHONE_NUMBER_ID="${VALS[WHATSAPP_PHONE_NUMBER_ID]}"
-export SYNC_RAZORPAY_KEY_ID="${VALS[RAZORPAY_KEY_ID]}"
-export SYNC_RAZORPAY_KEY_SECRET="${VALS[RAZORPAY_KEY_SECRET]}"
-export SYNC_RAZORPAY_WEBHOOK_SECRET="${VALS[RAZORPAY_WEBHOOK_SECRET]}"
 export SYNC_ENV_FILE="$ENV_FILE"
 
 python3 <<'PY'

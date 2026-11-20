@@ -51,6 +51,10 @@ This document is **scope guidance**, not a PCI attestation.
 - PII retention purge: `POST /internal/ops/retention` (worker daily 03:00; `PII_RETENTION_DAYS` default 90)
 - Security headers on Next; CSP with per-request **nonce** (prod: no script `unsafe-inline` / `unsafe-eval`; local Next Fast Refresh still allows `unsafe-eval`)
 - `assertAuthed` **always** requires role (admin/internal never soft-open when `AUTH_ENFORCE` is off)
+- HTTP `POST /orders` (+ batch / late-request) always require CUSTOMER session; body `customerMobile` cannot spoof another account
+- WhatsApp cancel / week Pay check sender owns the order/checkout
+- COOK sessions re-checked against LIVE + active kitchen on each request
+- `/internal/cutoffs` as COOK only runs for that cook’s kitchen (no global/force)
 - Anonymous `GET /orders/:id` and `GET /checkouts/:id` return a **redacted** view (no mobiles); owner/staff get PII
 - Stronger `LM-` / `CHK-` ids (`randomBytes`); cook `late-accept` by `publicId` bound to kitchen slug
 - `mock-confirm` refuses non-`mock_` ids and is blocked in `NODE_ENV=production`
@@ -65,8 +69,8 @@ This document is **scope guidance**, not a PCI attestation.
 
 | # | Risk | Status | Notes |
 |---|------|--------|--------|
-| API1 | Broken Object Level Authorization | **Partial** | Redacted public order/checkout views (no mobiles/address — `hasDeliveryAddress` only); cancel/concern/review ownership; late-accept kitchen bind; hardened `LM-`/`CHK-` ids. |
-| API2 | Broken Authentication | **Partial** | OTP hash, revoke, LIVE cook desk, prod boot. `assertAuthed` fail-closed. Soft customer binding when `AUTH_ENFORCE` off remains for local/tests only. |
+| API1 | Broken Object Level Authorization | **Hardened** | Redacted public order/checkout views; shared `orderOwnership` for HTTP + WA cancel/pay; concern photo bound to order owner; cook cutoffs scoped to own kitchen. |
+| API2 | Broken Authentication | **Hardened** | OTP hash, revoke, LIVE cook revalidated on every request; `assertAuthed` fail-closed; HTTP order create **always** requires CUSTOMER session (`bindCustomerMobile` ignores body mobile). |
 | API3 | Broken Object Property Level Authorization | **Partial** | Zod writes; public DTO strips mobiles; concern photo allowlist. |
 | API4 | Unrestricted Resource Consumption | **Partial** | Global + route limits; Postgres store; prod fail-closed on store errors. |
 | API5 | Broken Function Level Authorization | **Partial** | Kitchen staff always enforced; admin via `assertAuthed`; internal token or staff. |

@@ -59,7 +59,9 @@ export async function handleBrowse(s: WaSession): Promise<object> {
           slug,
           itemIndex: n,
           forceLate: Boolean(session.payload.forceLate),
-          fulfillmentMode: session.payload.fulfillmentMode === "PICKUP" ? "PICKUP" : "DELIVERY",
+          fulfillmentMode: (await import("@localmeals/domain")).normalizeFulfillmentMode(
+            session.payload.fulfillmentMode,
+          ),
           payerMobile: session.payload.payerMobile ?? null,
         });
       }
@@ -84,7 +86,9 @@ export async function handleBrowse(s: WaSession): Promise<object> {
           itemIndex,
           addressLabel: chosen.label as "HOME" | "OFFICE" | "OTHER",
           forceLate: Boolean(session.payload.forceLate),
-          fulfillmentMode: session.payload.fulfillmentMode === "PICKUP" ? "PICKUP" : "DELIVERY",
+          fulfillmentMode: (await import("@localmeals/domain")).normalizeFulfillmentMode(
+            session.payload.fulfillmentMode,
+          ),
           payerMobile: session.payload.payerMobile ?? null,
         });
       }
@@ -171,7 +175,7 @@ export async function handleBrowse(s: WaSession): Promise<object> {
         "",
         wt("wa.orderWithLabel"),
       ].join("\n"),
-      buttons: ["Menu", `Order sri-sai 1 ${list[0].label}`, "Help"],
+      buttons: ["Menu", `Order csk-homemade-delights 1 ${list[0].label}`, "Help"],
     });
     return { ok: true, intent, replies: replies() };
         });

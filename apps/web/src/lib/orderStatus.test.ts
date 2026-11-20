@@ -126,12 +126,13 @@ describe("statusTone", () => {
     expect(statusTone("PAID")).toBe("progress");
     expect(statusTone("COOKING")).toBe("progress");
     expect(statusTone("PACKED")).toBe("progress");
+    expect(statusTone("ASSIGNING_RIDER")).toBe("progress");
     expect(statusTone("DISPATCHED")).toBe("go");
     expect(statusTone("DELAYED")).toBe("go");
     expect(statusTone("DELIVERED")).toBe("done");
     expect(statusTone("CANCELLED")).toBe("bad");
     expect(statusTone("FAILED")).toBe("bad");
-    expect(statusTone("REFUNDED")).toBe("bad");
+    expect(statusTone("REFUNDED")).toBe("warn");
     expect(statusTone("UNKNOWN")).toBe("neutral");
   });
 });
@@ -154,6 +155,16 @@ describe("progressIndex / progressSteps", () => {
     expect(steps[1].state).toBe("current");
     expect(steps[0].state).toBe("done");
     expect(steps[2].state).toBe("todo");
+
+    expect(progressIndex("ASSIGNING_RIDER", null, "PARTNER")).toBe(3);
+    // PARTNER alone (not ASSIGNING_RIDER) and ASSIGNING_RIDER alone (not PARTNER)
+    expect(progressIndex("DISPATCHED", null, "PARTNER")).toBe(4);
+    expect(progressIndex("ASSIGNING_RIDER", null, null)).toBe(3);
+    expect(progressIndex("ASSIGNING_RIDER", "DELIVERY", "SELF")).toBe(3);
+    const partner = progressSteps(t as never, "ASSIGNING_RIDER", null, "PARTNER");
+    expect(partner).toHaveLength(6);
+    expect(partner[3].state).toBe("current");
+    expect(progressSteps(t as never, "DISPATCHED", null, "PARTNER")).toHaveLength(6);
 
     const pickup = progressSteps(t as never, "PACKED", "PICKUP");
     expect(pickup).toHaveLength(4);
@@ -182,6 +193,10 @@ describe("cookNextAction", () => {
     expect(cookNextAction(t as never, "PACKED", "PICKUP")).toEqual({
       label: "T:status.cook.markPickedUp",
       pathSuffix: "delivered",
+    });
+    expect(cookNextAction(t as never, "ASSIGNING_RIDER")).toEqual({
+      label: "T:status.cook.riderAssigned",
+      pathSuffix: "rider-assigned",
     });
     expect(cookNextAction(t as never, "DISPATCHED")).toEqual({
       label: "T:status.cook.markDelivered",

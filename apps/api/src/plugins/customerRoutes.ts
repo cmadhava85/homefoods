@@ -124,6 +124,7 @@ app.patch("/me/profile", async (req, reply) => {
       fullName: z.string().min(2).max(80).optional(),
       pinCode: z.string().min(6).max(6).optional(),
       preferredLanguage: z.enum(["en", "ta"]).optional(),
+      leanWaStatus: z.boolean().optional(),
     })
     .parse(req.body);
   try {
@@ -155,6 +156,8 @@ app.post("/me/addresses", async (req, reply) => {
       line1: z.string().min(5),
       line2: z.string().optional().nullable(),
       pinCode: z.string().min(6).max(6),
+      lat: z.union([z.string(), z.number()]).optional().nullable(),
+      lng: z.union([z.string(), z.number()]).optional().nullable(),
       isDefault: z.boolean().optional(),
     })
     .parse(req.body);
@@ -177,6 +180,8 @@ app.patch("/me/addresses/:id", async (req, reply) => {
       line1: z.string().min(5).optional(),
       line2: z.string().optional().nullable(),
       pinCode: z.string().min(6).max(6).optional(),
+      lat: z.union([z.string(), z.number()]).optional().nullable(),
+      lng: z.union([z.string(), z.number()]).optional().nullable(),
       isDefault: z.boolean().optional(),
     })
     .parse(req.body);
@@ -205,7 +210,7 @@ app.post(
         spice: z.enum(["NORMAL", "LESS"]).default("NORMAL"),
         channel: z.enum(["WEB_STOREFRONT", "WHATSAPP_BOT"]).optional(),
         serviceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-        fulfillmentMode: z.enum(["DELIVERY", "PICKUP"]).optional(),
+        fulfillmentMode: z.enum(["DELIVERY", "PICKUP", "CUSTOMER_ARRANGE"]).optional(),
         payerMobile: z.string().optional().nullable(),
         addressId: z.number().int().optional().nullable(),
       })
@@ -233,7 +238,7 @@ app.post(
         cookSlug: z.string(),
         channel: z.enum(["WEB_STOREFRONT", "WHATSAPP_BOT"]).optional(),
         payerMobile: z.string().optional().nullable(),
-        fulfillmentMode: z.enum(["DELIVERY", "PICKUP"]).optional(),
+        fulfillmentMode: z.enum(["DELIVERY", "PICKUP", "CUSTOMER_ARRANGE"]).optional(),
         addressId: z.number().int().optional().nullable(),
         lines: z
           .array(
@@ -245,7 +250,8 @@ app.post(
             }),
           )
           .min(1)
-          .max(14),
+          // Up to 14 calendar days × breakfast/lunch/dinner (matches createOrderBatch).
+          .max(42),
       })
       .parse(req.body);
     try {
@@ -324,14 +330,51 @@ app.get(
   const checkout = await getCheckoutById(db, checkoutId);
   if (!checkout) return reply.code(404).send({ error: "Checkout not found" });
   const seed = checkout.orders[0];
-  const audience = orderAudience(currentUser(req), seed, checkout.cookSlug);
+  const session = currentUser(req);
+  const audience = orderAudience(session, seed, checkout.cookSlug);
+  const pendingPay =
+    checkout.status === "AWAITING_PAYMENT" || checkout.status === "CONFIRMING_PAYMENT";
+  const roleOnOrder =
+    audience === "owner" && session
+      ? checkout.payerMobile && session.mobile === checkout.payerMobile
+        ? "PAYER"
+        : "CUSTOMER"
+      : null;
+  const { partnerTrackingUrl } = await import("../services/partnerLogistics.js");
+  const awaitingFamilyPay =
+    pendingPay &&
+    Boolean(checkout.payerMobile) &&
+    roleOnOrder === "CUSTOMER" &&
+    checkout.payerMobile !== checkout.customerMobile;
   return {
-    ...checkout,
+    checkoutId: checkout.checkoutId,
+    status: checkout.status,
+    gatewayTxnId: checkout.gatewayTxnId,
+    paymentUrl: checkout.paymentUrl,
+    totalPaise: checkout.totalPaise,
+    kitchenName: checkout.kitchenName,
+    cookSlug: checkout.cookSlug,
+    cancellable: checkout.cancellable,
+    cancelRequestable: checkout.cancelRequestable,
+    roleOnOrder,
+    awaitingFamilyPay,
+    ...(audience === "public"
+      ? {}
+      : {
+          customerMobile: checkout.customerMobile,
+          payerMobile: checkout.payerMobile,
+        }),
     orders: checkout.orders.map((o) =>
       redactOrderForAudience(o as unknown as Record<string, unknown>, audience, {
         cancellable: o.cancellable,
         cancelRequestable: o.cancelRequestable,
         lineTotalPaise: o.lineTotalPaise,
+        logisticsMode: o.logisticsMode ?? "SELF",
+        partnerShipmentId: o.partnerShipmentId ?? null,
+        partnerTrackingUrl:
+          o.logisticsMode === "PARTNER"
+            ? partnerTrackingUrl(o.partnerShipmentId, o.partnerTrackingUrl)
+            : null,
       }),
     ),
   };
@@ -350,7 +393,7 @@ app.post("/orders/late-request", async (req, reply) => {
       channel: z.enum(["WEB_STOREFRONT", "WHATSAPP_BOT"]).optional(),
       serviceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
       addressId: z.number().int().optional().nullable(),
-      fulfillmentMode: z.enum(["DELIVERY", "PICKUP"]).optional(),
+      fulfillmentMode: z.enum(["DELIVERY", "PICKUP", "CUSTOMER_ARRANGE"]).optional(),
       payerMobile: z.string().optional().nullable(),
     })
     .parse(req.body);
@@ -437,8 +480,14 @@ app.post("/me/kitchens/:slug/follow", async (req, reply) => {
     return reply.code(401).send({ error: "Sign in as customer" });
   }
   const { slug } = req.params as { slug: string };
+  const body = z
+    .object({ consent: z.boolean().optional() })
+    .parse(req.body ?? {});
   try {
-    return await followKitchen(db, user.mobile, slug);
+    return await followKitchen(db, user.mobile, slug, {
+      consent: body.consent === true,
+      consentVia: "web_confirm",
+    });
   } catch (e) {
     return sendCaughtError(reply, e);
   }
@@ -479,6 +528,14 @@ app.get(
     );
     deliveryWindow = formatDeliveryWindowLabel(schedule.deliveryWindow);
   }
+  const { partnerTrackingUrl } = await import("../services/partnerLogistics.js");
+  const session = currentUser(req);
+  const roleOnOrder =
+    audience === "owner" && session
+      ? order.payerMobile && session.mobile === order.payerMobile
+        ? "PAYER"
+        : "CUSTOMER"
+      : null;
   const extras: Record<string, unknown> = {
     kitchenName: cook?.kitchenName ?? null,
     cookSlug: cook?.slugHandle ?? null,
@@ -487,7 +544,21 @@ app.get(
     cancelRequestable: await isOrderCancelRequestable(db, order, cook),
     deliveryWindow,
     fulfillmentMode: order.fulfillmentMode ?? "DELIVERY",
+    logisticsMode: order.logisticsMode ?? "SELF",
+    kitchenDeliveryType: cook?.deliveryType === "PARTNER" ? "PARTNER" : "SELF",
+    partnerShipmentId: order.partnerShipmentId ?? null,
+    partnerTrackingUrl:
+      order.logisticsMode === "PARTNER"
+        ? partnerTrackingUrl(order.partnerShipmentId, order.partnerTrackingUrl)
+        : null,
     pickup: audience === "public" ? null : pickupRevealForOrder(order),
+    roleOnOrder,
+    /** Child Pays: senior should wait on confirmed, not be forced into UPI. */
+    awaitingFamilyPay:
+      pendingPay &&
+      Boolean(order.payerMobile) &&
+      roleOnOrder === "CUSTOMER" &&
+      order.payerMobile !== order.customerMobile,
     canReview:
       audience !== "public" && isOrderReviewable(order.status) && !existingReview,
     hasReview: audience !== "public" && Boolean(existingReview),
@@ -524,7 +595,12 @@ app.post("/orders/:publicId/concern/photo", {
   if (!user || user.role !== "CUSTOMER") {
     return reply.code(401).send({ error: "Sign in as customer" });
   }
+  const { publicId } = req.params as { publicId: string };
   try {
+    const order = await getOrderByPublicId(db, publicId);
+    if (!order) throw new Error("Order not found");
+    const { assertCustomerOwnsOrder } = await import("../http/orderOwnership.js");
+    assertCustomerOwnsOrder(order, user.mobile);
     const file = await req.file();
     if (!file) return reply.code(400).send({ error: "photo file required" });
     const url = await saveConcernImage(file);
@@ -609,14 +685,32 @@ app.post("/orders/:publicId/cancel", async (req, reply) => {
     const order = await getOrderByPublicId(db, publicId);
     if (!order) throw new Error("Order not found");
     if (user.role === "CUSTOMER") {
-      if (order.customerMobile !== user.mobile && order.payerMobile !== user.mobile) {
-        throw new Error("Not your order");
-      }
+      const { assertCustomerOwnsOrder } = await import("../http/orderOwnership.js");
+      assertCustomerOwnsOrder(order, user.mobile);
     } else if (user.role === "COOK") {
       const cook = await findCookById(db, order.cookId);
       if (!cook || cook.slugHandle !== user.cookSlug) throw new Error("Not your kitchen");
     }
     return await cancelOrder(db, publicId);
+  } catch (e) {
+    return sendCaughtError(reply, e);
+  }
+});
+
+/** Admin: refund a day-line by public id (FULL = food after discount + delivery + platform on that line). */
+app.post("/orders/:publicId/refund", async (req, reply) => {
+  const { publicId } = req.params as { publicId: string };
+  const body = z
+    .object({
+      mode: z.enum(["FULL", "FOOD_ONLY"]).default("FULL"),
+      reason: z.string().min(3).max(300),
+      ticketId: z.number().int().positive().optional(),
+    })
+    .parse(req.body ?? {});
+  try {
+    requireRole(currentUser(req), ["ADMIN"]);
+    const { refundOrderByPublicId } = await import("../services/admin.js");
+    return await refundOrderByPublicId(db, publicId, body);
   } catch (e) {
     return sendCaughtError(reply, e);
   }
@@ -630,9 +724,8 @@ app.post("/checkouts/:checkoutId/cancel", async (req, reply) => {
     if (!checkout?.orders?.length) throw new Error("Checkout not found");
     const seed = checkout.orders[0];
     if (user.role === "CUSTOMER") {
-      if (seed.customerMobile !== user.mobile && seed.payerMobile !== user.mobile) {
-        throw new Error("Not your order");
-      }
+      const { assertCustomerOwnsCheckout } = await import("../http/orderOwnership.js");
+      assertCustomerOwnsCheckout(seed, user.mobile);
     } else if (user.role === "COOK") {
       if (checkout.cookSlug !== user.cookSlug) throw new Error("Not your kitchen");
     }
@@ -649,6 +742,12 @@ app.post(
   { config: { rateLimit: { max: 8, timeWindow: "15 minutes" } } },
   async (req, reply) => {
     try {
+      const { isSoloKitchenMode } = await import("../soloKitchen.js");
+      if (isSoloKitchenMode()) {
+        return reply.code(403).send({
+          error: "Cook enrollment is paused while LocalMeals runs a single-kitchen launch.",
+        });
+      }
       const body = z
         .object({
           mobile: z.string().min(10).max(20),

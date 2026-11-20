@@ -30,16 +30,16 @@ describe("address + profile e2e", () => {
 
   before(async () => {
     await app.ready();
-    const cookAuth = await loginCook(app, "sri-sai");
+    const cookAuth = await loginCook(app, "csk-homemade-delights");
     cookHeaders = cookAuth.headers;
     await app.inject({
       method: "PATCH",
-      url: "/cooks/sri-sai/meal-settings/LUNCH",
+      url: "/cooks/csk-homemade-delights/meal-settings/LUNCH",
       headers: cookHeaders,
       payload: { cutoffHour: 23, cutoffMinute: 59 },
     });
-    const menu = await app.inject({ method: "GET", url: "/kitchens/sri-sai/menu" });
-    assert.ok(menu.json().menus?.[0], "No menu for sri-sai today — run npm run db:seed");
+    const menu = await app.inject({ method: "GET", url: "/kitchens/csk-homemade-delights/menu" });
+    assert.ok(menu.json().menus?.[0], "No menu for csk-homemade-delights today — run npm run db:seed");
     menuItemId = menu.json().menus[0].id;
   });
 
@@ -103,13 +103,14 @@ describe("address + profile e2e", () => {
   });
 
   it("web checkout rejects order without addressId", async () => {
-    const { mobile } = await loginCustomer(app);
+    const { mobile, headers } = await loginCustomer(app);
     const res = await app.inject({
       method: "POST",
       url: "/orders",
+      headers,
       payload: {
         customerMobile: mobile,
-        cookSlug: "sri-sai",
+        cookSlug: "csk-homemade-delights",
         menuItemId,
         qty: 1,
         spice: "NORMAL",
@@ -120,13 +121,14 @@ describe("address + profile e2e", () => {
   });
 
   it("web checkout accepts order with addressId and snapshots line", async () => {
-    const { mobile, addressId } = await customerWithAddress(app);
+    const { mobile, addressId, headers } = await customerWithAddress(app);
     const res = await app.inject({
       method: "POST",
       url: "/orders",
+      headers,
       payload: {
         customerMobile: mobile,
-        cookSlug: "sri-sai",
+        cookSlug: "csk-homemade-delights",
         menuItemId,
         qty: 1,
         spice: "NORMAL",
@@ -143,7 +145,7 @@ describe("address + profile e2e", () => {
     const { mobile, addressId, headers } = await customerWithAddress(app);
     const week = await app.inject({
       method: "GET",
-      url: "/kitchens/sri-sai/week?days=7&meal=LUNCH",
+      url: "/kitchens/csk-homemade-delights/week?days=7&meal=LUNCH",
     });
     assert.equal(week.statusCode, 200);
     const day = (week.json().plan as Array<{ serviceDate: string; menus: Array<{ id: number }>; orderingOpen: boolean }>).find(
@@ -157,7 +159,7 @@ describe("address + profile e2e", () => {
       headers,
       payload: {
         customerMobile: mobile,
-        cookSlug: "sri-sai",
+        cookSlug: "csk-homemade-delights",
         lines: [{ menuItemId: day.menus[0].id, serviceDate: day.serviceDate, qty: 1, spice: "NORMAL" }],
       },
     });
@@ -170,7 +172,7 @@ describe("address + profile e2e", () => {
       headers,
       payload: {
         customerMobile: mobile,
-        cookSlug: "sri-sai",
+        cookSlug: "csk-homemade-delights",
         addressId,
         lines: [{ menuItemId: day.menus[0].id, serviceDate: day.serviceDate, qty: 1, spice: "NORMAL" }],
       },
@@ -182,8 +184,8 @@ describe("address + profile e2e", () => {
 
   it("WhatsApp: Save HOME → Order with HOME label", async () => {
     const m = testMobile("77");
-    // Ensure user row exists
-    await loginCustomer(app, m);
+    // Ensure user row exists + session for owner-scoped order GET
+    const { headers } = await loginCustomer(app, m);
 
     const save = await app.inject({
       method: "POST",
@@ -201,7 +203,7 @@ describe("address + profile e2e", () => {
     const pick = await app.inject({
       method: "POST",
       url: "/webhooks/whatsapp",
-      payload: { from: m, text: "Order sri-sai 1" },
+      payload: { from: m, text: "Order csk-homemade-delights 1" },
     });
     assert.equal(pick.statusCode, 200, pick.body);
     assert.equal(pick.json().intent, "ORDER");
@@ -212,6 +214,7 @@ describe("address + profile e2e", () => {
     const order = await app.inject({
       method: "GET",
       url: `/orders/${pick.json().publicId}`,
+      headers,
     });
     assert.equal(order.statusCode, 200);
     assert.match(order.json().deliveryTargetAddress, /E2E WA Tower 9/);

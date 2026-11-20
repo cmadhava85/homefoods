@@ -11,7 +11,7 @@ Infrastructure as code for project **`home-food-513806`**. Prefer this over ad-h
 | Cloud SQL | `localmeals-pg` Postgres 16 `db-f1-micro` ENTERPRISE |
 | DB + user | `localmeals` / `localmeals` |
 | VPC connector | `localmeals-conn` (`10.8.0.0/28`) |
-| Pub/Sub | topics `localmeals.*` + worker pull subscriptions + DLQ |
+| Pub/Sub | **Off by default** (`create_pubsub=false`) — worker uses DB outbox |
 | Secrets | `DATABASE_URL`, `INTERNAL_JOB_TOKEN`, `AUTH_SECRET`, `ADMIN_MOBILES`, WhatsApp/Razorpay |
 | Runtime SA | `localmeals-run` (Cloud SQL client + secret accessor + Pub/Sub subscriber + uploads objectAdmin) |
 | Uploads bucket | `{project}-localmeals-uploads` (private; API sets `GCS_UPLOADS_BUCKET`) |
@@ -21,6 +21,8 @@ Infrastructure as code for project **`home-food-513806`**. Prefer this over ad-h
 | Optional | Custom domain mappings · GCS tfstate bucket · GitHub Actions WIF |
 
 Cloud Run / Scheduler stay **off** until images exist (`create_cloud_run=true` + image URIs).
+
+**Solo cost defaults:** API/web min 0 + `cpu_idle`, worker min 1 + 5 s poll, no Pub/Sub, GCS lifecycle, Artifact cleanup, `solo_kitchen_slug`. See [docs/COST.md](../../docs/COST.md) and `scripts/cost-sleep-staging.sh`.
 
 ## Prerequisites
 

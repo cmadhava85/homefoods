@@ -28,6 +28,12 @@ import {
   saveCookSavedPlate,
   deleteCookSavedPlate,
   postCookSavedPlate,
+  setCookIntakePause,
+  setCookFulfillmentOffers,
+  listCookMenuTemplates,
+  saveCookMenuTemplate,
+  deleteCookMenuTemplate,
+  postCookMenuTemplate,
 } from "../services/cookOps.js";
 import {
   listCookReviewsForDesk,
@@ -174,6 +180,43 @@ app.patch("/cooks/:slug/pickup", async (req, reply) => {
   }
 });
 
+app.patch("/cooks/:slug/intake-pause", async (req, reply) => {
+  const { slug } = req.params as { slug: string };
+  const body = z.object({ paused: z.boolean() }).parse(req.body ?? {});
+  try {
+    assertKitchenStaff(req, slug);
+    return await setCookIntakePause(db, slug, body);
+  } catch (e) {
+    return sendCaughtError(reply, e);
+  }
+});
+
+app.patch("/cooks/:slug/fulfillment", async (req, reply) => {
+  const { slug } = req.params as { slug: string };
+  const body = z
+    .object({
+      cookDelivery: z.boolean().optional(),
+      customerArrange: z.boolean().optional(),
+      pickupEnabled: z.boolean().optional(),
+      pickupLandmark: z.string().max(300).nullable().optional(),
+    })
+    .refine(
+      (b) =>
+        b.cookDelivery !== undefined ||
+        b.customerArrange !== undefined ||
+        b.pickupEnabled !== undefined ||
+        b.pickupLandmark !== undefined,
+      { message: "At least one fulfillment field required" },
+    )
+    .parse(req.body ?? {});
+  try {
+    assertKitchenStaff(req, slug);
+    return await setCookFulfillmentOffers(db, slug, body);
+  } catch (e) {
+    return sendCaughtError(reply, e);
+  }
+});
+
 app.get("/cooks/:slug/menu", async (req, reply) => {
   const { slug } = req.params as { slug: string };
   const q = req.query as { date?: string; view?: "day" | "week"; meal?: string };
@@ -286,6 +329,75 @@ app.post("/cooks/:slug/saved-plates/:id/post", async (req, reply) => {
     assertKitchenStaff(req, slug);
     const item = await postCookSavedPlate(db, slug, Number(id), body);
     return reply.code(201).send(item);
+  } catch (e) {
+    return sendCaughtError(reply, e);
+  }
+});
+
+app.get("/cooks/:slug/menu-templates", async (req, reply) => {
+  const { slug } = req.params as { slug: string };
+  const q = req.query as { meal?: string };
+  const meal = mealTypeSchema.safeParse((q.meal ?? "LUNCH").toUpperCase());
+  try {
+    assertKitchenStaff(req, slug);
+    return await listCookMenuTemplates(db, slug, meal.success ? meal.data : "LUNCH");
+  } catch (e) {
+    return sendCaughtError(reply, e);
+  }
+});
+
+app.post("/cooks/:slug/menu-templates", async (req, reply) => {
+  const { slug } = req.params as { slug: string };
+  const body = z
+    .object({
+      name: z.string().min(2).max(80),
+      mealType: mealTypeSchema.optional(),
+      fromServiceDate: z.string().nullable().optional(),
+      items: z
+        .array(
+          z.object({
+            itemName: z.string().min(1).max(100),
+            itemNameTa: z.string().max(100).nullable().optional(),
+            pricePaise: z.number().int().positive(),
+            isVeg: z.boolean().optional(),
+            imageUrl: z.string().nullable().optional(),
+          }),
+        )
+        .optional(),
+    })
+    .parse(req.body ?? {});
+  try {
+    assertKitchenStaff(req, slug);
+    const row = await saveCookMenuTemplate(db, slug, body);
+    return reply.code(201).send(row);
+  } catch (e) {
+    return sendCaughtError(reply, e);
+  }
+});
+
+app.delete("/cooks/:slug/menu-templates/:id", async (req, reply) => {
+  const { slug, id } = req.params as { slug: string; id: string };
+  try {
+    assertKitchenStaff(req, slug);
+    return await deleteCookMenuTemplate(db, slug, Number(id));
+  } catch (e) {
+    return sendCaughtError(reply, e);
+  }
+});
+
+app.post("/cooks/:slug/menu-templates/:id/post", async (req, reply) => {
+  const { slug, id } = req.params as { slug: string; id: string };
+  const body = z
+    .object({
+      serviceDate: z.string().nullable().optional(),
+      weekly: z.boolean().optional(),
+      dayOfWeek: z.number().int().min(0).max(6).nullable().optional(),
+    })
+    .parse(req.body ?? {});
+  try {
+    assertKitchenStaff(req, slug);
+    const result = await postCookMenuTemplate(db, slug, Number(id), body);
+    return reply.code(201).send(result);
   } catch (e) {
     return sendCaughtError(reply, e);
   }
@@ -404,7 +516,9 @@ app.post("/orders/:publicId/cooking", async (req, reply) => {
   const { publicId } = req.params as { publicId: string };
   try {
     await assertOrderKitchenStaff(req, publicId);
-    return await advanceOrderKitchenStatus(db, publicId, "COOKING");
+    return await advanceOrderKitchenStatus(db, publicId, "COOKING", {
+      channel: "WEB_STOREFRONT",
+    });
   } catch (e) {
     return sendCaughtError(reply, e);
   }
@@ -414,7 +528,9 @@ app.post("/orders/:publicId/pack", async (req, reply) => {
   const { publicId } = req.params as { publicId: string };
   try {
     await assertOrderKitchenStaff(req, publicId);
-    return await advanceOrderKitchenStatus(db, publicId, "PACKED");
+    return await advanceOrderKitchenStatus(db, publicId, "PACKED", {
+      channel: "WEB_STOREFRONT",
+    });
   } catch (e) {
     return sendCaughtError(reply, e);
   }
@@ -424,7 +540,21 @@ app.post("/orders/:publicId/dispatch", async (req, reply) => {
   const { publicId } = req.params as { publicId: string };
   try {
     await assertOrderKitchenStaff(req, publicId);
-    return await advanceOrderKitchenStatus(db, publicId, "DISPATCHED");
+    return await advanceOrderKitchenStatus(db, publicId, "DISPATCHED", {
+      channel: "WEB_STOREFRONT",
+    });
+  } catch (e) {
+    return sendCaughtError(reply, e);
+  }
+});
+
+/** Partner mock / ops: ASSIGNING_RIDER → DISPATCHED when rider is found. */
+app.post("/orders/:publicId/rider-assigned", async (req, reply) => {
+  const { publicId } = req.params as { publicId: string };
+  try {
+    const { cook } = await assertOrderKitchenStaff(req, publicId);
+    const { markPartnerRiderAssigned } = await import("../services/cookOps.js");
+    return await markPartnerRiderAssigned(db, publicId, cook.id);
   } catch (e) {
     return sendCaughtError(reply, e);
   }

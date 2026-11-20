@@ -1,5 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { addresses, users, type Db } from "@localmeals/db";
+import { parseLatLng, pinCentroid } from "@localmeals/domain";
 
 export type AddressLabel = "HOME" | "OFFICE" | "OTHER";
 
@@ -17,6 +18,23 @@ function normalizePin(pin: string) {
   return p;
 }
 
+/** Prefer client GPS; else known launch-pin centroid so distance limits can run. */
+function resolveStoredCoords(input: {
+  pinCode: string;
+  lat?: string | number | null;
+  lng?: string | number | null;
+}): { lat: string | null; lng: string | null } {
+  const explicit = parseLatLng(input.lat, input.lng);
+  if (explicit) {
+    return { lat: explicit.lat.toFixed(7), lng: explicit.lng.toFixed(7) };
+  }
+  const approx = pinCentroid(input.pinCode);
+  if (approx) {
+    return { lat: approx.lat.toFixed(7), lng: approx.lng.toFixed(7) };
+  }
+  return { lat: null, lng: null };
+}
+
 export async function listAddressesForMobile(db: Db, mobile: string) {
   const userMobile = normalizeMobile(mobile);
   const rows = await db.query.addresses.findMany({
@@ -31,6 +49,8 @@ export async function listAddressesForMobile(db: Db, mobile: string) {
       line1: r.line1,
       line2: r.line2,
       pinCode: r.pinCode,
+      lat: r.lat ?? null,
+      lng: r.lng ?? null,
       isDefault: r.isDefault,
     }));
 }
@@ -65,6 +85,8 @@ export async function createAddress(
     line1: string;
     line2?: string | null;
     pinCode: string;
+    lat?: string | number | null;
+    lng?: string | number | null;
     isDefault?: boolean;
   },
 ) {
@@ -73,6 +95,11 @@ export async function createAddress(
   if (line1.length < 5) throw new Error("Enter a fuller address (tower / flat / street)");
   const pinCode = normalizePin(input.pinCode);
   const label = input.label;
+  const coords = resolveStoredCoords({
+    pinCode,
+    lat: input.lat,
+    lng: input.lng,
+  });
 
   const existing = await db.query.addresses.findFirst({
     where: (t, { eq: e, and: a }) => a(e(t.userMobile, userMobile), e(t.label, label)),
@@ -113,6 +140,8 @@ export async function createAddress(
         line1,
         line2: input.line2?.trim() || null,
         pinCode,
+        lat: coords.lat,
+        lng: coords.lng,
         isDefault: makeDefault,
       })
       .returning();
@@ -122,6 +151,8 @@ export async function createAddress(
       line1: row.line1,
       line2: row.line2,
       pinCode: row.pinCode,
+      lat: row.lat ?? null,
+      lng: row.lng ?? null,
       isDefault: row.isDefault,
     };
   });
@@ -135,6 +166,8 @@ export async function updateAddress(
     line1?: string;
     line2?: string | null;
     pinCode?: string;
+    lat?: string | number | null;
+    lng?: string | number | null;
     isDefault?: boolean;
   },
 ) {
@@ -148,6 +181,21 @@ export async function updateAddress(
   }
   if (input.line2 !== undefined) patch.line2 = input.line2?.trim() || null;
   if (input.pinCode != null) patch.pinCode = normalizePin(input.pinCode);
+
+  const nextPin = patch.pinCode ?? row.pinCode;
+  if (input.lat !== undefined || input.lng !== undefined) {
+    const coords = resolveStoredCoords({
+      pinCode: nextPin,
+      lat: input.lat,
+      lng: input.lng,
+    });
+    patch.lat = coords.lat;
+    patch.lng = coords.lng;
+  } else if (input.pinCode != null && (!row.lat || !row.lng)) {
+    const coords = resolveStoredCoords({ pinCode: nextPin });
+    patch.lat = coords.lat;
+    patch.lng = coords.lng;
+  }
 
   return db.transaction(async (tx) => {
     if (input.isDefault === true) {
@@ -168,6 +216,8 @@ export async function updateAddress(
       line1: updated.line1,
       line2: updated.line2,
       pinCode: updated.pinCode,
+      lat: updated.lat ?? null,
+      lng: updated.lng ?? null,
       isDefault: updated.isDefault,
     };
   });

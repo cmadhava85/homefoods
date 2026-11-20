@@ -24,14 +24,18 @@ terraform import 'google_sql_database.localmeals' \
 terraform import 'google_sql_user.localmeals' \
   "${PROJECT_ID}/${PREFIX}-pg/localmeals" || true
 
-EVENTS=(order-created order-paid order-cancelled order-refunded cutoff-reached settlement-batch-completed)
-for e in "${EVENTS[@]}"; do
-  terraform import "google_pubsub_topic.events[\"${e}\"]" "projects/${PROJECT_ID}/topics/${PREFIX}.${e}" || true
-  terraform import "google_pubsub_subscription.worker[\"${e}\"]" "projects/${PROJECT_ID}/subscriptions/${PREFIX}-worker-${e}" || true
-done
-
-terraform import 'google_pubsub_topic.dead_letter' \
-  "projects/${PROJECT_ID}/topics/${PREFIX}.dead-letter" || true
+# Only if create_pubsub=true in tfvars (solo default is false — skip unused topics).
+if [[ "${TF_VAR_create_pubsub:-false}" == "true" ]]; then
+  EVENTS=(order-created order-paid order-cancelled order-refunded cutoff-reached settlement-batch-completed)
+  for e in "${EVENTS[@]}"; do
+    terraform import "google_pubsub_topic.events[\"${e}\"]" "projects/${PROJECT_ID}/topics/${PREFIX}.${e}" || true
+    terraform import "google_pubsub_subscription.worker[\"${e}\"]" "projects/${PROJECT_ID}/subscriptions/${PREFIX}-worker-${e}" || true
+  done
+  terraform import 'google_pubsub_topic.dead_letter[0]' \
+    "projects/${PROJECT_ID}/topics/${PREFIX}.dead-letter" || true
+else
+  echo "Skipping Pub/Sub import (create_pubsub=false — solo lean). Set TF_VAR_create_pubsub=true to import."
+fi
 
 APIS=(
   run.googleapis.com

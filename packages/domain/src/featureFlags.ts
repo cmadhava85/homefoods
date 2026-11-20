@@ -15,8 +15,8 @@ export const FEATURE_FLAG_DEFS = [
   {
     key: "child_pays_enabled",
     label: "Child Pays / Family",
-    description: "Family invite + bill a linked payer on week cart.",
-    defaultEnabled: true,
+    description: "Family invite + bill a linked payer on week cart. Off for solo launch.",
+    defaultEnabled: false,
   },
   {
     key: "week_discount_enabled",
@@ -60,6 +60,27 @@ export const FEATURE_FLAG_DEFS = [
     label: "Partner delivery",
     description:
       "Cooks with delivery type PARTNER get rider assign on dispatch (mock or real logistics). Keep OFF until a pin is ready.",
+    defaultEnabled: false,
+  },
+  {
+    key: "lean_wa_status_enabled",
+    label: "Lean WA status (opt-in)",
+    description:
+      "Customers who opt in get sparse Confirmed / Cooking / Ready WhatsApp pings. Default OFF — keeps outbound lean.",
+    defaultEnabled: false,
+  },
+  {
+    key: "delivery_distance_limits_enabled",
+    label: "Delivery distance limits",
+    description:
+      "Free cook delivery within 3 km, flat cook fee 3–5 km, block cook delivery beyond 5 km. Needs kitchen + address lat/lng. Keep OFF until coords are reliable.",
+    defaultEnabled: false,
+  },
+  {
+    key: "self_delivery_fee_enabled",
+    label: "Self delivery fee",
+    description:
+      "Charge cook flat_self_delivery_fee on DELIVERY checkouts (e.g. ₹25). Off = ₹0 delivery. Independent of platform ₹7. Keep OFF for free-delivery launch.",
     defaultEnabled: false,
   },
 ] as const;
