@@ -72,7 +72,10 @@ jobs:
           test -f packages/domain/dist/index.js
           test -f packages/observability/dist/index.js
           test -f packages/i18n/dist/index.js
-      - run: npm run db:migrate
+      - name: Migrate + seed
+        run: |
+          npm run db:migrate
+          npm run db:seed
       - run: npm test
       - name: Typecheck web
         run: npm run build -w @localmeals/web
