@@ -3,6 +3,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/
 COPY packages/domain/package.json packages/domain/
+COPY packages/observability/package.json packages/observability/
 COPY packages/adapters/package.json packages/adapters/
 COPY packages/db/package.json packages/db/
 RUN npm ci --omit=dev=false
@@ -12,6 +13,7 @@ COPY tsconfig.base.json ./
 COPY packages ./packages
 COPY apps/api ./apps/api
 RUN npm run build -w @localmeals/domain \
+ && npm run build -w @localmeals/observability \
  && npm run build -w @localmeals/adapters \
  && npm run build -w @localmeals/db \
  && npm run build -w @localmeals/api
