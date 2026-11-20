@@ -741,12 +741,14 @@ export function extractInboundWhatsApp(body: unknown): WaInboundMessage {
   };
 
   const normFrom = (f: string) => (f.startsWith("+") ? f : `+${f}`);
+  const locale =
+    typeof b.locale === "string" && b.locale.trim() ? b.locale.trim() : undefined;
 
   if (b.from && (b.imageUrl || b.imageBase64)) {
     return {
       from: normFrom(b.from),
       text: b.text,
-      locale: b.locale,
+      ...(locale ? { locale } : {}),
       image: {
         imageUrl: b.imageUrl,
         imageBase64: b.imageBase64,
@@ -756,7 +758,11 @@ export function extractInboundWhatsApp(body: unknown): WaInboundMessage {
   }
 
   if (b.from && b.text) {
-    return { from: normFrom(b.from), text: b.text, locale: b.locale };
+    return {
+      from: normFrom(b.from),
+      text: b.text,
+      ...(locale ? { locale } : {}),
+    };
   }
 
   const msg = b.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
