@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { addresses, users, type Db } from "@localmeals/db";
-import { parseLatLng, pinCentroid } from "@localmeals/domain";
+import { resolveAddressLatLng } from "@localmeals/domain";
 
 export type AddressLabel = "HOME" | "OFFICE" | "OTHER";
 
@@ -18,21 +18,19 @@ function normalizePin(pin: string) {
   return p;
 }
 
-/** Prefer client GPS; else known launch-pin centroid so distance limits can run. */
+/** Store trusted coords (PIN-anchored); reject GPS that drifts far from known PIN. */
 function resolveStoredCoords(input: {
   pinCode: string;
   lat?: string | number | null;
   lng?: string | number | null;
 }): { lat: string | null; lng: string | null } {
-  const explicit = parseLatLng(input.lat, input.lng);
-  if (explicit) {
-    return { lat: explicit.lat.toFixed(7), lng: explicit.lng.toFixed(7) };
-  }
-  const approx = pinCentroid(input.pinCode);
-  if (approx) {
-    return { lat: approx.lat.toFixed(7), lng: approx.lng.toFixed(7) };
-  }
-  return { lat: null, lng: null };
+  const trusted = resolveAddressLatLng({
+    pinCode: input.pinCode,
+    lat: input.lat,
+    lng: input.lng,
+  });
+  if (!trusted) return { lat: null, lng: null };
+  return { lat: trusted.lat.toFixed(7), lng: trusted.lng.toFixed(7) };
 }
 
 export async function listAddressesForMobile(db: Db, mobile: string) {

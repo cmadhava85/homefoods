@@ -6,6 +6,7 @@ import {
   publicErrorMessage,
   resolveRequestLocale,
 } from "./httpErrors.js";
+import { triageFromCorr } from "./observabilityPlugin.js";
 
 function localeFromReply(reply: FastifyReply): Locale {
   return reply.request?.locale ?? DEFAULT_LOCALE;
@@ -29,11 +30,22 @@ export function registerApiErrorHandler(app: FastifyInstance) {
     const locale = req.locale ?? DEFAULT_LOCALE;
     const status = httpStatusForError(err);
     const error = publicErrorMessage(err, locale);
+    const triage = triageFromCorr();
     if (status >= 500) {
-      req.log.error({ err, event: LogEvent.REQUEST_FAILED, status }, error);
+      req.log.error(
+        { err, event: LogEvent.REQUEST_FAILED, status, ...triage, method: req.method, url: req.url },
+        error,
+      );
     } else {
-      req.log.info(
-        { err: { message: error, name: (err as Error)?.name }, event: LogEvent.REQUEST_FAILED, status },
+      req.log.warn(
+        {
+          err: { message: error, name: (err as Error)?.name },
+          event: LogEvent.REQUEST_FAILED,
+          status,
+          ...triage,
+          method: req.method,
+          url: req.url,
+        },
         "request failed",
       );
     }

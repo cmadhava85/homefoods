@@ -5,6 +5,8 @@ import {
   bindTrace,
   getCorr,
   newTraceId,
+  maskMobile,
+  orderTriageFields,
   readCorr,
   runWithCorr,
   withCorr,
@@ -43,5 +45,29 @@ describe("correlation", () => {
     assert.equal(c.publicId, "LM-9");
     assert.equal(c.checkoutId, "chk-1");
     assert.equal(c.traceId, "trc_x");
+  });
+
+  it("orderTriageFields keeps triage keys and omits empties", () => {
+    const f = orderTriageFields({
+      publicId: "LM-1",
+      customerMobile: "+919900000001",
+      cookSlug: "csk-homemade-delights",
+      amountPaise: 8700,
+      pinCode: "",
+      kitchenName: null,
+    });
+    assert.equal(f.publicId, "LM-1");
+    assert.equal(f.customerMobile, "+91***0000001");
+    assert.equal(f.cookSlug, "csk-homemade-delights");
+    assert.equal(f.amountPaise, 8700);
+    assert.equal("pinCode" in f, false);
+    assert.equal("kitchenName" in f, false);
+  });
+
+  it("maskMobile hides the first three local digits (skips +91)", () => {
+    assert.equal(maskMobile("+919900000001"), "+91***0000001");
+    assert.equal(maskMobile("919900000001"), "91***0000001");
+    assert.equal(maskMobile("9900000001"), "***0000001");
+    assert.equal(maskMobile(""), "");
   });
 });

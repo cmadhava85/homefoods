@@ -29,11 +29,14 @@ export function parseLatLng(
 
 /**
  * Approximate pin centres for launch pins (when address has no GPS).
- * Prefer device lat/lng when the customer shares location.
+ * Client GPS is accepted only when it stays near a known pin centroid.
  */
 export const PIN_CENTROIDS: Record<string, LatLng> = {
   "600119": { lat: 12.901, lng: 80.227 }, // Sholinganallur / OMR cluster
 };
+
+/** Reject client GPS farther than this from the PIN centroid (billing / limits). */
+export const MAX_CLIENT_GPS_PIN_DRIFT_KM = 8;
 
 export function pinCentroid(pinCode: string | null | undefined): LatLng | null {
   if (!pinCode) return null;
@@ -41,13 +44,23 @@ export function pinCentroid(pinCode: string | null | undefined): LatLng | null {
   return PIN_CENTROIDS[pin] ?? null;
 }
 
-/** Prefer explicit coords; else known pin centroid. */
+/**
+ * Trusted coords for delivery distance / storage.
+ * Client GPS is used only when a known PIN centroid exists and GPS is near it;
+ * otherwise the centroid. Unknown PINs never trust client lat/lng alone (spoof bypass).
+ */
 export function resolveAddressLatLng(input: {
   lat?: string | number | null;
   lng?: string | number | null;
   pinCode?: string | null;
 }): LatLng | null {
-  return parseLatLng(input.lat, input.lng) ?? pinCentroid(input.pinCode);
+  const centroid = pinCentroid(input.pinCode);
+  if (!centroid) return null;
+  const explicit = parseLatLng(input.lat, input.lng);
+  if (explicit && haversineKm(explicit, centroid) <= MAX_CLIENT_GPS_PIN_DRIFT_KM) {
+    return explicit;
+  }
+  return centroid;
 }
 
 /** Great-circle distance in kilometres. */

@@ -9,6 +9,7 @@ import {
 import {
   LogEvent,
   createServiceLogger,
+  maskMobile,
   readCorr,
 } from "@localmeals/observability";
 import { recordOutboxOpsFailure } from "./opsLedger.js";
@@ -33,13 +34,25 @@ function rowLog(
   payload: Record<string, unknown>,
 ) {
   const corr = readCorr(payload);
+  const publicId =
+    corr.publicId ||
+    (typeof payload.publicId === "string" ? payload.publicId : undefined) ||
+    (typeof payload.orderPublicId === "string" ? payload.orderPublicId : undefined);
+  const customerMobile =
+    typeof payload.customerMobile === "string" ? maskMobile(payload.customerMobile) : undefined;
+  const cookSlug =
+    typeof payload.cookSlug === "string" ? payload.cookSlug : undefined;
+  const cookId = typeof payload.cookId === "string" ? payload.cookId : undefined;
   return log.child({
     outboxId: row.id,
     eventName: row.eventName,
     traceId: corr.traceId,
     requestId: corr.requestId,
-    publicId: corr.publicId,
+    publicId: publicId ?? corr.publicId,
     checkoutId: corr.checkoutId,
+    ...(customerMobile ? { customerMobile } : {}),
+    ...(cookSlug ? { cookSlug } : {}),
+    ...(cookId ? { cookId } : {}),
   });
 }
 
@@ -52,25 +65,38 @@ async function sendWa(
     await wa.send(message);
   } catch (err) {
     logger.error(
-      { err, event: LogEvent.WA_SEND_FAILED, to: message.to },
+      { err, event: LogEvent.WA_SEND_FAILED, to: maskMobile(message.to) },
       "whatsapp send failed",
     );
     throw err;
   }
 }
 
+/** Cache WA kill-switch so an idle worker does not hammer GET /meta/features every poll. */
+const WA_OUTBOUND_CACHE_MS = Math.max(
+  10_000,
+  Number(process.env.WA_OUTBOUND_FLAG_CACHE_MS ?? 60_000),
+);
+let waOutboundCache: { at: number; allowed: boolean } | null = null;
+
 async function defaultWhatsappOutboundAllowed(apiBase: string): Promise<boolean> {
+  if (waOutboundCache && Date.now() - waOutboundCache.at < WA_OUTBOUND_CACHE_MS) {
+    return waOutboundCache.allowed;
+  }
+  let allowed = true;
   try {
     const res = await fetch(`${apiBase}/meta/features`);
-    if (!res.ok) return true;
-    const json = (await res.json()) as { flags?: Record<string, boolean> };
-    if (json.flags && typeof json.flags.whatsapp_outbound_enabled === "boolean") {
-      return json.flags.whatsapp_outbound_enabled;
+    if (res.ok) {
+      const json = (await res.json()) as { flags?: Record<string, boolean> };
+      if (json.flags && typeof json.flags.whatsapp_outbound_enabled === "boolean") {
+        allowed = json.flags.whatsapp_outbound_enabled;
+      }
     }
   } catch {
     /* fail open so jobs aren't stuck if API is down briefly */
   }
-  return true;
+  waOutboundCache = { at: Date.now(), allowed };
+  return allowed;
 }
 
 export async function drainOutboxOnce(
@@ -92,6 +118,8 @@ export async function drainOutboxOnce(
     where: (t, { isNull: n }) => n(t.processedAt),
     limit: 20,
   });
+  if (!rows.length) return;
+
   const wa = getWhatsAppProvider();
   const waOut = await whatsappOutboundAllowed();
   for (const row of rows) {
@@ -636,7 +664,13 @@ export async function drainOutboxOnce(
       continue;
     }
 
-    logger.info({ event: LogEvent.OUTBOX_PROCESSED }, "outbox processed");
+    logger.info(
+      {
+        event: LogEvent.OUTBOX_PROCESSED,
+        outboxEvent: row.eventName,
+      },
+      "outbox processed",
+    );
     await db
       .update(outbox)
       .set({ processedAt: new Date() })

@@ -7,6 +7,7 @@ import { useAuth } from "@/components/AuthProvider";
 import { useLocale } from "@/components/LocaleProvider";
 import { API_BASE } from "@/lib/api";
 import { authFetch } from "@/lib/auth";
+import { loadFeatureFlags } from "@/lib/features";
 import { prepareMenuPhoto } from "@/lib/menuImage";
 import { groupCookStops } from "@/lib/cookStops";
 import { cookNextAction, customerStatusLabel, statusTone } from "@/lib/orderStatus";
@@ -268,10 +269,8 @@ function CookDeskInner() {
           };
         };
       }),
-      // Platform kill switches (authoritative).
-      fetch(`${API_BASE}/meta/features`)
-        .then(async (r) => (r.ok ? ((await r.json()) as { flags?: Record<string, boolean> }) : null))
-        .catch(() => null),
+      // Platform kill switches (authoritative) — shared client cache.
+      loadFeatureFlags().catch(() => null),
       // Kitchen deliveryType is on the public cook DTO even when meal-settings omits delivery.
       fetch(`${API_BASE}/kitchens/${slug}/menu`)
         .then(async (r) =>
@@ -281,13 +280,12 @@ function CookDeskInner() {
         )
         .catch(() => null),
     ])
-      .then(([json, meta, kitchen]) => {
-        const flags = meta?.flags ?? {};
-        if (typeof flags.pickup_enabled === "boolean") {
+      .then(([json, flags, kitchen]) => {
+        if (flags && typeof flags.pickup_enabled === "boolean") {
           setPickupPlatformOn(flags.pickup_enabled);
         }
         const platformPartner =
-          typeof flags.partner_delivery_enabled === "boolean"
+          flags && typeof flags.partner_delivery_enabled === "boolean"
             ? flags.partner_delivery_enabled
             : Boolean(json?.delivery?.platformPartnerEnabled);
         setPartnerPlatformOn(platformPartner);

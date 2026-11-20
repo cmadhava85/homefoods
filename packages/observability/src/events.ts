@@ -8,7 +8,12 @@ export const LogEvent = {
   PAYMENT_CONFIRMING_STUCK: "payment.confirming_stuck",
   ORDER_CREATED: "order.created",
   ORDER_PAID: "order.paid",
+  ORDER_STATUS_CHANGED: "order.status_changed",
   ORDER_UNPAID_EXPIRED: "order.unpaid_expired",
+  PAYMENT_FAILED: "payment.failed",
+  PAYMENT_CONFIRMING: "payment.confirming",
+  /** Outbound call to Razorpay / logistics / etc. with correlation ids. */
+  THIRD_PARTY_REQUEST: "third_party.request",
   OUTBOX_PROCESSED: "outbox.processed",
   OUTBOX_FAILED: "outbox.failed",
   OUTBOX_SKIPPED: "outbox.skipped",
@@ -18,6 +23,7 @@ export const LogEvent = {
   SETTLEMENT_BATCH_FAILED: "settlement.batch_failed",
   WORKER_STARTED: "worker.started",
   REQUEST_FAILED: "request.failed",
+  /** Structured HTTP access log (replaces Fastify default request logging). */
   REQUEST_COMPLETED: "request.completed",
 } as const;
 

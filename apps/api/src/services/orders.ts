@@ -13,6 +13,7 @@ import {
   bindTrace,
   createServiceLogger,
   newTraceId,
+  orderTriageFields,
 } from "@localmeals/observability";
 import { enqueueOutbox } from "./outboxEnqueue.js";
 
@@ -985,6 +986,13 @@ export async function createOrder(
         traceId: existing.traceId,
         publicId: existing.publicId,
         checkoutId: existing.checkoutId,
+        customerMobile: existing.customerMobile,
+        cookId: existing.cookId,
+        orderId: existing.id,
+        status: existing.status,
+        amountPaise: lineTotal(existing),
+        mealType: existing.mealType,
+        serviceDate: existing.serviceDate,
       });
       return {
         ...existing,
@@ -1007,7 +1015,17 @@ export async function createOrder(
   return db.transaction(async (tx) => {
     const pid = publicId();
     const traceId = newTraceId();
-    bindTrace({ traceId, publicId: pid });
+    bindTrace({
+      traceId,
+      publicId: pid,
+      customerMobile: input.customerMobile,
+      cookSlug: cook.slugHandle,
+      cookId: cook.id,
+      status: "AWAITING_PAYMENT",
+      amountPaise,
+      mealType,
+      serviceDate,
+    });
     const [order] = await tx
       .insert(orders)
       .values({
@@ -1035,6 +1053,27 @@ export async function createOrder(
       })
       .returning();
 
+    orderLog.info(
+      {
+        event: LogEvent.THIRD_PARTY_REQUEST,
+        provider: "payment",
+        action: "createPayment",
+        ...orderTriageFields({
+          traceId,
+          publicId: order.publicId,
+          orderId: order.id,
+          customerMobile: input.customerMobile,
+          cookSlug: cook.slugHandle,
+          cookId: cook.id,
+          amountPaise,
+          mealType,
+          serviceDate,
+          status: "AWAITING_PAYMENT",
+          channel,
+        }),
+      },
+      "payment createPayment",
+    );
     const payment = await pay.createPayment({
       orderPublicId: order.publicId,
       amountPaise,
@@ -1097,11 +1136,23 @@ export async function createOrder(
     orderLog.info(
       {
         event: LogEvent.ORDER_CREATED,
-        traceId,
-        publicId: order.publicId,
-        cookId: cook.id,
-        amountPaise,
-        channel,
+        ...orderTriageFields({
+          traceId,
+          publicId: order.publicId,
+          orderId: order.id,
+          customerMobile: input.customerMobile,
+          cookSlug: cook.slugHandle,
+          cookId: cook.id,
+          kitchenName: cook.kitchenName,
+          status: order.status,
+          amountPaise,
+          mealType,
+          serviceDate,
+          itemName: menu.itemName,
+          qty: input.qty,
+          fulfillmentMode,
+          channel,
+        }),
       },
       "order created",
     );
@@ -1177,6 +1228,13 @@ export async function markOrderPaid(
     traceId: group[0].traceId,
     publicId: group[0].publicId,
     checkoutId: group[0].checkoutId,
+    customerMobile: group[0].customerMobile,
+    cookId: group[0].cookId,
+    orderId: group[0].id,
+    status: group[0].status,
+    amountPaise: lineTotal(group[0]),
+    mealType: group[0].mealType,
+    serviceDate: group[0].serviceDate,
   });
 
   // Idempotent: if every line already paid (or past), return first
@@ -1314,6 +1372,32 @@ export async function markOrderPaid(
         });
       }
       out.push(updated);
+      orderLog.info(
+        {
+          event: LogEvent.ORDER_PAID,
+          ...orderTriageFields({
+            traceId: order.traceId,
+            publicId: order.publicId,
+            checkoutId: order.checkoutId,
+            orderId: order.id,
+            customerMobile: order.customerMobile,
+            cookSlug: cook?.slugHandle,
+            cookId: order.cookId,
+            kitchenName: cook?.kitchenName,
+            status: updated.status,
+            amountPaise: lineTotal(order),
+            mealType: order.mealType,
+            serviceDate: order.serviceDate,
+            itemName: order.itemName,
+            qty: order.qty,
+            fulfillmentMode: order.fulfillmentMode,
+            channel: order.channel,
+          }),
+          paymentId: input.paymentId ?? null,
+          gatewayTxnId: input.gatewayTxnId ?? order.gatewayTxnId,
+        },
+        "order paid",
+      );
     }
     return out;
   });
@@ -1575,7 +1659,16 @@ export async function createOrderBatch(
 
   const checkoutId = checkoutPublicId();
   const traceId = newTraceId();
-  bindTrace({ traceId, checkoutId });
+  bindTrace({
+    traceId,
+    checkoutId,
+    customerMobile: input.customerMobile,
+    cookSlug: cook.slugHandle,
+    cookId: cook.id,
+    status: "AWAITING_PAYMENT",
+    amountPaise: prepared.reduce((s, p) => s + p.amountPaise, 0),
+    mealType: prepared[0]?.mealType,
+  });
   const totalPaise = prepared.reduce((s, p) => s + p.amountPaise, 0);
   const foodDiscountTotalPaise = prepared.reduce((s, p) => s + p.foodDiscountPaise, 0);
   const batchIdempotency = input.clientIdempotencyKey?.trim()
@@ -1697,6 +1790,27 @@ export async function createOrderBatch(
     }
 
     const billMobile = payerMobile ?? input.customerMobile;
+    orderLog.info(
+      {
+        event: LogEvent.THIRD_PARTY_REQUEST,
+        provider: "payment",
+        action: "createPayment",
+        ...orderTriageFields({
+          traceId,
+          checkoutId,
+          customerMobile: input.customerMobile,
+          cookSlug: cook.slugHandle,
+          cookId: cook.id,
+          amountPaise: totalPaise,
+          mealType: created[0]?.mealType,
+          status: "AWAITING_PAYMENT",
+          channel,
+          fulfillmentMode,
+        }),
+        lineCount: created.length,
+      },
+      "payment createPayment (checkout)",
+    );
     const payment = await pay.createPayment({
       orderPublicId: checkoutId,
       amountPaise: totalPaise,
@@ -1760,6 +1874,29 @@ export async function createOrderBatch(
           spice: o.spice,
         })),
       });
+
+    orderLog.info(
+      {
+        event: LogEvent.ORDER_CREATED,
+        ...orderTriageFields({
+          traceId,
+          checkoutId,
+          customerMobile: input.customerMobile,
+          cookSlug: cook.slugHandle,
+          cookId: cook.id,
+          kitchenName: cook.kitchenName,
+          status: "AWAITING_PAYMENT",
+          amountPaise: totalPaise,
+          mealType: created[0]?.mealType,
+          fulfillmentMode,
+          channel,
+        }),
+        publicIds: created.map((o) => o.publicId),
+        lineCount: created.length,
+        serviceDates: created.map((o) => o.serviceDate),
+      },
+      "checkout created",
+    );
 
     if (payerMobile) {
       await enqueueOutbox(tx, "ChildPaysRequested", {
@@ -2486,7 +2623,33 @@ export async function approveLateOrder(db: Db, publicId: string) {
       traceId: order.traceId,
       publicId: order.publicId,
       checkoutId: order.checkoutId,
+      customerMobile: order.customerMobile,
+      cookId: order.cookId,
+      orderId: order.id,
+      status: "AWAITING_PAYMENT",
+      amountPaise,
+      mealType: order.mealType,
+      serviceDate: order.serviceDate,
     });
+    orderLog.info(
+      {
+        event: LogEvent.THIRD_PARTY_REQUEST,
+        provider: "payment",
+        action: "createPayment",
+        ...orderTriageFields({
+          traceId: order.traceId,
+          publicId: order.publicId,
+          orderId: order.id,
+          customerMobile: order.customerMobile,
+          cookId: order.cookId,
+          amountPaise,
+          mealType: order.mealType,
+          serviceDate: order.serviceDate,
+          status: "AWAITING_PAYMENT",
+        }),
+      },
+      "payment createPayment (late approve)",
+    );
     const payment = await pay.createPayment({
       orderPublicId: order.publicId,
       amountPaise,
@@ -2675,6 +2838,47 @@ export async function transitionOrder(
       publicId: order.publicId,
     },
   });
+
+  if (order.traceId) {
+    bindTrace({
+      traceId: order.traceId,
+      publicId: order.publicId,
+      checkoutId: order.checkoutId,
+      customerMobile: order.customerMobile,
+      cookId: order.cookId,
+      orderId: order.id,
+      status: to,
+      mealType: order.mealType,
+      serviceDate: order.serviceDate,
+      amountPaise: lineTotal(order),
+    });
+  }
+  orderLog.info(
+    {
+      event: LogEvent.ORDER_STATUS_CHANGED,
+      fromStatus,
+      toStatus: to,
+      channel: activity?.channel ?? "SYSTEM_CRON",
+      ...orderTriageFields({
+        traceId: order.traceId,
+        publicId: order.publicId,
+        checkoutId: order.checkoutId,
+        orderId: order.id,
+        customerMobile: order.customerMobile,
+        cookId: order.cookId,
+        status: to,
+        amountPaise: lineTotal(order),
+        mealType: order.mealType,
+        serviceDate: order.serviceDate,
+        itemName: order.itemName,
+        qty: order.qty,
+        fulfillmentMode: order.fulfillmentMode,
+        channel: order.channel,
+      }),
+      logisticsMode: updated.logisticsMode ?? order.logisticsMode ?? null,
+    },
+    "order status changed",
+  );
 
   return updated;
 }

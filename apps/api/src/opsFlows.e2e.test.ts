@@ -68,12 +68,13 @@ describe("ops flows e2e (gaps)", () => {
 
   async function openWeekDays(minDays: number) {
     // Keep cut-off open for the whole suite (other tests may tighten it).
-    await app.inject({
+    const cutoff = await app.inject({
       method: "PATCH",
       url: `/cooks/${SLUG}/meal-settings/LUNCH`,
       headers: cookHeaders,
       payload: { cutoffHour: 23, cutoffMinute: 59 },
     });
+    assert.equal(cutoff.statusCode, 200, cutoff.body);
 
     let week = await app.inject({
       method: "GET",

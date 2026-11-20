@@ -1,7 +1,15 @@
 import { cookProfiles, orders, type Db } from "@localmeals/db";
 import { getLogisticsProvider, isMockLogistics } from "@localmeals/adapters";
+import {
+  LogEvent,
+  bindTrace,
+  createServiceLogger,
+  orderTriageFields,
+} from "@localmeals/observability";
 import { assertFeatureEnabled } from "./featureFlags.js";
 import { transitionOrder } from "./orders.js";
+
+const logisticsLog = createServiceLogger("localmeals-api");
 
 function kitchenPickupLine(cook: {
   kitchenName: string;
@@ -48,6 +56,41 @@ export async function dispatchViaPartner(
   }
 
   const logistics = getLogisticsProvider();
+  const traceId = order.traceId?.trim() || undefined;
+  if (traceId) {
+    bindTrace({
+      traceId,
+      publicId: order.publicId,
+      customerMobile: order.customerMobile,
+      cookSlug: cook.slugHandle,
+      cookId: cook.id,
+      orderId: order.id,
+      status: order.status,
+      mealType: order.mealType,
+      serviceDate: order.serviceDate,
+    });
+  }
+  logisticsLog.info(
+    {
+      event: LogEvent.THIRD_PARTY_REQUEST,
+      provider: logistics.name,
+      action: "createShipment",
+      ...orderTriageFields({
+        traceId,
+        publicId: order.publicId,
+        orderId: order.id,
+        customerMobile: order.customerMobile,
+        cookSlug: cook.slugHandle,
+        cookId: cook.id,
+        status: order.status,
+        mealType: order.mealType,
+        serviceDate: order.serviceDate,
+        itemName: order.itemName,
+        qty: order.qty,
+      }),
+    },
+    "logistics createShipment",
+  );
   const shipment = await logistics.createShipment({
     orderPublicId: order.publicId,
     pickupAddress: kitchenPickupLine(cook),
@@ -55,6 +98,7 @@ export async function dispatchViaPartner(
     customerMobile: order.customerMobile,
     cookMobile: cook.mobileNumber,
     notes: `${order.qty}× ${order.itemName}`,
+    traceId,
   });
 
   // Stay on ASSIGNING_RIDER so cook/customer can see “Finding rider”.

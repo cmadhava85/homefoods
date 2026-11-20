@@ -22,6 +22,11 @@ export type PartnerShipmentInput = {
   customerMobile: string;
   cookMobile: string;
   notes?: string;
+  /**
+   * Durable journey id — sent as `traceId` / metadata so partner webhooks
+   * can echo it for Cloud Logging correlation (same as Razorpay notes.traceId).
+   */
+  traceId?: string;
   /** Optional geo / amount for vendors that require them. */
   pickupLat?: number | null;
   pickupLng?: number | null;
@@ -242,6 +247,7 @@ export class HttpLogisticsProvider implements LogisticsProvider {
   }
 
   async createShipment(input: PartnerShipmentInput): Promise<PartnerShipmentResult> {
+    const traceId = input.traceId?.trim().slice(0, 40) || null;
     const payload = {
       externalOrderId: input.orderPublicId,
       pickup: {
@@ -258,6 +264,12 @@ export class HttpLogisticsProvider implements LogisticsProvider {
       },
       notes: input.notes ?? null,
       amountPaise: input.foodPaise ?? null,
+      ...(traceId
+        ? {
+            traceId,
+            metadata: { traceId, orderPublicId: input.orderPublicId },
+          }
+        : {}),
     };
     const json = await this.request("POST", this.createPath, payload);
     return this.parseResult(json);
@@ -345,6 +357,9 @@ export function isMockLogistics() {
 export type LogisticsWebhookEvent = {
   partnerShipmentId: string;
   status: PartnerShipmentStatus;
+  /** Echoed from createShipment when the partner returns it. */
+  traceId?: string;
+  orderPublicId?: string;
 };
 
 /**
@@ -357,6 +372,12 @@ export function normalizeLogisticsWebhookPayload(body: unknown): LogisticsWebhoo
   const b = body as Record<string, unknown>;
   const data =
     b.data && typeof b.data === "object" ? (b.data as Record<string, unknown>) : null;
+  const meta =
+    b.metadata && typeof b.metadata === "object"
+      ? (b.metadata as Record<string, unknown>)
+      : data && data.metadata && typeof data.metadata === "object"
+        ? (data.metadata as Record<string, unknown>)
+        : null;
 
   const id =
     (typeof b.partnerShipmentId === "string" && b.partnerShipmentId) ||
@@ -372,7 +393,28 @@ export function normalizeLogisticsWebhookPayload(body: unknown): LogisticsWebhoo
   const status = mapPartnerShipmentStatus(statusRaw);
   if (!id || id.length < 4) throw new Error("Webhook missing shipment id");
   if (!status) throw new Error(`Webhook status not recognized: ${String(statusRaw)}`);
-  return { partnerShipmentId: id, status };
+
+  const pickStr = (...vals: unknown[]) => {
+    for (const v of vals) {
+      if (typeof v === "string" && v.trim()) return v.trim().slice(0, 40);
+    }
+    return undefined;
+  };
+  const traceId = pickStr(b.traceId, data?.traceId, meta?.traceId);
+  const orderPublicId = pickStr(
+    b.orderPublicId,
+    b.externalOrderId,
+    data?.orderPublicId,
+    data?.externalOrderId,
+    meta?.orderPublicId,
+  );
+
+  return {
+    partnerShipmentId: id,
+    status,
+    ...(traceId ? { traceId } : {}),
+    ...(orderPublicId ? { orderPublicId } : {}),
+  };
 }
 
 export type LogisticsWebhookAuthResult =

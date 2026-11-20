@@ -31,6 +31,8 @@ export function buildApp(db: Db = createDb(), opts: BuildAppOptions = {}): Fasti
     ...(opts.loggerInstance
       ? { loggerInstance: opts.loggerInstance }
       : { logger: fastifyLoggerOptions("localmeals-api") }),
+    // Structured access logs come from registerObservability (request.completed).
+    disableRequestLogging: true,
     requestIdHeader: "x-request-id",
     requestIdLogLabel: "requestId",
     genReqId: genRequestId,

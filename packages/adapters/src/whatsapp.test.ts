@@ -242,6 +242,28 @@ describe("extractInboundWhatsApp", () => {
     });
     assert.equal(meta.from, "+919840111111");
     assert.equal(meta.text, "Orders");
+    assert.equal(meta.locale, undefined);
+  });
+
+  it("includes locale only when non-blank; omits blank/whitespace/undefined", () => {
+    assert.deepEqual(extractInboundWhatsApp({ from: "+9198", text: "Hi", locale: "ta" }), {
+      from: "+9198",
+      text: "Hi",
+      locale: "ta",
+    });
+    assert.deepEqual(extractInboundWhatsApp({ from: "+9198", text: "Hi", locale: "  en  " }), {
+      from: "+9198",
+      text: "Hi",
+      locale: "en",
+    });
+    const blank = extractInboundWhatsApp({ from: "+9198", text: "Hi", locale: "" });
+    assert.equal(blank.locale, undefined);
+    assert.ok(!("locale" in blank) || blank.locale === undefined);
+    const ws = extractInboundWhatsApp({ from: "+9198", text: "Hi", locale: "   " });
+    assert.equal(ws.locale, undefined);
+    const missing = extractInboundWhatsApp({ from: "+9198", text: "Hi" });
+    assert.equal(missing.locale, undefined);
+    assert.ok(!Object.prototype.hasOwnProperty.call(missing, "locale"));
   });
 
   it("reads mock image and Meta image media id", () => {

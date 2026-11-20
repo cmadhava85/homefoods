@@ -170,6 +170,7 @@ export async function refundOrder(
         orderPublicId: order.publicId,
         mode: input.mode,
         reason: input.reason.slice(0, 100),
+        ...(order.traceId ? { traceId: order.traceId.slice(0, 40) } : {}),
       },
     });
   } catch (e) {

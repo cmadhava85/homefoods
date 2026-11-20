@@ -7,31 +7,52 @@ import {
   settlements,
   type Db,
 } from "@localmeals/db";
-import { bindTrace } from "@localmeals/observability";
+import {
+  LogEvent,
+  bindTrace,
+  createServiceLogger,
+  orderTriageFields,
+} from "@localmeals/observability";
 import { enqueueOutbox } from "./outboxEnqueue.js";
 import { assertTransition, type OrderState } from "@localmeals/domain";
 import type { GatewayWebhookEvent } from "@localmeals/adapters";
 import { markOrderPaid } from "./orders.js";
 
+const payLog = createServiceLogger("localmeals-api");
+
 function bindTraceFromEventOrOrders(
   event: GatewayWebhookEvent,
-  rows: { traceId: string; publicId: string; checkoutId: string | null }[],
+  rows: {
+    traceId: string;
+    publicId: string;
+    checkoutId: string | null;
+    customerMobile?: string;
+    cookId?: string;
+    id?: number;
+    status?: string;
+    mealType?: string;
+    serviceDate?: string;
+  }[],
 ) {
+  const row = rows[0];
   const fromNotes = event.notes?.traceId?.trim();
+  const base = {
+    publicId: row?.publicId ?? event.orderPublicId,
+    checkoutId: row?.checkoutId,
+    customerMobile: row?.customerMobile,
+    cookId: row?.cookId,
+    orderId: row?.id,
+    status: row?.status,
+    mealType: row?.mealType,
+    serviceDate: row?.serviceDate,
+    amountPaise: event.amountPaise,
+  };
   if (fromNotes) {
-    bindTrace({
-      traceId: fromNotes,
-      publicId: rows[0]?.publicId ?? event.orderPublicId,
-      checkoutId: rows[0]?.checkoutId,
-    });
+    bindTrace({ traceId: fromNotes, ...base });
     return;
   }
-  if (rows[0]?.traceId) {
-    bindTrace({
-      traceId: rows[0].traceId,
-      publicId: rows[0].publicId,
-      checkoutId: rows[0].checkoutId,
-    });
+  if (row?.traceId) {
+    bindTrace({ traceId: row.traceId, ...base });
   }
 }
 
@@ -119,6 +140,27 @@ async function markPaymentFailed(db: Db, event: GatewayWebhookEvent) {
       mobile: order.customerMobile,
       traceId: order.traceId,
     });
+    payLog.warn(
+      {
+        event: LogEvent.PAYMENT_FAILED,
+        kind: event.kind,
+        ...orderTriageFields({
+          traceId: order.traceId,
+          publicId: order.publicId,
+          checkoutId: order.checkoutId,
+          orderId: order.id,
+          customerMobile: order.customerMobile,
+          cookId: order.cookId,
+          status: "FAILED",
+          amountPaise: event.amountPaise,
+          mealType: order.mealType,
+          serviceDate: order.serviceDate,
+          itemName: order.itemName,
+        }),
+        gatewayTxnId: event.gatewayTxnId,
+      },
+      "payment failed",
+    );
   }
   return { ok: true, kind: event.kind, matched: updated.length, orders: updated };
 }
@@ -141,6 +183,27 @@ async function markPaymentAuthorized(db: Db, event: GatewayWebhookEvent) {
       cookId: order.cookId,
       mobile: order.customerMobile,
     });
+    payLog.info(
+      {
+        event: LogEvent.PAYMENT_CONFIRMING,
+        kind: event.kind,
+        ...orderTriageFields({
+          traceId: order.traceId,
+          publicId: order.publicId,
+          checkoutId: order.checkoutId,
+          orderId: order.id,
+          customerMobile: order.customerMobile,
+          cookId: order.cookId,
+          status: "CONFIRMING_PAYMENT",
+          amountPaise: event.amountPaise,
+          mealType: order.mealType,
+          serviceDate: order.serviceDate,
+          itemName: order.itemName,
+        }),
+        gatewayTxnId: event.gatewayTxnId,
+      },
+      "payment confirming",
+    );
   }
   if (!updated.length) await audit(db, event);
   return { ok: true, kind: event.kind, matched: updated.length, orders: updated };

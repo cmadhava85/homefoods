@@ -10,6 +10,7 @@ import { createDb, orders } from "@localmeals/db";
 import {
   LogEvent,
   createServiceLogger,
+  maskMobile,
   startTelemetry,
 } from "@localmeals/observability";
 import { drainOutboxOnce } from "./drainOutbox.js";
@@ -56,6 +57,8 @@ async function scanStuckConfirmingPayments() {
         event: LogEvent.PAYMENT_CONFIRMING_STUCK,
         orderId: o.id,
         publicId: o.publicId,
+        customerMobile: maskMobile(o.customerMobile),
+        cookId: o.cookId,
         updatedAt: o.updatedAt?.toISOString?.() ?? o.updatedAt,
         stuckMs: CONFIRMING_STUCK_MS,
       },

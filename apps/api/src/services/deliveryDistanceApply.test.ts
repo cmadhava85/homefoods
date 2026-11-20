@@ -32,6 +32,7 @@ describe("delivery distance apply (API contract)", () => {
       fulfillmentMode: "DELIVERY",
       flatSelfDeliveryFeePaise: 2500,
       ...cook,
+      addressPinCode: "600119",
       addressLat: "12.905",
       addressLng: "80.230",
     });
@@ -45,11 +46,24 @@ describe("delivery distance apply (API contract)", () => {
       fulfillmentMode: "DELIVERY",
       flatSelfDeliveryFeePaise: 2500,
       ...cook,
-      addressLat: "13.05",
+      addressPinCode: "600119",
+      // ~6 km — within PIN drift, beyond max delivery
+      addressLat: "12.955",
       addressLng: "80.227",
     });
     assert.equal(far.band, "TOO_FAR");
     assert.throws(() => assertSelfDeliveryAllowed(far.band), /5 km/);
+
+    const spoofUnknownPin = resolveSelfDeliveryPaise({
+      distanceLimitsEnabled: true,
+      fulfillmentMode: "DELIVERY",
+      flatSelfDeliveryFeePaise: 2500,
+      ...cook,
+      addressPinCode: "110001",
+      addressLat: "12.901",
+      addressLng: "80.227",
+    });
+    assert.equal(spoofUnknownPin.band, "MISSING_COORDS");
 
     const missing = resolveSelfDeliveryPaise({
       distanceLimitsEnabled: true,

@@ -178,12 +178,14 @@ describe("HttpLogisticsProvider", () => {
         customerMobile: "+9191",
         cookMobile: "+9192",
         notes: "1× Rice",
+        traceId: "trc_abc123",
       });
       assert.equal(created.partnerShipmentId, "shp_http_1");
       assert.equal(created.trackingUrl, "https://track.example/shp_http_1");
       assert.equal(calls[0]?.method, "POST");
       assert.match(calls[0]?.url ?? "", /\/v1\/shipments$/);
       assert.match(calls[0]?.body ?? "", /externalOrderId/);
+      assert.match(calls[0]?.body ?? "", /"traceId":"trc_abc123"/);
     } finally {
       globalThis.fetch = original;
     }

@@ -6,8 +6,8 @@ import { CancelOrderButton } from "@/components/CancelOrderButton";
 import { RequireAuth } from "@/components/RequireAuth";
 import { ReviewForm } from "@/components/ReviewForm";
 import { useLocale } from "@/components/LocaleProvider";
-import { API_BASE } from "@/lib/api";
 import { authFetch } from "@/lib/auth";
+import { loadFeatureFlags } from "@/lib/features";
 import { isExternalPaymentUrl, payPageHref } from "@/lib/payments";
 import { customerStatusLabel, statusTone } from "@/lib/orderStatus";
 import { localizedDishName, type MsgKey } from "@localmeals/i18n";
@@ -199,11 +199,10 @@ function OrdersInner() {
         setLeanWaStatus(Boolean(json.leanWaStatus));
       })
       .catch(() => undefined);
-    fetch(`${API_BASE}/meta/features`)
-      .then(async (r) => (r.ok ? r.json() : null))
-      .then((json: { flags?: Record<string, boolean> } | null) => {
-        if (json?.flags && typeof json.flags.lean_wa_status_enabled === "boolean") {
-          setLeanWaPlatformOn(Boolean(json.flags.lean_wa_status_enabled));
+    loadFeatureFlags()
+      .then((flags) => {
+        if (typeof flags.lean_wa_status_enabled === "boolean") {
+          setLeanWaPlatformOn(Boolean(flags.lean_wa_status_enabled));
         }
       })
       .catch(() => undefined);

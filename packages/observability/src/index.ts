@@ -4,6 +4,8 @@ export {
   getCorr,
   setCorrField,
   bindTrace,
+  maskMobile,
+  orderTriageFields,
   newTraceId,
   withCorr,
   readCorr,

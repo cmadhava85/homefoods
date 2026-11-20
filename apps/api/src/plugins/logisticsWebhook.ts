@@ -4,6 +4,7 @@ import {
   normalizeLogisticsWebhookPayload,
   verifyLogisticsWebhookAuth,
 } from "@localmeals/adapters";
+import { bindTrace } from "@localmeals/observability";
 import { sendCaughtError } from "../httpErrors.js";
 import { applyPartnerShipmentUpdate } from "../services/partnerLogistics.js";
 
@@ -11,6 +12,7 @@ import { applyPartnerShipmentUpdate } from "../services/partnerLogistics.js";
  * Partner logistics webhook (Shadowfax / Porter / HTTP gateway).
  * Auth: `X-Logistics-Secret` and/or HMAC `X-Logistics-Signature` (sha256 hex of raw body).
  * Body: LocalMeals shape or common vendor aliases — see docs/LOGISTICS.md.
+ * Prefer echoed `traceId` from createShipment metadata for Cloud Logging joins.
  */
 export async function logisticsWebhook(app: FastifyInstance, opts: { db: Db }) {
   const { db } = opts;
@@ -29,11 +31,25 @@ export async function logisticsWebhook(app: FastifyInstance, opts: { db: Db }) {
     try {
       const event = normalizeLogisticsWebhookPayload(req.body);
       const order = await applyPartnerShipmentUpdate(db, event);
+      const traceId = event.traceId?.trim() || order.traceId?.trim();
+      if (traceId) {
+        bindTrace({
+          traceId,
+          publicId: order.publicId,
+          customerMobile: order.customerMobile,
+          cookId: order.cookId,
+          orderId: order.id,
+          status: order.status,
+          mealType: order.mealType,
+          serviceDate: order.serviceDate,
+        });
+      }
       return {
         ok: true,
         publicId: order.publicId,
         status: order.status,
         partnerShipmentId: order.partnerShipmentId,
+        ...(traceId ? { traceId } : {}),
       };
     } catch (e) {
       return sendCaughtError(reply, e);

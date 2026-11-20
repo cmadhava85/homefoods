@@ -33,17 +33,47 @@ Ledger events that matter for ops:
 | `PAYMENT_CONFIRMING_STUCK` | Paid link open too long without webhook (deduped 6h) |
 | `GATEWAY_*` | Raw payment webhook kinds |
 
+## What a good log line looks like
+
+Every meaningful line should include as many of these as known:
+
+| Field | Purpose |
+|-------|---------|
+| `event` | Stable marker (`order.created`, `order.status_changed`, `order.paid`, `request.completed`, …) |
+| `traceId` | One journey across API → Razorpay → logistics → worker |
+| `publicId` / `checkoutId` | Customer-facing order keys |
+| `customerMobile` | Masked (`+91***…`) |
+| `cookSlug` / `cookId` | Kitchen |
+| `status` / `fromStatus`/`toStatus` | Lifecycle |
+| `amountPaise`, `mealType`, `serviceDate` | Money / slot |
+| `method`/`url`/`statusCode`/`durationMs` | HTTP access (`request.completed`) |
+
+**Noise control:** `/health`, `/meta/features`, `/meta/today` log at `debug` only. Fastify’s default “incoming request” lines are disabled.
+
+Cloud Logging examples:
+
+```text
+jsonPayload.event="order.status_changed"
+jsonPayload.traceId="trc_…"
+jsonPayload.publicId="LM-…"
+jsonPayload.event="request.completed" AND jsonPayload.statusCode>=400
+jsonPayload.event="third_party.request"
+jsonPayload.event="outbox.processed"
+```
+
 ## Trace an order (ops) — prefer `traceId`
 
 Each checkout/order gets one durable **`traceId`** (`trc_…`) at create time. It is:
 
 - stored on `orders.trace_id`
-- sent to Razorpay as payment-link `notes.traceId` (comes back on webhooks)
+- sent to Razorpay as payment-link / refund / transfer `notes.traceId` (comes back on webhooks)
+- sent to partner logistics (Porter/Shadowfax gateway) as `traceId` + `metadata.traceId` on createShipment; webhook echoes it when the partner returns it (else we fall back to `orders.trace_id`)
 - embedded on outbox `_corr.traceId`
 - returned as response header **`X-Trace-Id`** (and in create/batch JSON when present)
 - shown on Admin order support
+- outbound calls also log `event=third_party.request` with the same `traceId`
 
-`requestId` still changes on every HTTP call (including each webhook delivery). **Use `traceId` to join create → pay webhook → outbox → worker.**
+`requestId` still changes on every HTTP call (including each webhook delivery). **Use `traceId` to join create → pay webhook → logistics webhook → outbox → worker.**
 
 1. Get `traceId` from Admin order support, `X-Trace-Id`, or `publicId` if older rows were backfilled.
 2. Cloud Logging:

@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { cookLedger, orders, settlements, type Db } from "@localmeals/db";
-import { LogEvent, createServiceLogger } from "@localmeals/observability";
+import { LogEvent, createServiceLogger, newTraceId } from "@localmeals/observability";
 import { enqueueOutbox } from "./outboxEnqueue.js";
 import { serviceDateISO } from "@localmeals/domain";
 import { getPaymentProvider, getWhatsAppProvider, isMockPayments } from "@localmeals/adapters";
@@ -124,6 +124,20 @@ export async function runEodSettlement(db: Db, businessDate = serviceDateISO()) 
       }
     } else {
       try {
+        const settleTraceId = newTraceId();
+        log.info(
+          {
+            event: LogEvent.THIRD_PARTY_REQUEST,
+            provider: "razorpay",
+            action: "transferToLinkedAccount",
+            traceId: settleTraceId,
+            settlementId: draft.id,
+            cookId,
+            amountPaise: netPaise,
+            businessDate,
+          },
+          "razorpay transfer",
+        );
         const transfer = await pay.transferToLinkedAccount({
           accountId,
           amountPaise: netPaise,
@@ -133,6 +147,7 @@ export async function runEodSettlement(db: Db, businessDate = serviceDateISO()) 
             cookId,
             orderCount: String(cookOrders.length),
             clawbackPaise: String(clawbackPaise),
+            traceId: settleTraceId.slice(0, 40),
           },
         });
         gatewayBatchId = transfer.transferId;
