@@ -67,20 +67,61 @@ describe("ops flows e2e (gaps)", () => {
   }
 
   async function openWeekDays(minDays: number) {
-    const week = await app.inject({
+    // Keep cut-off open for the whole suite (other tests may tighten it).
+    await app.inject({
+      method: "PATCH",
+      url: `/cooks/${SLUG}/meal-settings/LUNCH`,
+      headers: cookHeaders,
+      payload: { cutoffHour: 23, cutoffMinute: 59 },
+    });
+
+    let week = await app.inject({
       method: "GET",
       url: `/kitchens/${SLUG}/week?days=7&meal=LUNCH`,
     });
     assert.equal(week.statusCode, 200, week.body);
-    const plan = week.json().plan as Array<{
+    let plan = week.json().plan as Array<{
       serviceDate: string;
       orderingOpen: boolean;
       menus: Array<{ id: number }>;
     }>;
-    const days = plan.filter((d) => d.orderingOpen && d.menus.length > 0);
+    let days = plan.filter((d) => d.orderingOpen && d.menus.length > 0);
+
+    // Seed may only have today — backfill dated lunch plates for open empty days.
+    if (days.length < minDays) {
+      const { dailyMenus } = await import("@localmeals/db");
+      const cook = await db.query.cookProfiles.findFirst({
+        where: (t, { eq: e }) => e(t.slugHandle, SLUG),
+      });
+      assert.ok(cook, "CSK cook missing — run db:seed");
+      for (const d of plan) {
+        if (!d.orderingOpen || d.menus.length > 0) continue;
+        await db.insert(dailyMenus).values({
+          cookId: cook.id,
+          itemName: `CI Week Plate ${d.serviceDate}`,
+          pricePaise: 8000,
+          serviceDate: d.serviceDate,
+          mealType: "LUNCH",
+          isVeg: true,
+          allergens: [],
+        });
+      }
+      week = await app.inject({
+        method: "GET",
+        url: `/kitchens/${SLUG}/week?days=7&meal=LUNCH`,
+      });
+      assert.equal(week.statusCode, 200, week.body);
+      plan = week.json().plan as Array<{
+        serviceDate: string;
+        orderingOpen: boolean;
+        menus: Array<{ id: number }>;
+      }>;
+      days = plan.filter((d) => d.orderingOpen && d.menus.length > 0);
+    }
+
     assert.ok(
       days.length >= minDays,
-      `need ≥${minDays} open lunch days with plates — run db:seed`,
+      `need ≥${minDays} open lunch days with plates — run db:seed (got ${days.length})`,
     );
     return days;
   }

@@ -12,11 +12,18 @@ import {
   supportTickets,
   users,
 } from "./schema.js";
-import { defaultMealSchedule, MEAL_PERIODS, serviceDateISO } from "@localmeals/domain";
+import {
+  addDaysISO,
+  defaultMealSchedule,
+  MEAL_PERIODS,
+  serviceDateISO,
+} from "@localmeals/domain";
 
 async function main() {
   const db = createDb();
   const today = serviceDateISO();
+  /** Today + next days so week-cart e2e / demos have ≥2 open lunch slots. */
+  const lunchDates = [0, 1, 2].map((offset) => addDaysISO(today, offset));
   const demoHour = Number(process.env.LUNCH_CUTOFF_HOUR ?? 8);
   const demoMinute = Number(process.env.LUNCH_CUTOFF_MINUTE ?? 0);
 
@@ -268,33 +275,35 @@ async function main() {
   }
 
   if (csk) {
-    const todayMenu = await db.query.dailyMenus.findFirst({
-      where: (t, { eq: e, and: a }) =>
-        a(e(t.cookId, csk.id), e(t.serviceDate, today)),
-    });
-    if (!todayMenu) {
-      await db.insert(dailyMenus).values([
-        {
-          cookId: csk.id,
-          itemName: "Sambar Rice + Poriyal",
-          itemNameTa: "சாம்பார் சாதம் + பொரியல்",
-          pricePaise: 8000,
-          serviceDate: today,
-          mealType: "LUNCH",
-          isVeg: true,
-          allergens: ["dairy"],
-        },
-        {
-          cookId: csk.id,
-          itemName: "Chapathi (3) + Dal",
-          itemNameTa: "சப்பாத்தி (3) + பருப்பு",
-          pricePaise: 9000,
-          serviceDate: today,
-          mealType: "LUNCH",
-          isVeg: true,
-          allergens: [],
-        },
-      ]);
+    for (const serviceDate of lunchDates) {
+      const dayMenu = await db.query.dailyMenus.findFirst({
+        where: (t, { eq: e, and: a }) =>
+          a(e(t.cookId, csk.id), e(t.serviceDate, serviceDate)),
+      });
+      if (!dayMenu) {
+        await db.insert(dailyMenus).values([
+          {
+            cookId: csk.id,
+            itemName: "Sambar Rice + Poriyal",
+            itemNameTa: "சாம்பார் சாதம் + பொரியல்",
+            pricePaise: 8000,
+            serviceDate,
+            mealType: "LUNCH",
+            isVeg: true,
+            allergens: ["dairy"],
+          },
+          {
+            cookId: csk.id,
+            itemName: "Chapathi (3) + Dal",
+            itemNameTa: "சப்பாத்தி (3) + பருப்பு",
+            pricePaise: 9000,
+            serviceDate,
+            mealType: "LUNCH",
+            isVeg: true,
+            allergens: [],
+          },
+        ]);
+      }
     }
   }
 
