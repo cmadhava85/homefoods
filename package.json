@@ -10,7 +10,7 @@
     "dev:api": "npm run dev -w @localmeals/api",
     "dev:worker": "npm run dev -w @localmeals/worker",
     "dev:web": "npm run dev -w @localmeals/web",
-    "build": "npm run build -w @localmeals/domain && npm run build -w @localmeals/adapters && npm run build -w @localmeals/i18n && npm run build -w @localmeals/observability && npm run build -w @localmeals/db && npm run build -w @localmeals/api --if-present && npm run build -w @localmeals/worker --if-present && npm run build -w @localmeals/web --if-present",
+    "build": "npm run build -w @localmeals/domain && npm run build -w @localmeals/observability && npm run build -w @localmeals/adapters && npm run build -w @localmeals/i18n && npm run build -w @localmeals/db && npm run build -w @localmeals/api --if-present && npm run build -w @localmeals/worker --if-present && npm run build -w @localmeals/web --if-present",
     "db:migrate": "npm run migrate -w @localmeals/db",
     "db:seed": "npm run seed -w @localmeals/db",
     "db:seed:month": "npm run seed:month -w @localmeals/db",

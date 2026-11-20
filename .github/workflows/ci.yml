@@ -47,10 +47,12 @@ jobs:
           # (exit 0, empty dist). Force a real emit.
           find packages apps -name 'tsconfig.tsbuildinfo' -delete 2>/dev/null || true
           npm run build -w @localmeals/domain
+          npm run build -w @localmeals/observability
           npm run build -w @localmeals/adapters
           npm run build -w @localmeals/i18n
           npm run build -w @localmeals/db
           test -f packages/domain/dist/index.js
+          test -f packages/observability/dist/index.js
 
       - name: Migrate + seed
         run: |
