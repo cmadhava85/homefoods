@@ -185,11 +185,7 @@ describe("MVP-1 integration", () => {
   });
 
   it("late request + late-approve creates payable order; FSSAI gate blocks unpaid kitchen", async () => {
-    // Past cut-off; delivery ≥5h ahead of now (IST) so late window (start−4h) stays open on CI.
-    const { appZoneParts } = await import("@localmeals/domain");
-    const nowIst = appZoneParts(new Date());
-    const startHour = Math.min(23, nowIst.hour + 5);
-    const endHour = Math.min(23, startHour + 1);
+    // Past cut-off; delivery 23:00 → late closes 19:00 IST (works for daytime CI).
     const openLate = await app.inject({
       method: "PATCH",
       url: "/cooks/csk-homemade-delights/meal-settings/LUNCH",
@@ -198,10 +194,10 @@ describe("MVP-1 integration", () => {
         cutoffHour: 0,
         cutoffMinute: 0,
         deliveryWindow: {
-          startHour,
+          startHour: 23,
           startMinute: 0,
-          endHour,
-          endMinute: 0,
+          endHour: 23,
+          endMinute: 45,
         },
       },
     });
