@@ -11,19 +11,23 @@ const fraunces = Fraunces({
   subsets: ["latin"],
   variable: "--font-fraunces",
   display: "swap",
+  fallback: ["Georgia", "serif"],
 });
 
 const figtree = Figtree({
   subsets: ["latin"],
   variable: "--font-figtree",
   display: "swap",
+  fallback: ["system-ui", "sans-serif"],
 });
 
 const notoTamil = Noto_Sans_Tamil({
   subsets: ["tamil"],
-  weight: ["400", "500", "600", "700"],
+  weight: ["400", "700"],
   variable: "--font-tamil",
   display: "swap",
+  fallback: ["system-ui", "sans-serif"],
+  adjustFontFallback: false,
 });
 
 export const metadata: Metadata = {

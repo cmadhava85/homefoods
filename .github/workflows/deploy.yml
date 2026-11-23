@@ -78,7 +78,9 @@ jobs:
           npm run db:seed
       - run: npm test
       - name: Typecheck web
-        run: npm run build -w @localmeals/web
+        # tsc only — next build downloads Google Fonts and flakes in Actions.
+        # Full next build still runs in the Docker web image step.
+        run: npm run typecheck -w @localmeals/web
         env:
           NEXT_PUBLIC_API_URL: http://127.0.0.1:4000
 
