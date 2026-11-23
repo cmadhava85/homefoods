@@ -185,55 +185,80 @@ describe("MVP-1 integration", () => {
   });
 
   it("late request + late-approve creates payable order; FSSAI gate blocks unpaid kitchen", async () => {
-    const close = await app.inject({
+    // Past cut-off; delivery ≥5h ahead of now (IST) so late window (start−4h) stays open on CI.
+    const { appZoneParts } = await import("@localmeals/domain");
+    const nowIst = appZoneParts(new Date());
+    const startHour = Math.min(23, nowIst.hour + 5);
+    const endHour = Math.min(23, startHour + 1);
+    const openLate = await app.inject({
       method: "PATCH",
       url: "/cooks/csk-homemade-delights/meal-settings/LUNCH",
       headers: cookHeaders,
-      payload: { cutoffHour: 0, cutoffMinute: 0 },
-    });
-    assert.equal(close.statusCode, 200, close.body);
-
-    const { mobile: lateMobile, addressId, headers: lateHeaders } =
-      await customerWithAddress(app);
-    const requested = await app.inject({
-      method: "POST",
-      url: "/orders/late-request",
-      headers: lateHeaders,
       payload: {
-        customerMobile: lateMobile,
-        cookSlug: "csk-homemade-delights",
-        menuItemId,
-        qty: 1,
-        addressId,
+        cutoffHour: 0,
+        cutoffMinute: 0,
+        deliveryWindow: {
+          startHour,
+          startMinute: 0,
+          endHour,
+          endMinute: 0,
+        },
       },
     });
-    assert.equal(requested.statusCode, 200, requested.body);
-    assert.equal(requested.json().status, "PENDING_APPROVAL");
+    assert.equal(openLate.statusCode, 200, openLate.body);
 
-    const approved = await app.inject({
-      method: "POST",
-      url: `/orders/${requested.json().publicId}/late-approve`,
-      headers: cookHeaders,
-    });
-    assert.equal(approved.statusCode, 200, approved.body);
-    assert.equal(approved.json().status, "AWAITING_PAYMENT");
-    assert.ok(approved.json().gatewayTxnId);
-    assert.ok(approved.json().paymentUrl);
+    try {
+      const { mobile: lateMobile, addressId, headers: lateHeaders } =
+        await customerWithAddress(app);
+      const requested = await app.inject({
+        method: "POST",
+        url: "/orders/late-request",
+        headers: lateHeaders,
+        payload: {
+          customerMobile: lateMobile,
+          cookSlug: "csk-homemade-delights",
+          menuItemId,
+          qty: 1,
+          addressId,
+        },
+      });
+      assert.equal(requested.statusCode, 200, requested.body);
+      assert.equal(requested.json().status, "PENDING_APPROVAL");
 
-    const millet = await db.query.cookProfiles.findFirst({
-      where: (t, { eq: e }) => e(t.slugHandle, "millet-box"),
-    });
-    assert.ok(millet);
-    assert.throws(() =>
-      assertCanAcceptPaidOrders({ ...millet, onboardingStatus: "LIVE", fssaiNumber: null }),
-    );
+      const approved = await app.inject({
+        method: "POST",
+        url: `/orders/${requested.json().publicId}/late-approve`,
+        headers: cookHeaders,
+      });
+      assert.equal(approved.statusCode, 200, approved.body);
+      assert.equal(approved.json().status, "AWAITING_PAYMENT");
+      assert.ok(approved.json().gatewayTxnId);
+      assert.ok(approved.json().paymentUrl);
 
-    await app.inject({
-      method: "PATCH",
-      url: "/cooks/csk-homemade-delights/meal-settings/LUNCH",
-      headers: cookHeaders,
-      payload: { cutoffHour: 23, cutoffMinute: 59 },
-    });
+      const millet = await db.query.cookProfiles.findFirst({
+        where: (t, { eq: e }) => e(t.slugHandle, "millet-box"),
+      });
+      assert.ok(millet);
+      assert.throws(() =>
+        assertCanAcceptPaidOrders({ ...millet, onboardingStatus: "LIVE", fssaiNumber: null }),
+      );
+    } finally {
+      await app.inject({
+        method: "PATCH",
+        url: "/cooks/csk-homemade-delights/meal-settings/LUNCH",
+        headers: cookHeaders,
+        payload: {
+          cutoffHour: 23,
+          cutoffMinute: 59,
+          deliveryWindow: {
+            startHour: 12,
+            startMinute: 0,
+            endHour: 13,
+            endMinute: 0,
+          },
+        },
+      });
+    }
   });
 
   it("EOD skips settlement_hold and is idempotent", async () => {
