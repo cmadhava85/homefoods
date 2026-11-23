@@ -1813,7 +1813,7 @@ function CookDeskInner() {
                 {stop.orders.length > 1 ? (
                   <span className="muted">
                     {" "}
-                    ({stop.orders.map((o) => o.publicId).join(", ")})
+                    ({stop.orders.map((o: ManifestOrder) => o.publicId).join(", ")})
                   </span>
                 ) : null}
               </li>
@@ -1907,7 +1907,7 @@ function CookDeskInner() {
               {stop.customerMobile}
               {fulfillmentMode === "PICKUP" ? ` · ${t("cook.showCode")}` : ""}
             </p>
-            {stop.orders.map((o) => {
+            {stop.orders.map((o: ManifestOrder) => {
               const next = cookNextAction(t, o.status, o.fulfillmentMode);
               const cancelAsk = o.status === "CANCEL_REQUESTED";
               const linePartner =
