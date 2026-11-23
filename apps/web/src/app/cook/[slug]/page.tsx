@@ -9,12 +9,15 @@ import { API_BASE } from "@/lib/api";
 import { authFetch } from "@/lib/auth";
 import { loadFeatureFlags } from "@/lib/features";
 import { prepareMenuPhoto } from "@/lib/menuImage";
-import { groupCookStops } from "@/lib/cookStops";
+import { groupCookStops, type CookStopGroup } from "@/lib/cookStops";
 import { cookNextAction, customerStatusLabel, statusTone } from "@/lib/orderStatus";
 import type { MsgKey } from "@localmeals/i18n";
 import { CookDeskHero } from "./CookDeskHero";
 import { CookSettingsCards } from "./CookSettingsCards";
 import type { DeskReview, Manifest, MealType, MenuItem, WaFeedItem } from "./types";
+
+type ManifestOrder = Manifest["orders"][number];
+type DeskStop = CookStopGroup<ManifestOrder>;
 
 function mapsLinkForAddress(address: string) {
   return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`;
@@ -1799,7 +1802,7 @@ function CookDeskInner() {
           <ol style={{ margin: "0.5rem 0 0", paddingLeft: "1.2rem" }}>
             {groupCookStops(
               orders.filter((o) => !["DELIVERED", "REFUNDED", "CANCELLED"].includes(o.status)),
-            ).map((stop) => (
+            ).map((stop: DeskStop) => (
               <li key={stop.key} style={{ marginBottom: "0.35rem" }}>
                 <strong>
                   {stop.orders.length > 1
@@ -1874,7 +1877,7 @@ function CookDeskInner() {
           (a, b) =>
             Number(b.status === "CANCEL_REQUESTED") - Number(a.status === "CANCEL_REQUESTED"),
         ),
-      ).map((stop, i) => {
+      ).map((stop: DeskStop, i) => {
         const fulfillmentMode = stop.fulfillmentMode;
         const partnerOrder = stop.orders.some(
           (o) => o.logisticsMode === "PARTNER" || o.status === "ASSIGNING_RIDER",
