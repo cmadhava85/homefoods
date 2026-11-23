@@ -180,12 +180,14 @@ npm test
 |--------|---------|
 | `metaRoutes` | `/health`, `/meta/today`, `/meta/features` |
 | `authRoutes` | OTP request/verify, me, logout |
-| `customerRoutes` | Kitchens, orders, family, checkouts, concerns, reviews |
-| `cookRoutes` | Desk menu, meal-settings, pipeline, late/cancel pending |
+| `customerRoutes` | Kitchens, orders, family, checkouts, concerns, reviews, `/ads` |
+| `cookRoutes` | Desk menu, meal-settings, pipeline, late/cancel, boosts |
 | `paymentRoutes` | Mock confirm, payment webhooks |
-| `adminRoutes` | Tickets, cooks, payouts, flags, analytics |
+| `adminRoutes` | Tickets, cooks, payouts, flags, ads, order support, analytics |
 | `internalRoutes` | Cut-offs, EOD, ops (token-guarded) |
 | `whatsappWebhook` | Meta verify + inbound |
+| `logisticsWebhook` | Partner shipment status webhooks |
+| `uploadsRoutes` | GCS proxy for `/uploads/:name` (else disk static) |
 
 **Guidance:** New HTTP endpoint → correct plugin → call a **service** function → domain asserts. Don’t put cut-off math in the route handler.
 

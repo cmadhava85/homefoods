@@ -1877,10 +1877,11 @@ function CookDeskInner() {
           (a, b) =>
             Number(b.status === "CANCEL_REQUESTED") - Number(a.status === "CANCEL_REQUESTED"),
         ),
-      ).map((stop: DeskStop, i) => {
+      ).map((stop: DeskStop, i: number) => {
         const fulfillmentMode = stop.fulfillmentMode;
         const partnerOrder = stop.orders.some(
-          (o) => o.logisticsMode === "PARTNER" || o.status === "ASSIGNING_RIDER",
+          (o: ManifestOrder) =>
+            o.logisticsMode === "PARTNER" || o.status === "ASSIGNING_RIDER",
         );
         const multi = stop.orders.length > 1;
         return (

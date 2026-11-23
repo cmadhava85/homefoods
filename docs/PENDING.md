@@ -1,17 +1,17 @@
 # Pending items (LocalMeals)
 
-Last updated after block/ops pass (Cloud SQL migrate through `0026`, uploads bucket, staging smoke).
+Last updated after ads scaffold + deploy CI harden (migrations through `0029` in repo).
 
 ## Block launch / staging ops
 
 | Item | Status |
 |------|--------|
-| Migrate Cloud SQL through latest (`0009`–`0026`) | **Done** — 26 migrations on `localmeals-pg` |
+| Migrate Cloud SQL through latest (`0009`–`0029`) | **Apply on Cloud SQL** after each deploy — local/journal has `0028` late-orders + `0029` ad_campaigns; confirm staging/prod drizzle journal |
 | Uploads bucket + `GCS_UPLOADS_BUCKET` on API | **Done** — `gs://home-food-513806-localmeals-uploads`; Run SA `objectAdmin`; API env set. Deploy workflow now keeps the env var. TF state import blocked on ADC reauth (`gcloud auth application-default login` then `terraform import` in `infra/terraform`) |
 | Sync local `.env` WA + Razorpay from SM | **Done** — `npm run secrets:sync` (script fixed for macOS bash 3.2) |
 | Refresh WA secrets on Run | **Done** — api `00020`, worker `00006` rebound to SM `:latest` |
 | Staging smoke | **Done** — `7/7` on `https://localmeals-api-1031170612008.asia-south1.run.app` |
-| Redeploy api + web + worker images | **Open** — after you commit + push: CI green → `gh workflow run "Deploy Cloud Run"` (needs `ENABLE_GCP_DEPLOY=true`) → re-smoke api/web/worker |
+| Redeploy api + web + worker images | **In progress** — push ads + desk + docs; watch Deploy Cloud Run; then smoke |
 | GitHub Actions CI / ZAP | **Root cause fixed locally** — `*.tsbuildinfo` gitignored; CI cleans buildinfo before build. Re-runs on your push. |
 | WhatsApp phone test | **Needs you** — Meta → add your number as test recipient → message business/test number → confirm OTP / menu / pay ping |
 | Post-deploy smoke | Order CSK lunch → Razorpay (or mock) → cook desk stop → deliver → Admin Features kill-switch spot-check |
@@ -47,6 +47,7 @@ See [ROADMAP.md](./ROADMAP.md).
 - Kitchen follow alerts
 - EOD settlement job
 - **Kitchen pickup** (default **OFF**) — landmark after pay, restricted window, ₹0 delivery; cook desk Menu & settings → enable + landmark (`PATCH /cooks/:slug/pickup`)
+- **Ads & kitchen boosts** (default **OFF**) — `ads_enabled`; Admin Ads + Discover sponsored + cook boost request; keep off until pin volume is healthy
 
 ## Ops ritual
 

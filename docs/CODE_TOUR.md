@@ -107,13 +107,14 @@ apps/api/src/index.ts
 |-------------|--------|
 | `plugins/metaRoutes.ts` | `/health`, `/meta/*` |
 | `plugins/authRoutes.ts` | `/auth/*` OTP login |
-| `plugins/customerRoutes.ts` | kitchens, orders, checkouts, me, family |
+| `plugins/customerRoutes.ts` | kitchens, orders, checkouts, me, family, `/ads`, reviews/concerns |
 | `plugins/paymentRoutes.ts` | pay confirm + `/webhooks/payments` |
 | `plugins/cookRoutes.ts` | cook desk `/cooks/:slug/*` |
 | `plugins/internalRoutes.ts` | cut-off, EOD, retention (`X-Internal-Token`) |
-| `plugins/adminRoutes.ts` | admin tickets, cooks, order support, analytics |
+| `plugins/adminRoutes.ts` | tickets, cooks, payouts, features, ads, order support, analytics |
 | `plugins/whatsappWebhook.ts` | `/webhooks/whatsapp` |
 | `plugins/logisticsWebhook.ts` | partner delivery webhooks |
+| `plugins/uploadsRoutes.ts` | `GET /uploads/:name` when `GCS_UPLOADS_BUCKET` is set |
 
 **HTTP layer pattern:** plugin = thin Zod + auth assert → call `services/*` → return JSON. Business rules live in services / domain, not in the route file.
 
@@ -296,6 +297,7 @@ POST /checkouts/:id/cancel → cancelCheckout (each day line)
 | `settlement.ts` | EOD batch |
 | `cookClawback.ts` | Post-refund clawback notes |
 | `featureFlags.ts` | Kill switches |
+| `ads.ts` | Pin ads / kitchen boosts (gated by `ads_enabled`, default OFF) |
 | `outboxEnqueue.ts` | Insert outbox + `_corr` |
 | `partnerLogistics.ts` | Dispatch via partner when cook deliveryType=PARTNER |
 | `reviews.ts` | Post-delivery reviews |

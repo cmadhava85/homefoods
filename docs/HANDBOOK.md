@@ -220,16 +220,20 @@ Deploy checklist: [DEPLOY.md](./DEPLOY.md) · Terraform: [infra/terraform/README
 
 | Key | Meaning (default) |
 |-----|-------------------|
-| `ordering_enabled` | Master switch for new orders (on) |
-| `late_orders_enabled` | Late requests (on) |
-| `child_pays_enabled` | Family pay (on) |
-| `week_discount_enabled` | Week % (on) |
-| `reviews_enabled` | Reviews (on) |
-| `whatsapp_outbound_enabled` | Worker WA send (on) |
-| `kitchen_follow_enabled` | Follow alerts (on) |
-| `eod_settlement_enabled` | EOD job (on) |
+| `ordering_enabled` | Master switch for new orders (**on**) |
+| `late_orders_enabled` | Late requests (**on**) |
+| `child_pays_enabled` | Family pay (**off** for solo launch) |
+| `week_discount_enabled` | Week % (**on**) |
+| `reviews_enabled` | Reviews (**on**) |
+| `whatsapp_outbound_enabled` | Worker WA send (**on**) |
+| `kitchen_follow_enabled` | Follow alerts (**on**) |
+| `eod_settlement_enabled` | EOD job (**on**) |
 | `pickup_enabled` | Kitchen pickup (**off** until ready) |
-| `partner_delivery_enabled` | Partner rider logistics (**off**; Admin Cooks → Delivery mode PARTNER; desk + confirm UI) |
+| `partner_delivery_enabled` | Partner rider logistics (**off**) |
+| `lean_wa_status_enabled` | Opt-in Cooking/Ready WA pings (**off**) |
+| `delivery_distance_limits_enabled` | 3 / 5 km cook-delivery bands (**off**) |
+| `self_delivery_fee_enabled` | Charge cook flat self-delivery fee (**off**) |
+| `ads_enabled` | Sponsored Discover + cook boosts (**off**) |
 
 Incident response: flip flags off in Admin before code rollback when possible ([RUNBOOK.md](./RUNBOOK.md)).
 
