@@ -54,14 +54,22 @@ export async function handleOrderFlow(s: WaSession): Promise<object> {
       "PACKED",
       "DISPATCHED",
       "DELAYED",
+      "CANCEL_REQUESTED",
     ]);
     const { orders: history } = await listOrdersForCustomer(db, mobile, 30);
-    // WhatsApp: upcoming / in-flight only — easier Pay & Cancel
+    // WhatsApp: upcoming / in-flight — Pay & Cancel; also surface today's closed unpaid holds
     const upcoming = history
       .filter((o) => openStatuses.has(o.status) && o.serviceDate >= today)
       .sort((a, b) => a.serviceDate.localeCompare(b.serviceDate) || b.id - a.id)
       .slice(0, 8);
-    if (!upcoming.length) {
+    const recentClosed = history
+      .filter(
+        (o) =>
+          (o.status === "CANCELLED" || o.status === "FAILED") &&
+          o.serviceDate >= today,
+      )
+      .slice(0, 3);
+    if (!upcoming.length && !recentClosed.length) {
       await wa.send({
         to: from,
         body: wt("wa.ordersEmpty"),
@@ -69,36 +77,56 @@ export async function handleOrderFlow(s: WaSession): Promise<object> {
       });
       return { ok: true, intent, empty: true, replies: replies() };
     }
-    const lines = upcoming.map((o) => {
+    const formatLine = (o: (typeof history)[number]) => {
       const total = (o.totalPaise / 100).toFixed(0);
       const statusKey = `wa.status.${o.status}` as MsgKey;
       const statusLabel = wt(statusKey) !== statusKey ? wt(statusKey) : o.status;
       const payHint =
-        o.status === "AWAITING_PAYMENT"
+        o.status === "AWAITING_PAYMENT" || o.status === "FAILED"
           ? ` → Pay ${o.checkoutId ?? o.publicId}`
           : o.cancellable
             ? ` → Cancel ${o.publicId}`
             : "";
       return `• ${o.publicId} · ${o.serviceDate} · ${o.qty}× ${localizedDishName(waLocale, o)} · ${statusLabel} · ₹${total}${payHint}`;
-    });
-    const unpaid = upcoming.find((o) => o.status === "AWAITING_PAYMENT");
+    };
+    const lines = upcoming.map(formatLine);
+    const closedLines = recentClosed.map(formatLine);
+    const unpaid = upcoming.find(
+      (o) => o.status === "AWAITING_PAYMENT" || o.status === "FAILED",
+    );
     const canCancel = upcoming.find((o) => o.cancellable);
     await wa.send({
       to: from,
       body: [
-        wt("wa.ordersTitle"),
+        upcoming.length ? wt("wa.ordersTitle") : wt("wa.ordersClosedTitle"),
         "",
-        ...lines,
+        ...(lines.length ? lines : []),
+        ...(closedLines.length
+          ? [
+              lines.length ? "" : null,
+              lines.length ? wt("wa.ordersClosedTitle") : null,
+              ...closedLines,
+              wt("wa.ordersClosedHint"),
+            ].filter(Boolean)
+          : []),
         "",
-        wt("wa.ordersHint"),
-      ].join("\n"),
+        upcoming.length ? wt("wa.ordersHint") : null,
+      ]
+        .filter((x) => x !== null && x !== undefined)
+        .join("\n"),
       buttons: [
         unpaid ? `Pay ${unpaid.checkoutId ?? unpaid.publicId}` : null,
         canCancel ? `Cancel ${canCancel.publicId}` : null,
         "Menu",
       ].filter(Boolean) as string[],
     });
-    return { ok: true, intent, count: upcoming.length, replies: replies() };
+    return {
+      ok: true,
+      intent,
+      count: upcoming.length,
+      closed: recentClosed.length,
+      replies: replies(),
+    };
         });
   }
 

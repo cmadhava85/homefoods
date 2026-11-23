@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { and, eq, inArray, lt } from "drizzle-orm";
+import { and, eq, inArray, lt, sql } from "drizzle-orm";
 import {
   addresses,
   orders,
@@ -30,7 +30,9 @@ import {
   dayOfWeekForServiceDate,
   formatCutoffLabel,
   formatDeliveryWindowLabel,
+  assertLateOrderTiming,
   isBeforeCutoff,
+  isLateOrderWindowOpen,
   isIntakePausedForDate,
   isFeatureEnabled,
   isZeroDeliveryFulfillment,
@@ -76,6 +78,7 @@ export function publicCookDto(cook: {
   weekDiscountMinDays?: number | null;
   pickupEnabled?: boolean | null;
   intakePausedDate?: string | null;
+  lateOrdersEnabled?: boolean | null;
   offerCookDelivery?: boolean | null;
   offerCustomerArrange?: boolean | null;
 }) {
@@ -97,6 +100,7 @@ export function publicCookDto(cook: {
     pickupEnabled: Boolean(cook.pickupEnabled),
     intakePaused: isIntakePausedForDate(cook.intakePausedDate, today),
     intakePausedDate: cook.intakePausedDate ?? null,
+    lateOrdersEnabled: cook.lateOrdersEnabled !== false,
     fulfillmentOffers: offers,
   };
 }
@@ -625,6 +629,16 @@ export async function getKitchenWeekPlan(
   const offers = cookFulfillmentOffersFromRow(cook);
   const todayPaused = isIntakePausedForDate(cook.intakePausedDate, serviceDateISO());
   const orderingOpen = slot.orderingOpen && !todayPaused;
+  const now = new Date();
+  const lateOrderingOpen =
+    schedule.enabled &&
+    isLateOrderWindowOpen(
+      mealType,
+      now,
+      serviceDateISO(),
+      schedule.cutoff,
+      schedule.deliveryWindow,
+    );
 
   return {
     cook: publicCookDto(cook),
@@ -638,6 +652,9 @@ export async function getKitchenWeekPlan(
     deliveryWindow: deliveryWindowLabel,
     orderingOpen,
     intakePaused: todayPaused,
+    lateOrdersEnabled: cook.lateOrdersEnabled !== false,
+    /** Timing window only — AND with lateOrdersEnabled on the client. */
+    lateOrderingOpen,
     nextServiceDate: slot.nextServiceDate,
     openStatusLabel: todayPaused ? "Paused for today" : slot.statusLabel,
     fulfillmentOffers: {
@@ -657,6 +674,15 @@ export async function getKitchenWeekPlan(
       ...day,
       orderingOpen:
         day.orderingOpen && !isIntakePausedForDate(cook.intakePausedDate, day.serviceDate),
+      lateOrderingOpen:
+        schedule.enabled &&
+        isLateOrderWindowOpen(
+          mealType,
+          now,
+          day.serviceDate,
+          schedule.cutoff,
+          schedule.deliveryWindow,
+        ),
     })),
     weekDiscount: {
       ...weekDiscount,
@@ -825,30 +851,94 @@ async function resolveCheckoutAddress(
   throw new Error("Choose a delivery address");
 }
 
-async function assertCapacity(db: Db, cookId: string, serviceDate: string, addQty: number) {
+/**
+ * Soft plate hold: unpaid + in-flight kitchen statuses count toward maxDailyCapacity
+ * until cancel / fail / expire / deliver. CONFIRMING_PAYMENT included so authorize
+ * windows cannot open a race hole.
+ */
+const CAPACITY_HOLD_STATUSES = [
+  "PENDING_APPROVAL",
+  "AWAITING_PAYMENT",
+  "CONFIRMING_PAYMENT",
+  "PAID",
+  "COOKING",
+  "PACKED",
+  "DISPATCHED",
+  "ASSIGNING_RIDER",
+  "DELAYED",
+  "CANCEL_REQUESTED",
+] as const;
+
+/** Abandoned UPI carts release capacity after this TTL (same calendar day). */
+const UNPAID_HOLD_TTL_MS = 15 * 60 * 1000;
+
+async function lockCookCapacityRow(db: Db, cookId: string) {
+  await db.execute(sql`select id from cook_profiles where id = ${cookId} for update`);
+}
+
+export async function usedKitchenDayQty(
+  db: Db,
+  cookId: string,
+  serviceDate: string,
+  opts?: { menuItemId?: number },
+) {
+  const rows = await db.query.orders.findMany({
+    where: (t, { eq: e, and: a, inArray: ia }) => {
+      const parts = [
+        e(t.cookId, cookId),
+        e(t.serviceDate, serviceDate),
+        ia(t.status, [...CAPACITY_HOLD_STATUSES]),
+      ];
+      if (opts?.menuItemId != null) parts.push(e(t.menuItemId, opts.menuItemId));
+      return a(...parts);
+    },
+  });
+  return rows.reduce((n, o) => n + o.qty, 0);
+}
+
+async function assertCapacity(
+  db: Db,
+  cookId: string,
+  serviceDate: string,
+  addQty: number,
+  opts?: { lock?: boolean },
+) {
+  if (opts?.lock) await lockCookCapacityRow(db, cookId);
   const cook = await db.query.cookProfiles.findFirst({
     where: (t, { eq: e }) => e(t.id, cookId),
   });
   if (!cook) return;
-  const rows = await db.query.orders.findMany({
-    where: (t, { eq: e, and: a, inArray: ia }) =>
-      a(
-        e(t.cookId, cookId),
-        e(t.serviceDate, serviceDate),
-        ia(t.status, [
-          "PENDING_APPROVAL",
-          "PAID",
-          "COOKING",
-          "PACKED",
-          "DISPATCHED",
-          "AWAITING_PAYMENT",
-        ]),
-      ),
-  });
-  const used = rows.reduce((n, o) => n + o.qty, 0);
+  const used = await usedKitchenDayQty(db, cookId, serviceDate);
   if (used + addQty > cook.maxDailyCapacity) {
     throw new Error(
       `Kitchen at capacity (${cook.maxDailyCapacity} plates) — try another kitchen or tomorrow`,
+    );
+  }
+}
+
+/** Enforce cook-set plate stock when totalStockAvailable ≥ 0 (−1 = unlimited). */
+async function assertMenuStock(
+  db: Db,
+  menu: {
+    id: number;
+    cookId: string;
+    itemName: string;
+    totalStockAvailable: number | null;
+  },
+  serviceDate: string,
+  addQty: number,
+) {
+  const stock = menu.totalStockAvailable;
+  if (stock == null || stock < 0) return;
+  const used = await usedKitchenDayQty(db, menu.cookId, serviceDate, {
+    menuItemId: menu.id,
+  });
+  const left = Math.max(0, stock - used);
+  if (used + addQty > stock) {
+    throw new Error(
+      left === 0
+        ? `${menu.itemName} is sold out for that day`
+        : `${menu.itemName} only has ${left} left — reduce qty or pick another plate`,
     );
   }
 }
@@ -945,7 +1035,6 @@ export async function createOrder(
     addressId: input.addressId,
     channel,
   });
-  await assertCapacity(db, cook.id, serviceDate, input.qty);
 
   const deliveryPaise = await applyDeliveryDistancePaise(db, {
     cook,
@@ -1013,6 +1102,10 @@ export async function createOrder(
   const billMobile = payerMobile ?? input.customerMobile;
 
   return db.transaction(async (tx) => {
+    // Soft hold under cook row lock — prevents double UPI oversell.
+    await assertCapacity(tx, cook.id, serviceDate, input.qty, { lock: true });
+    await assertMenuStock(tx, menu, serviceDate, input.qty);
+
     const pid = publicId();
     const traceId = newTraceId();
     bindTrace({
@@ -1603,10 +1696,6 @@ export async function createOrderBatch(
     throw new Error("Only one plate per meal on each day — remove the duplicate");
   }
 
-  for (const [serviceDate, qty] of qtyByDate) {
-    await assertCapacity(db, cook.id, serviceDate, qty);
-  }
-
   const weekRule = normalizeWeekDiscountRule({
     percent: flags.week_discount_enabled ? cook.weekDiscountPercent : 0,
     minDays: cook.weekDiscountMinDays,
@@ -1754,6 +1843,15 @@ export async function createOrderBatch(
   const pay = getPaymentProvider();
 
   return db.transaction(async (tx) => {
+    // One lock for the kitchen; re-check every service date + plate stock inside the cart tx.
+    await lockCookCapacityRow(tx, cook.id);
+    for (const [serviceDate, qty] of qtyByDate) {
+      await assertCapacity(tx, cook.id, serviceDate, qty);
+    }
+    for (const p of prepared) {
+      await assertMenuStock(tx, p.menu, p.serviceDate, p.qty);
+    }
+
     const created = [];
     for (const p of prepared) {
       const pid = publicId();
@@ -2435,6 +2533,9 @@ export async function requestLateOrder(
     where: (t, { eq: e }) => e(t.slugHandle, input.cookSlug),
   });
   if (!cook) throw new Error("Kitchen not found");
+  if (cook.lateOrdersEnabled === false) {
+    throw new Error("This kitchen is not taking late orders right now");
+  }
   assertCanAcceptPaidOrders({
     onboardingStatus: cook.onboardingStatus,
     fssaiNumber: cook.fssaiNumber,
@@ -2475,11 +2576,14 @@ export async function requestLateOrder(
   if (!schedule.enabled) {
     throw new Error(`${mealLabel(mealType)} is not offered by this kitchen`);
   }
-  if (isBeforeCutoff(mealType, new Date(), serviceDate, schedule.cutoff)) {
-    throw new Error(
-      `Cut-off not reached yet (${formatCutoffLabel(schedule.cutoff)}) — place a normal order`,
-    );
-  }
+  // After cut-off, until 4h before delivery start (then late is closed).
+  assertLateOrderTiming(
+    mealType,
+    new Date(),
+    serviceDate,
+    schedule.cutoff,
+    schedule.deliveryWindow,
+  );
 
   const channel = input.channel ?? "WEB_STOREFRONT";
   const { address, deliveryTargetAddress } = await resolveCheckoutAddress(db, {
@@ -2490,7 +2594,6 @@ export async function requestLateOrder(
     addressId: input.addressId,
     channel,
   });
-  await assertCapacity(db, cook.id, serviceDate, input.qty);
 
   const deliveryPaise = await applyDeliveryDistancePaise(db, {
     cook,
@@ -2530,6 +2633,9 @@ export async function requestLateOrder(
   }
 
   return db.transaction(async (tx) => {
+    await assertCapacity(tx, cook.id, serviceDate, input.qty, { lock: true });
+    await assertMenuStock(tx, menu, serviceDate, input.qty);
+
     const pid = publicId();
     const traceId = newTraceId();
     bindTrace({ traceId, publicId: pid });
@@ -2607,6 +2713,17 @@ export async function approveLateOrder(db: Db, publicId: string) {
     where: (t, { eq: e }) => e(t.id, order.cookId),
   });
   if (!cook) throw new Error("Cook not found");
+
+  const mealType = (order.mealType ?? "LUNCH") as MealPeriod;
+  const schedule = await scheduleForCook(db, cook, mealType);
+  // Don't take payment once the drop window is over.
+  assertLateOrderTiming(
+    mealType,
+    new Date(),
+    order.serviceDate,
+    schedule.cutoff,
+    schedule.deliveryWindow,
+  );
 
   const amountPaise = orderTotalPaise({
     foodPaise: order.foodPaise,
@@ -2935,14 +3052,86 @@ export async function findAwaitingPaymentByPublicId(
 }
 
 /**
+ * Release soft plate holds from abandoned UPI carts (same-day AWAITING_PAYMENT
+ * older than UNPAID_HOLD_TTL_MS). Quiet cancel — customer can re-order.
+ */
+export async function expireStalePaymentHolds(
+  db: Db,
+  olderThanMs = UNPAID_HOLD_TTL_MS,
+  limit = 200,
+) {
+  const cutoff = new Date(Date.now() - olderThanMs);
+  const stale = await db
+    .select({
+      id: orders.id,
+      publicId: orders.publicId,
+      status: orders.status,
+      serviceDate: orders.serviceDate,
+      customerMobile: orders.customerMobile,
+    })
+    .from(orders)
+    .where(and(eq(orders.status, "AWAITING_PAYMENT"), lt(orders.updatedAt, cutoff)))
+    .limit(limit);
+
+  let cancelled = 0;
+  for (const row of stale) {
+    try {
+      assertTransition(row.status as OrderState, "CANCELLED");
+      await db
+        .update(orders)
+        .set({
+          status: "CANCELLED",
+          idempotencyKey: null,
+          gatewayTxnId: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(orders.id, row.id));
+      await db.insert(platformEventLedger).values({
+        associatedMobile: row.customerMobile,
+        orderId: row.id,
+        channel: "WEB_STOREFRONT",
+        eventName: "UNPAID_HOLD_EXPIRED",
+        rawPayload: {
+          publicId: row.publicId,
+          serviceDate: row.serviceDate,
+          previousStatus: row.status,
+          olderThanMs,
+        },
+      });
+      cancelled += 1;
+    } catch (err) {
+      orderLog.warn(
+        {
+          event: LogEvent.ORDER_UNPAID_EXPIRED,
+          publicId: row.publicId,
+          err: err instanceof Error ? err.message : String(err),
+        },
+        "expire stale payment hold skipped",
+      );
+    }
+  }
+
+  if (cancelled > 0) {
+    orderLog.info(
+      { event: LogEvent.ORDER_UNPAID_EXPIRED, cancelled, olderThanMs, reason: "stale_hold" },
+      "expired stale unpaid payment holds",
+    );
+  }
+  return { scanned: stale.length, cancelled, olderThanMs };
+}
+
+/**
  * Drop unpaid / failed-pay / late-pending rows whose service date is already past.
  * Quiet cancel (no customer WA) — they can no longer receive that meal.
+ * Also clears abandoned same-day UPI holds so capacity is not stuck until tomorrow.
  */
 export async function expireUnpaidOrdersPastServiceDate(
   db: Db,
   asOfDate = serviceDateISO(),
   limit = 200,
 ) {
+  await expireStalePaymentHolds(db).catch(() => undefined);
+
   const stale = await db
     .select({
       id: orders.id,

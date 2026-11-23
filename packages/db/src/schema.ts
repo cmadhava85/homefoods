@@ -156,6 +156,11 @@ export const cookProfiles = pgTable("cook_profiles", {
    * Clears automatically the next calendar day (no cron).
    */
   intakePausedDate: varchar("intake_paused_date", { length: 10 }),
+  /**
+   * Cook opts into post–cut-off late asks (still gated by platform `late_orders_enabled`
+   * and delivery−4h timing). Default on so existing kitchens keep prior behaviour.
+   */
+  lateOrdersEnabled: boolean("late_orders_enabled").default(true).notNull(),
   /** Cook / family delivers (SELF Maps). Default on. */
   offerCookDelivery: boolean("offer_cook_delivery").default(true).notNull(),
   /** Customer arranges their own auto / porter — ₹0 platform delivery. */

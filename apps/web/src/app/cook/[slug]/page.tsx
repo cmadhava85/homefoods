@@ -114,6 +114,9 @@ function CookDeskInner() {
   const [savingPickup, setSavingPickup] = useState(false);
   const [intakePaused, setIntakePaused] = useState(false);
   const [togglingPause, setTogglingPause] = useState(false);
+  const [lateOrdersEnabled, setLateOrdersEnabled] = useState(true);
+  const [latePlatformEnabled, setLatePlatformEnabled] = useState(true);
+  const [togglingLate, setTogglingLate] = useState(false);
   const [offerCookDelivery, setOfferCookDelivery] = useState(true);
   const [offerCustomerArrange, setOfferCustomerArrange] = useState(false);
   const [savingFulfillment, setSavingFulfillment] = useState(false);
@@ -257,6 +260,7 @@ function CookDeskInner() {
           weekDiscount?: { percent?: number; minDays?: number; platformEnabled?: boolean };
           pickup?: { enabled?: boolean; landmark?: string | null; platformEnabled?: boolean };
           intake?: { paused?: boolean };
+          lateOrders?: { enabled?: boolean; platformEnabled?: boolean };
           fulfillmentOffers?: {
             cookDelivery?: boolean;
             pickup?: boolean;
@@ -304,6 +308,12 @@ function CookDeskInner() {
         }
         if (json?.intake) {
           setIntakePaused(Boolean(json.intake.paused));
+        }
+        if (json?.lateOrders) {
+          setLateOrdersEnabled(json.lateOrders.enabled !== false);
+          if (typeof json.lateOrders.platformEnabled === "boolean") {
+            setLatePlatformEnabled(Boolean(json.lateOrders.platformEnabled));
+          }
         }
         if (json?.fulfillmentOffers) {
           setOfferCookDelivery(json.fulfillmentOffers.cookDelivery !== false);
@@ -575,6 +585,28 @@ function CookDeskInner() {
       setErr((e as Error).message);
     } finally {
       setTogglingPause(false);
+    }
+  }
+
+  async function toggleLateOrders() {
+    setTogglingLate(true);
+    setErr(null);
+    try {
+      const res = await authFetch(`/cooks/${slug}/late-orders`, {
+        method: "PATCH",
+        body: JSON.stringify({ enabled: !lateOrdersEnabled }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Could not update late orders");
+      setLateOrdersEnabled(Boolean(json.enabled));
+      if (typeof json.platformEnabled === "boolean") {
+        setLatePlatformEnabled(Boolean(json.platformEnabled));
+      }
+      setMsg(t("cook.lateSaved"));
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setTogglingLate(false);
     }
   }
 
@@ -1005,12 +1037,17 @@ function CookDeskInner() {
   return (
     <main className="cook-desk">
       <CookDeskHero
+        slug={slug}
         kitchenName={data.cook.kitchenName}
         partnerActive={partnerActive || Boolean(data.delivery?.partnerActive)}
         cookMobile={data.whatsapp?.cookMobile ?? data.cook.mobileNumber ?? cookMobile}
         intakePaused={intakePaused}
         togglingPause={togglingPause}
         onTogglePause={() => void toggleIntakePause()}
+        lateOrdersEnabled={lateOrdersEnabled}
+        latePlatformEnabled={latePlatformEnabled}
+        togglingLate={togglingLate}
+        onToggleLate={() => void toggleLateOrders()}
       />
 
       <div className="seg desk-tabs" role="tablist" aria-label={t("cook.desk")}>

@@ -2,6 +2,59 @@ export type MealPeriod = "BREAKFAST" | "LUNCH" | "DINNER";
 
 export const MEAL_PERIODS: MealPeriod[] = ["BREAKFAST", "LUNCH", "DINNER"];
 
+/** All cook cut-offs / delivery windows are Asia/Kolkata wall clocks (no DST). */
+export const APP_TIME_ZONE = "Asia/Kolkata";
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+export type AppZoneParts = {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+};
+
+/** Read calendar + clock parts in the app zone (independent of process TZ). */
+export function appZoneParts(now: Date, timeZone = APP_TIME_ZONE): AppZoneParts {
+  const fmt = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  });
+  const bag: Record<string, string> = {};
+  for (const p of fmt.formatToParts(now)) {
+    if (p.type !== "literal") bag[p.type] = p.value;
+  }
+  return {
+    year: Number(bag.year),
+    month: Number(bag.month),
+    day: Number(bag.day),
+    hour: Number(bag.hour),
+    minute: Number(bag.minute),
+    second: Number(bag.second),
+  };
+}
+
+/**
+ * Absolute instant for a service-date wall clock in Asia/Kolkata.
+ * India has no DST — fixed UTC+05:30.
+ */
+export function appZoneDateTime(
+  serviceDate: string,
+  hour: number,
+  minute: number,
+  second = 0,
+): Date {
+  const [y, m, d] = serviceDate.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d, hour, minute, second) - IST_OFFSET_MS);
+}
+
 export type CutoffConfig = {
   hour: number;
   minute: number;
@@ -168,8 +221,7 @@ export function isBeforeCutoff(
   serviceDate: string,
   config: CutoffConfig = defaultCutoffConfig(),
 ): boolean {
-  const [y, m, d] = serviceDate.split("-").map(Number);
-  const cutoff = new Date(y, m - 1, d, config.hour, config.minute, 0, 0);
+  const cutoff = appZoneDateTime(serviceDate, config.hour, config.minute);
   return now.getTime() < cutoff.getTime();
 }
 
@@ -183,16 +235,17 @@ export function isAtOrPastCutoff(
 }
 
 export function serviceDateISO(d = new Date()): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+  const p = appZoneParts(d);
+  const m = String(p.month).padStart(2, "0");
+  const day = String(p.day).padStart(2, "0");
+  return `${p.year}-${m}-${day}`;
 }
 
 export function parseServiceDate(iso: string): Date {
   const [y, m, d] = iso.split("-").map(Number);
   if (!y || !m || !d) throw new Error("Invalid service date");
-  return new Date(y, m - 1, d);
+  // Midnight Asia/Kolkata for that calendar day.
+  return appZoneDateTime(iso, 0, 0);
 }
 
 export function addDaysISO(iso: string, days: number): string {
@@ -222,6 +275,83 @@ export function assertValidDeliveryWindow(window: DeliveryWindow): void {
   const end = window.endHour * 60 + window.endMinute;
   if (end <= start) {
     throw new Error("Delivery window end must be after start");
+  }
+}
+
+/**
+ * Late asks must close this many hours before delivery start
+ * (cook needs lead time — not during/after the drop window).
+ */
+export const LATE_ORDER_CLOSE_HOURS_BEFORE_DELIVERY = 4;
+
+export function deliveryWindowStartAt(
+  serviceDate: string,
+  window: DeliveryWindow,
+): Date {
+  return appZoneDateTime(serviceDate, window.startHour, window.startMinute);
+}
+
+export function deliveryWindowEndAt(
+  serviceDate: string,
+  window: DeliveryWindow,
+): Date {
+  return appZoneDateTime(serviceDate, window.endHour, window.endMinute);
+}
+
+/**
+ * Late-order timing (after normal cut-off):
+ * - Must be at/after cut-off
+ * - Must be before (delivery start − 4h) — closed once within 4h of delivery
+ */
+export function assertLateOrderTiming(
+  meal: MealPeriod,
+  now: Date,
+  serviceDate: string,
+  cutoff: CutoffConfig,
+  deliveryWindow: DeliveryWindow,
+  closeHoursBeforeDelivery = LATE_ORDER_CLOSE_HOURS_BEFORE_DELIVERY,
+): void {
+  if (isBeforeCutoff(meal, now, serviceDate, cutoff)) {
+    throw new Error(
+      `Cut-off not reached yet (${formatCutoffLabel(cutoff)}) — place a normal order`,
+    );
+  }
+
+  const deliveryStart = deliveryWindowStartAt(serviceDate, deliveryWindow);
+  const lateClosesAt = new Date(
+    deliveryStart.getTime() - closeHoursBeforeDelivery * 60 * 60 * 1000,
+  );
+  const windowLabel = formatDeliveryWindowLabel(deliveryWindow);
+  const closeLabel = `${String(lateClosesAt.getHours()).padStart(2, "0")}:${String(lateClosesAt.getMinutes()).padStart(2, "0")}`;
+
+  if (now.getTime() >= lateClosesAt.getTime()) {
+    throw new Error(
+      `Late orders closed at ${closeLabel} (${closeHoursBeforeDelivery}h before delivery ${windowLabel})`,
+    );
+  }
+}
+
+/** True when a late request is allowed right now for this meal/service date. */
+export function isLateOrderWindowOpen(
+  meal: MealPeriod,
+  now: Date,
+  serviceDate: string,
+  cutoff: CutoffConfig,
+  deliveryWindow: DeliveryWindow,
+  closeHoursBeforeDelivery = LATE_ORDER_CLOSE_HOURS_BEFORE_DELIVERY,
+): boolean {
+  try {
+    assertLateOrderTiming(
+      meal,
+      now,
+      serviceDate,
+      cutoff,
+      deliveryWindow,
+      closeHoursBeforeDelivery,
+    );
+    return true;
+  } catch {
+    return false;
   }
 }
 

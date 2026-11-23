@@ -23,6 +23,7 @@ type Profile = {
     id: number;
     label: string;
     line1: string;
+    line2?: string | null;
     pinCode: string;
     isDefault: boolean;
   }>;
@@ -49,6 +50,7 @@ function AccountInner() {
   const [showAddAddr, setShowAddAddr] = useState(false);
   const [addrLabel, setAddrLabel] = useState<AddrLabel>("HOME");
   const [addrLine1, setAddrLine1] = useState("");
+  const [addrLine2, setAddrLine2] = useState("");
   const [addrPin, setAddrPin] = useState("600119");
   const [addrBusy, setAddrBusy] = useState(false);
   const [addrFieldErr, setAddrFieldErr] = useState<{ line?: string; pin?: string }>({});
@@ -99,6 +101,7 @@ function AccountInner() {
         body: JSON.stringify({
           label: addrLabel,
           line1: addrLine1.trim(),
+          line2: addrLine2.trim() || null,
           pinCode: addrPin.trim(),
           isDefault: !(profile?.addresses?.length),
           ...(geo ? { lat: geo.lat, lng: geo.lng } : {}),
@@ -109,6 +112,7 @@ function AccountInner() {
       setMsg(t("account.addressSaved"));
       setShowAddAddr(false);
       setAddrLine1("");
+      setAddrLine2("");
       load();
     } catch (e) {
       setErr((e as Error).message);
@@ -297,6 +301,7 @@ function AccountInner() {
                     ) : null}
                   </div>
                   <p className="account-address-line">{a.line1}</p>
+                  {a.line2 ? <p className="account-address-line muted">{a.line2}</p> : null}
                   <p className="account-address-pin">PIN {a.pinCode}</p>
                 </div>
                 {!a.isDefault ? (
@@ -351,6 +356,15 @@ function AccountInner() {
                 {addrFieldErr.line ? (
                   <span className="err account-field-err">{addrFieldErr.line}</span>
                 ) : null}
+              </label>
+              <label className="account-field account-field-span">
+                <span className="account-field-label">{t("address.line2")}</span>
+                <input
+                  type="text"
+                  value={addrLine2}
+                  onChange={(e) => setAddrLine2(e.target.value)}
+                  placeholder={t("address.line2Placeholder")}
+                />
               </label>
               <label className="account-field">
                 <span className="account-field-label">{t("account.addressPin")}</span>

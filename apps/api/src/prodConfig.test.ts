@@ -56,6 +56,22 @@ describe("assertProductionConfig", () => {
     assert.throws(() => assertProductionConfig(), /MOCK_AUTH/);
   });
 
+  it("allows MOCK_AUTH and MOCK_WHATSAPP when APP_ENV=staging", () => {
+    setProdBase();
+    process.env.APP_ENV = "staging";
+    process.env.MOCK_AUTH = "true";
+    process.env.MOCK_WHATSAPP = "true";
+    assert.doesNotThrow(() => assertProductionConfig());
+  });
+
+  it("still requires live payments in staging", () => {
+    setProdBase();
+    process.env.APP_ENV = "staging";
+    process.env.MOCK_AUTH = "true";
+    process.env.MOCK_PAYMENTS = "true";
+    assert.throws(() => assertProductionConfig(), /MOCK_PAYMENTS/);
+  });
+
   it("fails when AUTH_ENFORCE is false", () => {
     setProdBase();
     process.env.AUTH_ENFORCE = "false";

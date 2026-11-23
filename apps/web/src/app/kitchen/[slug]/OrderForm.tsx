@@ -28,6 +28,7 @@ export function OrderForm({
   serviceDate,
   pricePaise,
   orderingOpen = true,
+  lateOrdersEnabled = true,
   onAddToCart,
   confirmBeforeOrder,
   addressId,
@@ -42,6 +43,8 @@ export function OrderForm({
   serviceDate: string;
   pricePaise?: number;
   orderingOpen?: boolean;
+  /** Cook opted into post–cut-off late asks. */
+  lateOrdersEnabled?: boolean;
   /** When set and ordering is open, primary action adds to week cart instead of paying now. */
   onAddToCart?: (line: CartAddPayload) => void;
   /** Soft gate when customer already has an order that day. */
@@ -61,10 +64,16 @@ export function OrderForm({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const useCart = Boolean(onAddToCart) && orderingOpen;
+  const lateClosed = !orderingOpen && !lateOrdersEnabled;
+  const canOrder = orderingOpen || lateOrdersEnabled;
 
   async function submitInstant() {
     if (!user || user.role !== "CUSTOMER") {
       router.push(loginPath("CUSTOMER", `/kitchen/${cookSlug}`));
+      return;
+    }
+    if (lateClosed) {
+      setError(t("order.lateClosed"));
       return;
     }
     if (needsAddress && !addressId) {
@@ -180,24 +189,30 @@ export function OrderForm({
             {t("order.addWeek")}
           </button>
         ) : null}
-        <button
-          className={useCart ? "btn secondary order-cta-secondary" : "btn order-cta-primary"}
-          type="button"
-          disabled={loading || !ready}
-          onClick={submitInstant}
-        >
-          {loading
-            ? orderingOpen
-              ? t("order.creating")
-              : t("order.requesting")
-            : orderingOpen
-              ? useCart
-                ? t("order.thisDayOnly")
-                : t("order.forDate", { date: serviceDate })
-              : t("order.late")}
-        </button>
+        {canOrder ? (
+          <button
+            className={useCart ? "btn secondary order-cta-secondary" : "btn order-cta-primary"}
+            type="button"
+            disabled={loading || !ready}
+            onClick={submitInstant}
+          >
+            {loading
+              ? orderingOpen
+                ? t("order.creating")
+                : t("order.requesting")
+              : orderingOpen
+                ? useCart
+                  ? t("order.thisDayOnly")
+                  : t("order.forDate", { date: serviceDate })
+                : t("order.late")}
+          </button>
+        ) : null}
       </div>
-      {!orderingOpen ? <p className="muted order-note">{t("order.lateNote")}</p> : null}
+      {lateClosed ? (
+        <p className="muted order-note">{t("order.lateClosed")}</p>
+      ) : !orderingOpen ? (
+        <p className="muted order-note">{t("order.lateNote")}</p>
+      ) : null}
       {error ? <p className="err">{error}</p> : null}
     </div>
   );

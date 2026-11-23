@@ -59,8 +59,12 @@ export const waFlowMessages = {
     "wa.payFamily": "Pay link sent to family — or Pay {id}",
     "wa.payTap": "Amount ready — tap Pay {id}",
     "wa.payLink": "Link: {url}",
-    "wa.ordersEmpty": "No upcoming orders. Send Menu to order lunch.",
-    "wa.ordersTitle": "📦 Upcoming orders",
+    "wa.ordersEmpty":
+      "No active orders right now.\nUnpaid holds cancel after 15 minutes — reply Menu to order again.",
+    "wa.ordersTitle": "📦 Your orders",
+    "wa.ordersClosedTitle": "Recently closed",
+    "wa.ordersClosedHint":
+      "Unpaid holds cancel after 15 minutes. Reply Menu to place a new order.",
     "wa.ordersHint": "Pay LM-/CHK-… · Cancel LM-/CHK-… (before that day’s cut-off)",
     "wa.whichKitchen": "Which kitchen? Reply with a number or tap:",
     "wa.meal.breakfast": "Breakfast",
@@ -139,8 +143,12 @@ export const waFlowMessages = {
     "wa.payFamily": "Family-க்கு Pay link — இல்லையென்றால் Pay {id}",
     "wa.payTap": "Amount ready — Pay {id} tap செய்யுங்கள்",
     "wa.payLink": "Link: {url}",
-    "wa.ordersEmpty": "Upcoming orders இல்ல. Lunch-க்கு Menu அனுப்புங்கள்.",
-    "wa.ordersTitle": "📦 Upcoming orders",
+    "wa.ordersEmpty":
+      "இப்போ active orders இல்ல.\nUnpaid hold 15 min-ல cancel ஆகும் — மீண்டும் order-க்கு Menu அனுப்புங்கள்.",
+    "wa.ordersTitle": "📦 உங்க orders",
+    "wa.ordersClosedTitle": "Recently closed",
+    "wa.ordersClosedHint":
+      "Unpaid hold 15 min-ல cancel ஆகும். புதிய order-க்கு Menu அனுப்புங்கள்.",
     "wa.ordersHint": "Pay LM-/CHK-… · Cancel LM-/CHK-… (அந்த day cut-off-க்கு முன்னாடி)",
     "wa.whichKitchen": "எந்த kitchen? Number அனுப்புங்கள் இல்லையென்றால் tap செய்யுங்கள்:",
     "wa.meal.breakfast": "Breakfast",

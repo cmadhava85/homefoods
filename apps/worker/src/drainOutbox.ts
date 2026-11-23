@@ -182,16 +182,18 @@ export async function drainOutboxOnce(
         const payerMobile = str(payload.payerMobile);
 
         let body: string;
+        const holdNote =
+          "Your plate is reserved for 15 minutes. Pay now to confirm — if payment isn’t completed, this hold cancels automatically (no charge).";
         if (childPays) {
           body = [
-            `🧾 Week order placed · ${kitchen}`,
+            `⏳ Waiting for payment · ${kitchen}`,
             checkoutId || pid,
             amountLabel ? `Total ${amountLabel}` : null,
             payerMobile
-              ? `Waiting for family ${payerMobile} to pay on UPI.`
-              : "Waiting for family to pay on UPI.",
+              ? `Family ${payerMobile} needs to complete UPI.`
+              : "A family member needs to complete UPI.",
             "",
-            "You’ll get confirmation after they pay.",
+            "Reserved for 15 minutes. If they don’t pay in time, this hold cancels automatically (no charge).",
           ]
             .filter(Boolean)
             .join("\n");
@@ -203,25 +205,25 @@ export async function drainOutboxOnce(
             })
             .join("\n");
           body = [
-            `🧾 Week order placed · ${kitchen}`,
+            `⏳ Pay to confirm · ${kitchen}`,
             checkoutId || pid,
             dayLines,
             amountLabel ? `Total ${amountLabel}` : null,
-            payUrl ? `Pay: ${payUrl}` : "Reply Pay to open UPI.",
+            payUrl ? `Pay here: ${payUrl}` : "Reply Pay to open UPI.",
             "",
-            "You’ll get a confirmation for each day after payment.",
+            holdNote,
           ]
             .filter(Boolean)
             .join("\n");
         } else {
           body = [
-            `🧾 Order placed · ${kitchen}`,
+            `⏳ Pay to confirm · ${kitchen}`,
             `${pid} · ${payload.qty ?? 1}× ${str(payload.itemName) || "plate"}`,
             payload.serviceDate ? `For ${str(payload.serviceDate)}` : null,
             amountLabel ? `Amount ${amountLabel}` : null,
-            payUrl ? `Pay: ${payUrl}` : "Reply Pay to open UPI.",
+            payUrl ? `Pay here: ${payUrl}` : "Reply Pay to open UPI.",
             "",
-            "You’ll get updates for this order until delivery.",
+            holdNote,
           ]
             .filter(Boolean)
             .join("\n");
@@ -261,9 +263,9 @@ export async function drainOutboxOnce(
               seniorMobile ? `For ${seniorMobile}` : null,
               checkoutId,
               amountLabel ? `Amount ${amountLabel}` : null,
-              payUrl ? `Pay: ${payUrl}` : "Open My orders → Pay now.",
+              payUrl ? `Pay here: ${payUrl}` : "Open My orders → Pay now.",
               "",
-              "This settles their home meal on UPI.",
+              "Their plate is reserved for 15 minutes. Pay now to confirm — if payment isn’t completed, this hold cancels automatically (no charge).",
             ]
               .filter(Boolean)
               .join("\n"),

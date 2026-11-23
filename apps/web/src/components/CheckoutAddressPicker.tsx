@@ -55,6 +55,7 @@ export function CheckoutAddressPicker({
   const [showAdd, setShowAdd] = useState(!compact && addresses.length === 0);
   const [label, setLabel] = useState<Label>("HOME");
   const [line1, setLine1] = useState("");
+  const [line2, setLine2] = useState("");
   const [pinCode, setPinCode] = useState("600119");
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [locating, setLocating] = useState(false);
@@ -93,6 +94,7 @@ export function CheckoutAddressPicker({
         body: JSON.stringify({
           label,
           line1,
+          line2: line2.trim() || null,
           pinCode,
           isDefault: addresses.length === 0,
           ...(geo ? { lat: geo.lat, lng: geo.lng } : {}),
@@ -104,6 +106,7 @@ export function CheckoutAddressPicker({
       onChange(String(json.id));
       setShowAdd(false);
       setLine1("");
+      setLine2("");
       setCoords(null);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not save address");
@@ -127,6 +130,7 @@ export function CheckoutAddressPicker({
             {addresses.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.label} — {a.line1}
+                {a.line2 ? ` · ${a.line2}` : ""}
                 {a.pinCode ? ` · ${a.pinCode}` : ""}
               </option>
             ))}
@@ -184,6 +188,14 @@ export function CheckoutAddressPicker({
             aria-invalid={Boolean(fieldErr.line)}
           />
           {fieldErr.line ? <p className="err">{fieldErr.line}</p> : null}
+          <input
+            type="text"
+            value={line2}
+            onChange={(e) => setLine2(e.target.value)}
+            placeholder={t("address.line2Placeholder")}
+            aria-label={t("address.line2")}
+            style={{ marginTop: "0.35rem" }}
+          />
           <p className="muted" style={{ margin: "0.35rem 0 0", fontSize: "0.85rem" }}>
             {t("address.locationHint")}
             {coords ? ` · ✓ ${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)}` : ""}

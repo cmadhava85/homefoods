@@ -197,6 +197,13 @@
       "when": 1732006800000,
       "tag": "0027_mvp2_polish",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1732093200000,
+      "tag": "0028_cook_late_orders",
+      "breakpoints": true
     }
   ]
 }

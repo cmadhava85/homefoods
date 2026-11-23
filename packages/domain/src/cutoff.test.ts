@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  assertLateOrderTiming,
   assertValidCutoff,
   assertValidDeliveryWindow,
   cutoffConfigForCook,
@@ -11,7 +12,9 @@ import {
   formatCutoffLabel,
   formatDeliveryWindowLabel,
   isAtOrPastCutoff,
+  appZoneDateTime,
   isBeforeCutoff,
+  isLateOrderWindowOpen,
   mealLabel,
   MEAL_PERIODS,
   resolveMealSchedule,
@@ -57,12 +60,23 @@ describe("cutoff", () => {
   it("isBeforeCutoff / isAtOrPastCutoff agree for all meals", () => {
     const cfg = { hour: 8, minute: 0 };
     const date = "2026-11-04";
-    const before = new Date(2026, 10, 4, 7, 59);
-    const after = new Date(2026, 10, 4, 8, 0);
+    const before = appZoneDateTime(date, 7, 59);
+    const after = appZoneDateTime(date, 8, 0);
     assert.equal(isBeforeCutoff("LUNCH", before, date, cfg), true);
     assert.equal(isAtOrPastCutoff("LUNCH", before, date, cfg), false);
     assert.equal(isBeforeCutoff("BREAKFAST", after, date, cfg), false);
     assert.equal(isAtOrPastCutoff("DINNER", after, date, cfg), true);
+  });
+
+  it("cut-off uses Asia/Kolkata even when process TZ is UTC", () => {
+    const cfg = { hour: 8, minute: 0 };
+    const date = "2026-11-23";
+    // 12:30 IST = 07:00 UTC — still past 08:00 IST cut-off
+    const duringDeliveryUtc = new Date("2026-11-23T07:00:00.000Z");
+    assert.equal(isBeforeCutoff("LUNCH", duringDeliveryUtc, date, cfg), false);
+    // 07:30 IST = 02:00 UTC — still before cut-off
+    const morningUtc = new Date("2026-11-23T02:00:00.000Z");
+    assert.equal(isBeforeCutoff("LUNCH", morningUtc, date, cfg), true);
   });
 
   it("default meal schedules differ by period", () => {
@@ -178,8 +192,90 @@ describe("cutoff", () => {
     assert.equal(lunchRow.mealType, "LUNCH");
   });
 
-  it("serviceDateISO is YYYY-MM-DD", () => {
-    assert.match(serviceDateISO(new Date(2026, 10, 4)), /^\d{4}-\d{2}-\d{2}$/);
+  it("serviceDateISO is YYYY-MM-DD in Asia/Kolkata", () => {
+    assert.equal(serviceDateISO(new Date("2026-11-04T03:00:00.000Z")), "2026-11-04");
+    // 23:30 UTC = next calendar day in IST
+    assert.equal(serviceDateISO(new Date("2026-11-04T19:00:00.000Z")), "2026-11-05");
+  });
+
+  it("late orders close 4h before delivery start", () => {
+    // Cut-off 06:00, delivery 12:00–13:00 → late open 06:00–08:00 (closes 4h before 12:00)
+    const cutoff = { hour: 6, minute: 0 };
+    const window = {
+      startHour: 12,
+      startMinute: 0,
+      endHour: 13,
+      endMinute: 0,
+    };
+    const date = "2026-11-23";
+
+    // Before cut-off → normal order path, not late
+    assert.throws(
+      () =>
+        assertLateOrderTiming(
+          "LUNCH",
+          appZoneDateTime(date, 5, 30),
+          date,
+          cutoff,
+          window,
+        ),
+      /Cut-off not reached/,
+    );
+
+    // After cut-off, still ≥4h before delivery → allowed
+    assert.doesNotThrow(() =>
+      assertLateOrderTiming(
+        "LUNCH",
+        appZoneDateTime(date, 7, 0),
+        date,
+        cutoff,
+        window,
+      ),
+    );
+    assert.equal(
+      isLateOrderWindowOpen(
+        "LUNCH",
+        appZoneDateTime(date, 7, 59),
+        date,
+        cutoff,
+        window,
+      ),
+      true,
+    );
+
+    // At/after 08:00 (4h before 12:00) → closed (includes during/after delivery)
+    assert.throws(
+      () =>
+        assertLateOrderTiming(
+          "LUNCH",
+          appZoneDateTime(date, 8, 0),
+          date,
+          cutoff,
+          window,
+        ),
+      /Late orders closed at 08:00/,
+    );
+    assert.throws(
+      () =>
+        assertLateOrderTiming(
+          "LUNCH",
+          appZoneDateTime(date, 14, 0),
+          date,
+          cutoff,
+          window,
+        ),
+      /Late orders closed/,
+    );
+    assert.equal(
+      isLateOrderWindowOpen(
+        "LUNCH",
+        appZoneDateTime(date, 10, 0),
+        date,
+        cutoff,
+        window,
+      ),
+      false,
+    );
   });
 
   it("labels meals and delivery windows", () => {

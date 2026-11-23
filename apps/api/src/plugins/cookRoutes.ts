@@ -29,6 +29,9 @@ import {
   deleteCookSavedPlate,
   postCookSavedPlate,
   setCookIntakePause,
+  setCookLateOrders,
+  trimCookRemainingPlates,
+  getCookCapacityToday,
   setCookFulfillmentOffers,
   listCookMenuTemplates,
   saveCookMenuTemplate,
@@ -186,6 +189,40 @@ app.patch("/cooks/:slug/intake-pause", async (req, reply) => {
   try {
     assertKitchenStaff(req, slug);
     return await setCookIntakePause(db, slug, body);
+  } catch (e) {
+    return sendCaughtError(reply, e);
+  }
+});
+
+app.patch("/cooks/:slug/late-orders", async (req, reply) => {
+  const { slug } = req.params as { slug: string };
+  const body = z.object({ enabled: z.boolean() }).parse(req.body ?? {});
+  try {
+    assertKitchenStaff(req, slug);
+    return await setCookLateOrders(db, slug, body);
+  } catch (e) {
+    return sendCaughtError(reply, e);
+  }
+});
+
+app.get("/cooks/:slug/capacity-today", async (req, reply) => {
+  const { slug } = req.params as { slug: string };
+  try {
+    assertKitchenStaff(req, slug);
+    return await getCookCapacityToday(db, slug);
+  } catch (e) {
+    return sendCaughtError(reply, e);
+  }
+});
+
+app.patch("/cooks/:slug/capacity-today", async (req, reply) => {
+  const { slug } = req.params as { slug: string };
+  const body = z
+    .object({ remaining: z.number().int().min(0).max(500) })
+    .parse(req.body ?? {});
+  try {
+    assertKitchenStaff(req, slug);
+    return await trimCookRemainingPlates(db, slug, body.remaining);
   } catch (e) {
     return sendCaughtError(reply, e);
   }

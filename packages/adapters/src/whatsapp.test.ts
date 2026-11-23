@@ -231,7 +231,9 @@ describe("extractInboundWhatsApp", () => {
                   {
                     from: "919840111111",
                     type: "interactive",
-                    interactive: { button_reply: { title: "Orders", id: "btn_0" } },
+                    interactive: {
+                      button_reply: { title: "Orders", id: "btn_0_Orders" },
+                    },
                   },
                 ],
               },
@@ -243,6 +245,27 @@ describe("extractInboundWhatsApp", () => {
     assert.equal(meta.from, "+919840111111");
     assert.equal(meta.text, "Orders");
     assert.equal(meta.locale, undefined);
+
+    const idOnly = extractInboundWhatsApp({
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                messages: [
+                  {
+                    from: "919840111111",
+                    type: "interactive",
+                    interactive: { button_reply: { id: "btn_1_Orders" } },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    });
+    assert.equal(idOnly.text, "Orders");
   });
 
   it("includes locale only when non-blank; omits blank/whitespace/undefined", () => {

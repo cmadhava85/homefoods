@@ -19,8 +19,10 @@ RUN npm run build -w @localmeals/domain \
  && npm run build -w @localmeals/api
 
 FROM node:22-alpine
+RUN apk add --no-cache tzdata
 WORKDIR /app
 ENV NODE_ENV=production
+ENV TZ=Asia/Kolkata
 COPY --from=build /app /app
 WORKDIR /app/apps/api
 EXPOSE 4000

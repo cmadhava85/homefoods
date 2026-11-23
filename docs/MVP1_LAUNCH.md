@@ -144,11 +144,12 @@ Submit in Meta → WhatsApp → Message templates (utility):
 
 | Name | Body idea |
 |------|-----------|
+| `localmeals_login_otp` | LocalMeals login code: {{1}}. Valid 10 minutes. Do not share. |
 | `lunch_pay_link` | Order {{1}} — pay: {{2}} |
 | `cook_manifest` | {{1}} plates locked · route {{2}} |
 | `order_refunded` | Refund for {{1}}: {{2}} |
 
-Adapter supports `send({ template: { name, bodyParams } })` for these once approved. Inside 24h after customer messages, free-form text + buttons work without templates.
+Adapter supports `send({ template: { name, bodyParams } })` for these once approved. Set `WHATSAPP_OTP_TEMPLATE_NAME=localmeals_login_otp` on the API after approval — free-form OTP often never arrives outside the 24h chat window (while `hello_world` still does).
 
 ### 6. Flip staging
 

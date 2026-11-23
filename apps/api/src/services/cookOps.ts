@@ -96,6 +96,10 @@ export async function getCookMealSettings(db: Db, cookSlug: string) {
       pausedDate: cook.intakePausedDate ?? null,
       serviceDate: serviceDateISO(),
     },
+    lateOrders: {
+      enabled: cook.lateOrdersEnabled !== false,
+      platformEnabled: isFeatureEnabled(flags, "late_orders_enabled"),
+    },
     fulfillmentOffers: cookFulfillmentOffersFromRow(cook),
     delivery: {
       type: (cook.deliveryType === "PARTNER" ? "PARTNER" : "SELF") as "SELF" | "PARTNER",
@@ -287,6 +291,78 @@ export async function setCookIntakePause(
     paused: Boolean(intakePausedDate),
     pausedDate: intakePausedDate,
     serviceDate: today,
+  };
+}
+
+/** Cook opts in/out of post–cut-off late order requests. */
+export async function setCookLateOrders(
+  db: Db,
+  cookSlug: string,
+  input: { enabled: boolean },
+) {
+  const cook = await requireCookBySlug(db, cookSlug);
+  const enabled = Boolean(input.enabled);
+  await db
+    .update(cookProfiles)
+    .set({ lateOrdersEnabled: enabled })
+    .where(eq(cookProfiles.id, cook.id));
+  const { getFeatureFlags } = await import("./featureFlags.js");
+  const { isFeatureEnabled } = await import("@localmeals/domain");
+  const flags = await getFeatureFlags(db);
+  return {
+    enabled,
+    platformEnabled: isFeatureEnabled(flags, "late_orders_enabled"),
+  };
+}
+
+/**
+ * Emergency trim: set how many plates can still be sold today.
+ * Soft-held + paid qty stay reserved; capacity becomes used + remaining.
+ * remaining=0 also pauses intake for today.
+ */
+export async function trimCookRemainingPlates(
+  db: Db,
+  cookSlug: string,
+  remaining: number,
+) {
+  if (!Number.isInteger(remaining) || remaining < 0 || remaining > 500) {
+    throw new Error("Remaining plates must be a whole number from 0–500");
+  }
+  const cook = await requireCookBySlug(db, cookSlug);
+  const today = serviceDateISO();
+  const { usedKitchenDayQty } = await import("./orders.js");
+  const used = await usedKitchenDayQty(db, cook.id, today);
+  const maxDailyCapacity = used + remaining;
+  const intakePausedDate = remaining === 0 ? today : cook.intakePausedDate;
+  await db
+    .update(cookProfiles)
+    .set({
+      maxDailyCapacity,
+      ...(remaining === 0 ? { intakePausedDate: today } : {}),
+    })
+    .where(eq(cookProfiles.id, cook.id));
+  return {
+    serviceDate: today,
+    used,
+    remaining,
+    maxDailyCapacity,
+    paused: Boolean(intakePausedDate && isIntakePausedForDate(intakePausedDate, today)),
+  };
+}
+
+/** Desk snapshot: plates already held/paid today vs max capacity. */
+export async function getCookCapacityToday(db: Db, cookSlug: string) {
+  const cook = await requireCookBySlug(db, cookSlug);
+  const today = serviceDateISO();
+  const { usedKitchenDayQty } = await import("./orders.js");
+  const used = await usedKitchenDayQty(db, cook.id, today);
+  const max = cook.maxDailyCapacity;
+  return {
+    serviceDate: today,
+    used,
+    maxDailyCapacity: max,
+    remaining: Math.max(0, max - used),
+    paused: isIntakePausedForDate(cook.intakePausedDate, today),
   };
 }
 

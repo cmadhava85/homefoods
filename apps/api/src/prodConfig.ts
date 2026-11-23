@@ -1,10 +1,16 @@
 /**
  * Fail closed in production when required secrets / flags are missing or still on mock defaults.
  * Call once at process boot (apps/api/src/index.ts).
+ *
+ * Staging (`APP_ENV=staging`) may keep MOCK_AUTH / MOCK_WHATSAPP on — Meta test numbers
+ * are allowlist-gated, so demo OTP 123456 is the practical login path there.
+ * MOCK_PAYMENTS and AUTH_ENFORCE stay strict even in staging.
  */
 export function assertProductionConfig() {
   if (process.env.NODE_ENV !== "production") return;
 
+  const staging =
+    (process.env.APP_ENV ?? "").trim().toLowerCase() === "staging";
   const missing: string[] = [];
   const weak: string[] = [];
 
@@ -19,10 +25,10 @@ export function assertProductionConfig() {
   if (process.env.MOCK_PAYMENTS !== "false") {
     weak.push("MOCK_PAYMENTS must be false in production");
   }
-  if (process.env.MOCK_WHATSAPP !== "false") {
+  if (!staging && process.env.MOCK_WHATSAPP !== "false") {
     weak.push("MOCK_WHATSAPP must be false in production");
   }
-  if (process.env.MOCK_AUTH !== "false") {
+  if (!staging && process.env.MOCK_AUTH !== "false") {
     weak.push("MOCK_AUTH must be false in production");
   }
   if (process.env.AUTH_ENFORCE === "false") {

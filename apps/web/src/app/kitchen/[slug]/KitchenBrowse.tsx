@@ -43,11 +43,12 @@ type DayPlan = {
   dayLabel: string;
   isToday: boolean;
   orderingOpen: boolean;
+  lateOrderingOpen?: boolean;
   itemCount: number;
   menus: MenuItem[];
 };
 
-type WeekPayload = {
+export type KitchenWeekPayload = {
   cook: {
     kitchenName: string;
     slugHandle: string;
@@ -64,6 +65,9 @@ type WeekPayload = {
   cutoff?: string;
   deliveryWindow?: string;
   orderingOpen?: boolean;
+  lateOrdersEnabled?: boolean;
+  /** True when late-ask timing window is open (AND with lateOrdersEnabled). */
+  lateOrderingOpen?: boolean;
   intakePaused?: boolean;
   nextServiceDate?: string | null;
   openStatusLabel?: string;
@@ -77,6 +81,8 @@ type WeekPayload = {
   weekDiscount?: { percent: number; minDays: number; label: string | null };
   reviews?: { average: number | null; count: number; public: boolean };
 };
+
+type WeekPayload = KitchenWeekPayload;
 
 type PublicReview = {
   id: number;
@@ -95,7 +101,14 @@ function imgSrc(url: string | null | undefined) {
   return `${API_BASE}${url}`;
 }
 
-export function KitchenBrowse({ slug }: { slug: string }) {
+export function KitchenBrowse({
+  slug,
+  initialWeek = null,
+}: {
+  slug: string;
+  /** SSR prefetch of lunch week plan — skips first client spinner when present. */
+  initialWeek?: WeekPayload | null;
+}) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user } = useAuth();
@@ -130,9 +143,18 @@ export function KitchenBrowse({ slug }: { slug: string }) {
   const [availableMeals, setAvailableMeals] = useState<
     Array<{ mealType: MealType; mealLabel: string; openDayCount: number }>
   >([]);
-  const [data, setData] = useState<WeekPayload | null>(null);
+  const [data, setData] = useState<WeekPayload | null>(() =>
+    initialWeek && mealType === "LUNCH" ? initialWeek : null,
+  );
   const [err, setErr] = useState<string | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(() => {
+    if (!initialWeek || mealType !== "LUNCH") return null;
+    return (
+      initialWeek.plan.find((d) => d.itemCount > 0)?.serviceDate ??
+      initialWeek.plan[0]?.serviceDate ??
+      null
+    );
+  });
   const [cart, setCart] = useState<CartLine[]>([]);
   /** Full dock covers the day strip — stay collapsed while browsing more days. */
   const [cartExpanded, setCartExpanded] = useState(false);
@@ -183,6 +205,10 @@ export function KitchenBrowse({ slug }: { slug: string }) {
   }, [slug]);
 
   useEffect(() => {
+    // Already painted from SSR lunch prefetch — skip duplicate first fetch.
+    if (initialWeek && mealType === "LUNCH" && data === initialWeek) {
+      return;
+    }
     let cancelled = false;
     setErr(null);
     setCartExpanded(false);
@@ -207,6 +233,7 @@ export function KitchenBrowse({ slug }: { slug: string }) {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional skip when SSR lunch data is already shown
   }, [slug, mealType, againMode]);
 
   /** From “Order another day”: land on the next free day, not the one already ordered. */
@@ -763,7 +790,11 @@ export function KitchenBrowse({ slug }: { slug: string }) {
                 {mealName} · {formatDayTitle(day)}
               </h2>
               <span className={`chip${day.orderingOpen ? " tone-go" : " tone-warn"}`}>
-                {day.orderingOpen ? t("kitchen.orderingOpen") : t("kitchen.pastCutoff")}
+                {day.orderingOpen
+                  ? t("kitchen.orderingOpen")
+                  : day.lateOrderingOpen && data.lateOrdersEnabled !== false
+                    ? t("kitchen.pastCutoff")
+                    : t("kitchen.orderingClosed")}
               </span>
             </div>
 
@@ -844,6 +875,9 @@ export function KitchenBrowse({ slug }: { slug: string }) {
                         serviceDate={day.serviceDate}
                         pricePaise={m.pricePaise}
                         orderingOpen={day.orderingOpen}
+                        lateOrdersEnabled={
+                          data.lateOrdersEnabled !== false && Boolean(day.lateOrderingOpen)
+                        }
                         onAddToCart={day.orderingOpen ? addToCart : undefined}
                         confirmBeforeOrder={
                           orderedDates.has(day.serviceDate)

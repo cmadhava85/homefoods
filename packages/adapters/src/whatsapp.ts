@@ -357,7 +357,12 @@ export function parseWhatsAppIntent(text: string): {
   }
   // Order / Late before Menu so "Order …" never matches menu
   if (t.startsWith("late") || t.includes("late order")) return { intent: "LATE", raw: text };
-  if (t === "orders" || t === "my orders" || t === "order history") {
+  if (
+    t === "orders" ||
+    t === "my orders" ||
+    t === "order history" ||
+    t.startsWith("orders ")
+  ) {
     return { intent: "ORDERS", raw: text };
   }
   if (t.startsWith("week")) return { intent: "WEEK", raw: text };
@@ -778,10 +783,15 @@ export function extractInboundWhatsApp(body: unknown): WaInboundMessage {
       },
     };
   }
+  const buttonId =
+    msg.interactive?.button_reply?.id ?? msg.interactive?.list_reply?.id;
+  // Outbound ids are `btn_{i}_{title}` — recover title if Meta omits it.
+  const fromButtonId = buttonId?.replace(/^btn_\d+_/, "").trim() || undefined;
   const text =
     msg.text?.body ??
     msg.interactive?.button_reply?.title ??
     msg.interactive?.list_reply?.title ??
+    fromButtonId ??
     msg.button?.text ??
     msg.button?.payload;
   return { from, text };

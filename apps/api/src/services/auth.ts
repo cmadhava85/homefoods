@@ -148,6 +148,27 @@ async function deliverOtp(mobile: string, code: string, role: AuthRole) {
   }
   const { getWhatsAppProvider } = await import("@localmeals/adapters");
   const wa = getWhatsAppProvider();
+  /**
+   * Meta delivers business-initiated messages reliably only as approved templates
+   * (or free-form inside the 24h customer-care window). Free-form OTP often returns
+   * API 200 but never reaches the phone — same reason hello_world arrives and OTP does not.
+   *
+   * Prefer WHATSAPP_OTP_TEMPLATE_NAME (utility/auth template with body {{1}} = code).
+   */
+  const templateName = (process.env.WHATSAPP_OTP_TEMPLATE_NAME ?? "").trim();
+  const templateLang = (process.env.WHATSAPP_OTP_TEMPLATE_LANG ?? "en").trim() || "en";
+  if (templateName) {
+    await wa.send({
+      to: mobile,
+      body: `LocalMeals code: ${code}`,
+      template: {
+        name: templateName,
+        language: templateLang,
+        bodyParams: [code],
+      },
+    });
+    return;
+  }
   await wa.send({
     to: mobile,
     body: `LocalMeals code: ${code}\nValid 10 minutes. Do not share.`,
