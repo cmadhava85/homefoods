@@ -10,6 +10,7 @@ Decided for LocalMeals launch and near-term roadmap. Do not reverse without an e
 | Cook take at launch | **100% of food** — no cook surcharge / % fee in MVP-1 |
 | Delivery fee | Platform keeps delivery + platform fee; food → cook at EOD |
 | Later cook monetization | Only after pin has volume: small % of food, weekly listing fee, or payout fee — never block supply at launch |
+| Ads / kitchen boosts | Scaffolded behind `ads_enabled` (**default OFF**). Flat boost packages later — **not** a % of food. Turn on only when pin volume is healthy |
 
 ## Trust & reviews (MVP-2)
 

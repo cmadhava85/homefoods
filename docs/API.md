@@ -9,7 +9,13 @@ Base: `http://127.0.0.1:4000`
 | POST | `/auth/otp/verify` | Verify OTP → `{ token, user }` |
 | GET | `/auth/me` | Current session (Bearer) |
 | POST | `/auth/logout` | End session |
-| GET | `/kitchens?pin=` | LIVE kitchens |
+| GET | `/kitchens?pin=` | LIVE kitchens (`sponsored` when `ads_enabled`) |
+| GET | `/ads?pin=` | Active pin ads (empty when `ads_enabled` off) |
+| GET | `/admin/ads` | Admin: list campaigns + `adsEnabled` |
+| POST | `/admin/ads` | Admin: create/update campaign |
+| PATCH | `/admin/ads/:id/status` | Admin: DRAFT/ACTIVE/PAUSED/ENDED |
+| GET | `/cooks/:slug/ads` | Cook: boost campaigns (gated by flag in response) |
+| POST | `/cooks/:slug/ads/boost` | Cook: request DRAFT kitchen boost (requires `ads_enabled`) |
 | GET | `/kitchens/:slug/menu` | Today's menu |
 | POST | `/orders` | Create order + payment link (optional `Idempotency-Key` header) |
 | POST | `/orders/batch` | Multi-day cart, one payment (optional `Idempotency-Key`) |

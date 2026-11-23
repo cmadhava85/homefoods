@@ -83,6 +83,13 @@ export const FEATURE_FLAG_DEFS = [
       "Charge cook flat_self_delivery_fee on DELIVERY checkouts (e.g. ₹25). Off = ₹0 delivery. Independent of platform ₹7. Keep OFF for free-delivery launch.",
     defaultEnabled: false,
   },
+  {
+    key: "ads_enabled",
+    label: "Ads & kitchen boosts",
+    description:
+      "Sponsored kitchen cards + external pin promotions. Keep OFF until pin volume is healthy — does not take a % of food.",
+    defaultEnabled: false,
+  },
 ] as const;
 
 export type FeatureFlagKey = (typeof FEATURE_FLAG_DEFS)[number]["key"];

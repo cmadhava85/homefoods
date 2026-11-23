@@ -464,10 +464,22 @@ export async function listKitchens(db: Db, pinCode?: string) {
       reviews: reviews.public
         ? { average: reviews.average, count: reviews.count, public: true }
         : { average: null, count: reviews.count, public: false },
+      sponsored: false,
     });
   }
-  // Open kitchens first
-  out.sort((a, b) => Number(b.orderingOpen) - Number(a.orderingOpen));
+
+  const { activeBoostCookIds } = await import("./ads.js");
+  const boostIds = pinCode ? await activeBoostCookIds(db, pinCode) : new Set<string>();
+  for (const k of out) {
+    k.sponsored = boostIds.has(k.id);
+  }
+
+  // Sponsored (when ads on) then open kitchens first
+  out.sort((a, b) => {
+    const s = Number(b.sponsored) - Number(a.sponsored);
+    if (s !== 0) return s;
+    return Number(b.orderingOpen) - Number(a.orderingOpen);
+  });
   return out;
 }
 

@@ -204,6 +204,13 @@
       "when": 1732093200000,
       "tag": "0028_cook_late_orders",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1732179600000,
+      "tag": "0029_ad_campaigns",
+      "breakpoints": true
     }
   ]
 }

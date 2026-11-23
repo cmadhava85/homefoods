@@ -32,6 +32,7 @@ import {
   setCookLateOrders,
   trimCookRemainingPlates,
   getCookCapacityToday,
+  listCookUpcomingOrders,
   setCookFulfillmentOffers,
   listCookMenuTemplates,
   saveCookMenuTemplate,
@@ -97,6 +98,49 @@ app.get("/cooks/:slug/manifest", async (req, reply) => {
   try {
     assertKitchenStaff(req, slug);
     return await getManifest(db, slug, q.date, meal.success ? meal.data : "LUNCH");
+  } catch (e) {
+    return sendCaughtError(reply, e);
+  }
+});
+
+app.get("/cooks/:slug/upcoming-orders", async (req, reply) => {
+  const { slug } = req.params as { slug: string };
+  const q = z
+    .object({ days: z.coerce.number().int().min(1).max(14).optional() })
+    .safeParse(req.query ?? {});
+  try {
+    assertKitchenStaff(req, slug);
+    return await listCookUpcomingOrders(db, slug, {
+      days: q.success ? q.data.days : 7,
+    });
+  } catch (e) {
+    return sendCaughtError(reply, e);
+  }
+});
+
+app.get("/cooks/:slug/ads", async (req, reply) => {
+  const { slug } = req.params as { slug: string };
+  try {
+    assertKitchenStaff(req, slug);
+    const { listCookBoostCampaigns } = await import("../services/ads.js");
+    return await listCookBoostCampaigns(db, slug);
+  } catch (e) {
+    return sendCaughtError(reply, e);
+  }
+});
+
+app.post("/cooks/:slug/ads/boost", async (req, reply) => {
+  const { slug } = req.params as { slug: string };
+  const body = z
+    .object({
+      title: z.string().min(2).max(120).optional(),
+      days: z.number().int().min(1).max(30).optional(),
+    })
+    .parse(req.body ?? {});
+  try {
+    assertKitchenStaff(req, slug);
+    const { requestCookKitchenBoost } = await import("../services/ads.js");
+    return await requestCookKitchenBoost(db, slug, body);
   } catch (e) {
     return sendCaughtError(reply, e);
   }

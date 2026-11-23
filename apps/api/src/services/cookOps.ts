@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, gte, inArray, lte } from "drizzle-orm";
 import {
   cookMealSettings,
   cookMenuTemplates,
@@ -18,7 +18,9 @@ import {
   assertFulfillmentOffersValid,
   assertValidCutoff,
   assertValidDeliveryWindow,
+  addDaysISO,
   cookFulfillmentOffersFromRow,
+  dayOfWeekForServiceDate,
   defaultMealSchedule,
   describeWeekDiscount,
   formatCutoffLabel,
@@ -31,6 +33,7 @@ import {
   MEAL_PERIODS,
   normalizeWeekDiscountRule,
   serviceDateISO,
+  WEEKDAY_SHORT,
   type DeliveryWindow,
   type MealPeriod,
 } from "@localmeals/domain";
@@ -782,6 +785,133 @@ export async function getManifest(
       note:
         "Paid orders and cut-off digests are sent to this WhatsApp number (mock logs locally).",
     },
+  };
+}
+
+/** Paid / in-kitchen statuses — same set as today's manifest (no unpaid holds). */
+const UPCOMING_PAID_STATUSES = [
+  "PAID",
+  "CANCEL_REQUESTED",
+  "COOKING",
+  "PACKED",
+  "ASSIGNING_RIDER",
+  "DISPATCHED",
+  "DELAYED",
+  "DELIVERED",
+  "LOGISTICS_EXCEPTION",
+] as const;
+
+export type CookUpcomingLine = {
+  itemName: string;
+  itemNameTa: string | null;
+  qty: number;
+  orderCount: number;
+};
+
+export type CookUpcomingDay = {
+  serviceDate: string;
+  dayLabel: string;
+  mealType: MealPeriod;
+  totalPlates: number;
+  lines: CookUpcomingLine[];
+};
+
+/** Pure aggregator for upcoming paid plates (testable). */
+export function aggregateCookUpcomingDays(
+  rows: Array<{
+    serviceDate: string;
+    mealType: string;
+    itemName: string;
+    itemNameTa?: string | null;
+    qty: number;
+  }>,
+): CookUpcomingDay[] {
+  type Acc = {
+    serviceDate: string;
+    mealType: MealPeriod;
+    byItem: Map<string, CookUpcomingLine>;
+  };
+  const byKey = new Map<string, Acc>();
+  for (const row of rows) {
+    const mealType = (row.mealType || "LUNCH") as MealPeriod;
+    const key = `${row.serviceDate}|${mealType}`;
+    let acc = byKey.get(key);
+    if (!acc) {
+      acc = { serviceDate: row.serviceDate, mealType, byItem: new Map() };
+      byKey.set(key, acc);
+    }
+    const itemKey = row.itemName;
+    const prev = acc.byItem.get(itemKey);
+    if (prev) {
+      prev.qty += row.qty;
+      prev.orderCount += 1;
+      if (!prev.itemNameTa && row.itemNameTa) prev.itemNameTa = row.itemNameTa;
+    } else {
+      acc.byItem.set(itemKey, {
+        itemName: row.itemName,
+        itemNameTa: row.itemNameTa ?? null,
+        qty: row.qty,
+        orderCount: 1,
+      });
+    }
+  }
+
+  const days: CookUpcomingDay[] = [...byKey.values()]
+    .map((acc) => {
+      const lines = [...acc.byItem.values()].sort((a, b) => b.qty - a.qty || a.itemName.localeCompare(b.itemName));
+      return {
+        serviceDate: acc.serviceDate,
+        dayLabel: WEEKDAY_SHORT[dayOfWeekForServiceDate(acc.serviceDate)] ?? "",
+        mealType: acc.mealType,
+        totalPlates: lines.reduce((n, l) => n + l.qty, 0),
+        lines,
+      };
+    })
+    .sort(
+      (a, b) =>
+        a.serviceDate.localeCompare(b.serviceDate) ||
+        a.mealType.localeCompare(b.mealType),
+    );
+  return days;
+}
+
+/**
+ * Paid plates for future service dates — shopping / prep forecast.
+ * Excludes today (Run tab) and unpaid holds.
+ */
+export async function listCookUpcomingOrders(
+  db: Db,
+  cookSlug: string,
+  opts: { days?: number } = {},
+) {
+  const cook = await requireCookBySlug(db, cookSlug);
+  const daysAhead = Math.min(Math.max(opts.days ?? 7, 1), 14);
+  const today = serviceDateISO();
+  const from = addDaysISO(today, 1);
+  const to = addDaysISO(today, daysAhead);
+
+  const rows = await db
+    .select({
+      serviceDate: orders.serviceDate,
+      mealType: orders.mealType,
+      itemName: orders.itemName,
+      itemNameTa: orders.itemNameTa,
+      qty: orders.qty,
+    })
+    .from(orders)
+    .where(
+      and(
+        eq(orders.cookId, cook.id),
+        gte(orders.serviceDate, from),
+        lte(orders.serviceDate, to),
+        inArray(orders.status, [...UPCOMING_PAID_STATUSES]),
+      ),
+    );
+
+  return {
+    from,
+    to,
+    days: aggregateCookUpcomingDays(rows),
   };
 }
 

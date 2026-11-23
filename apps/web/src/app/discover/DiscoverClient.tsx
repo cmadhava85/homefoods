@@ -20,6 +20,15 @@ type Cook = {
   coverImageUrl?: string | null;
   platesThisWeek?: number;
   reviews?: { average: number | null; count: number; public: boolean };
+  sponsored?: boolean;
+};
+
+type ExternalAd = {
+  id: number;
+  title: string;
+  body: string | null;
+  ctaUrl: string | null;
+  imageUrl: string | null;
 };
 
 type MyKitchen = {
@@ -65,6 +74,7 @@ export function DiscoverClient() {
   const [pin, setPin] = useState("600119");
   const [pinDraft, setPinDraft] = useState("600119");
   const [kitchens, setKitchens] = useState<Cook[]>([]);
+  const [externalAds, setExternalAds] = useState<ExternalAd[]>([]);
   const [mine, setMine] = useState<MyKitchen[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -84,11 +94,25 @@ export function DiscoverClient() {
   const load = useCallback((p: string) => {
     setLoading(true);
     setErr(null);
-    fetch(`${API_BASE}/kitchens?pin=${encodeURIComponent(p)}`)
-      .then(async (r) => {
+    Promise.all([
+      fetch(`${API_BASE}/kitchens?pin=${encodeURIComponent(p)}`).then(async (r) => {
         const json = await r.json();
         if (!r.ok) throw new Error(json.error ?? "Could not load kitchens");
-        setKitchens(Array.isArray(json) ? json : []);
+        return Array.isArray(json) ? (json as Cook[]) : [];
+      }),
+      fetch(`${API_BASE}/ads?pin=${encodeURIComponent(p)}`)
+        .then(async (r) => {
+          const json = await r.json();
+          if (!r.ok) return [] as ExternalAd[];
+          return json.adsEnabled && Array.isArray(json.external)
+            ? (json.external as ExternalAd[])
+            : [];
+        })
+        .catch(() => [] as ExternalAd[]),
+    ])
+      .then(([ks, ads]) => {
+        setKitchens(ks);
+        setExternalAds(ads);
       })
       .catch((e) => setErr((e as Error).message))
       .finally(() => setLoading(false));
@@ -218,6 +242,35 @@ export function DiscoverClient() {
       {loading ? <p className="muted discover-status">{t("discover.loading")}</p> : null}
       {err ? <p className="err">{err}</p> : null}
 
+      {!loading && externalAds.length > 0 ? (
+        <section className="discover-ads" aria-label={t("discover.sponsored")}>
+          {externalAds.map((ad) => {
+            const inner = (
+              <>
+                <strong>{ad.title}</strong>
+                {ad.body ? <p className="muted">{ad.body}</p> : null}
+                <span className="discover-ad-badge">{t("discover.sponsored")}</span>
+              </>
+            );
+            return ad.ctaUrl ? (
+              <a
+                key={ad.id}
+                className="discover-ad-card"
+                href={ad.ctaUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {inner}
+              </a>
+            ) : (
+              <div key={ad.id} className="discover-ad-card">
+                {inner}
+              </div>
+            );
+          })}
+        </section>
+      ) : null}
+
       {!loading && !err && kitchens.length === 0 ? (
         <div className="card empty-card">
           <h2>{t("discover.emptyTitle", { pin })}</h2>
@@ -230,7 +283,7 @@ export function DiscoverClient() {
           <Link
             key={k.id}
             href={`/kitchen/${k.slugHandle}`}
-            className="kitchen-tile"
+            className={`kitchen-tile${k.sponsored ? " sponsored" : ""}`}
             style={{ animationDelay: `${i * 70}ms` }}
           >
             <div className="kitchen-tile-media-wrap">
@@ -244,6 +297,9 @@ export function DiscoverClient() {
               <span className={`kitchen-tile-status${k.orderingOpen ? " open" : ""}`}>
                 {k.orderingOpen ? t("common.openNow") : t("common.closed")}
               </span>
+              {k.sponsored ? (
+                <span className="kitchen-tile-sponsored">{t("discover.sponsored")}</span>
+              ) : null}
               <h2 className="kitchen-tile-title">{k.kitchenName}</h2>
             </div>
             <div className="kitchen-tile-body">

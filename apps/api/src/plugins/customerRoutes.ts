@@ -64,6 +64,22 @@ app.get("/kitchens", async (req) => {
   return listKitchens(db, q.pin);
 });
 
+/** Pin ads / kitchen boosts — empty when ads_enabled is off. */
+app.get("/ads", async (req, reply) => {
+  const q = z
+    .object({ pin: z.string().regex(/^\d{6}$/) })
+    .safeParse(req.query ?? {});
+  if (!q.success) {
+    return reply.code(400).send({ error: "pin must be 6 digits" });
+  }
+  try {
+    const { listActiveAdsForPin } = await import("../services/ads.js");
+    return await listActiveAdsForPin(db, q.data.pin);
+  } catch (e) {
+    return sendCaughtError(reply, e);
+  }
+});
+
 app.get("/kitchens/:slug/menu", async (req, reply) => {
   const { slug } = req.params as { slug: string };
   const q = req.query as { date?: string; meal?: string };

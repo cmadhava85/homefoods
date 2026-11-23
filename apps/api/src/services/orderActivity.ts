@@ -1,5 +1,11 @@
-import { desc, sql } from "drizzle-orm";
-import { outbox, platformEventLedger, type Db } from "@localmeals/db";
+import { and, desc, eq, gte, lt, or, sql } from "drizzle-orm";
+import { orders, outbox, platformEventLedger, type Db } from "@localmeals/db";
+import {
+  addDaysISO,
+  ORDER_STATES,
+  serviceDateISO,
+  type OrderState,
+} from "@localmeals/domain";
 
 type LedgerChannel = "VOICE_IVR" | "WHATSAPP_BOT" | "WEB_STOREFRONT" | "SYSTEM_CRON" | "ADMIN";
 
@@ -322,5 +328,175 @@ export async function getOrderSupportBundle(db: Db, key: string) {
     outbox: outboxRows,
     cloudLogging,
     activity,
+  };
+}
+
+function tryNormalizeMobile(raw: string): string | null {
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length === 10) return `+91${digits}`;
+  if (digits.length === 12 && digits.startsWith("91")) return `+${digits}`;
+  if (raw.trim().startsWith("+") && digits.length >= 10) return `+${digits}`;
+  return null;
+}
+
+function adminOrderListRow(
+  o: {
+    id: number;
+    publicId: string;
+    checkoutId: string | null;
+    status: string;
+    customerMobile: string;
+    payerMobile: string | null;
+    serviceDate: string;
+    mealType: string;
+    itemName: string;
+    qty: number;
+    foodPaise: number;
+    foodDiscountPaise: number | null;
+    deliveryPaise: number;
+    platformFeePaise: number;
+    settlementHold: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+    cookId: string;
+  },
+  cookById: Map<string, { kitchenName: string; slugHandle: string }>,
+) {
+  const cook = cookById.get(o.cookId);
+  return {
+    id: o.id,
+    publicId: o.publicId,
+    checkoutId: o.checkoutId,
+    status: o.status,
+    customerMobile: o.customerMobile,
+    payerMobile: o.payerMobile,
+    serviceDate: o.serviceDate,
+    mealType: o.mealType,
+    itemName: o.itemName,
+    qty: o.qty,
+    totalPaise: lineTotalPaise(o),
+    settlementHold: o.settlementHold,
+    createdAt: o.createdAt,
+    updatedAt: o.updatedAt,
+    kitchenName: cook?.kitchenName ?? null,
+    cookSlug: cook?.slugHandle ?? null,
+  };
+}
+
+/**
+ * Admin browse/search — mobile, cook slug, service date, status.
+ * Newest first; max 100 rows.
+ */
+export async function searchAdminOrders(
+  db: Db,
+  opts: {
+    mobile?: string;
+    cookSlug?: string;
+    serviceDate?: string;
+    status?: string;
+    limit?: number;
+  },
+) {
+  const limit = Math.min(Math.max(opts.limit ?? 40, 1), 100);
+  const clauses = [];
+
+  if (opts.mobile?.trim()) {
+    const mobile = tryNormalizeMobile(opts.mobile.trim());
+    if (!mobile) throw new Error("Enter a valid Indian mobile number");
+    clauses.push(
+      or(eq(orders.customerMobile, mobile), eq(orders.payerMobile, mobile)),
+    );
+  }
+
+  if (opts.cookSlug?.trim()) {
+    const cook = await db.query.cookProfiles.findFirst({
+      where: (t, { eq: e }) => e(t.slugHandle, opts.cookSlug!.trim()),
+    });
+    if (!cook) throw new Error("Kitchen not found");
+    clauses.push(eq(orders.cookId, cook.id));
+  }
+
+  if (opts.serviceDate?.trim()) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(opts.serviceDate.trim())) {
+      throw new Error("serviceDate must be YYYY-MM-DD");
+    }
+    clauses.push(eq(orders.serviceDate, opts.serviceDate.trim()));
+  }
+
+  if (opts.status?.trim()) {
+    const status = opts.status.trim();
+    if (!(ORDER_STATES as readonly string[]).includes(status)) {
+      throw new Error("Unknown order status");
+    }
+    clauses.push(eq(orders.status, status as OrderState));
+  }
+
+  const rows = await db
+    .select()
+    .from(orders)
+    .where(clauses.length ? and(...clauses) : undefined)
+    .orderBy(desc(orders.createdAt))
+    .limit(limit);
+
+  const cookIds = [...new Set(rows.map((r) => r.cookId))];
+  const cooks =
+    cookIds.length === 0
+      ? []
+      : await db.query.cookProfiles.findMany({
+          where: (t, { inArray: ia }) => ia(t.id, cookIds),
+        });
+  const cookById = new Map(cooks.map((c) => [c.id, c]));
+
+  return {
+    count: rows.length,
+    orders: rows.map((o) => adminOrderListRow(o, cookById)),
+  };
+}
+
+/**
+ * Ops queue: cancel asks, payment stuck, logistics exceptions (recent window).
+ */
+export async function listAdminAttentionOrders(db: Db, limit = 40) {
+  const capped = Math.min(Math.max(limit, 1), 80);
+  const sinceDate = addDaysISO(serviceDateISO(), -2);
+  const unpaidCutoff = new Date(Date.now() - 15 * 60 * 1000);
+
+  const rows = await db
+    .select()
+    .from(orders)
+    .where(
+      and(
+        gte(orders.serviceDate, sinceDate),
+        or(
+          eq(orders.status, "CANCEL_REQUESTED"),
+          eq(orders.status, "CONFIRMING_PAYMENT"),
+          eq(orders.status, "LOGISTICS_EXCEPTION"),
+          and(eq(orders.status, "AWAITING_PAYMENT"), lt(orders.updatedAt, unpaidCutoff)),
+        ),
+      ),
+    )
+    .orderBy(desc(orders.updatedAt))
+    .limit(capped);
+
+  const cookIds = [...new Set(rows.map((r) => r.cookId))];
+  const cooks =
+    cookIds.length === 0
+      ? []
+      : await db.query.cookProfiles.findMany({
+          where: (t, { inArray: ia }) => ia(t.id, cookIds),
+        });
+  const cookById = new Map(cooks.map((c) => [c.id, c]));
+
+  return {
+    count: rows.length,
+    orders: rows.map((o) => {
+      const row = adminOrderListRow(o, cookById);
+      let reason = row.status;
+      if (row.status === "AWAITING_PAYMENT") reason = "Unpaid hold >15m";
+      if (row.status === "CONFIRMING_PAYMENT") reason = "Payment confirming stuck";
+      if (row.status === "CANCEL_REQUESTED") reason = "Cancel ask";
+      if (row.status === "LOGISTICS_EXCEPTION") reason = "Logistics exception";
+      return { ...row, reason };
+    }),
   };
 }

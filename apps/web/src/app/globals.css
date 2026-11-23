@@ -3584,6 +3584,52 @@ select {
   color: #8a5a00;
 }
 
+.kitchen-tile-sponsored {
+  position: absolute;
+  top: 0.65rem;
+  left: 0.65rem;
+  z-index: 2;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.45rem;
+  border-radius: 4px;
+  background: rgba(20, 20, 20, 0.72);
+  color: #f5f0e8;
+}
+
+.discover-ads {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0 0 1.25rem;
+}
+
+.discover-ad-card {
+  position: relative;
+  display: block;
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #1f3a2e 0%, #2d4a3a 55%, #3a5a45 100%);
+  color: #f4f1ea;
+  text-decoration: none;
+}
+
+.discover-ad-card .muted {
+  color: rgba(244, 241, 234, 0.78);
+  margin: 0.35rem 0 0;
+}
+
+.discover-ad-badge {
+  position: absolute;
+  top: 0.65rem;
+  right: 0.75rem;
+  font-size: 0.65rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+
 .kitchen-tile-status.open {
   background: rgba(231, 245, 238, 0.95);
   color: #176b42;

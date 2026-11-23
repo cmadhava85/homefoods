@@ -47,6 +47,16 @@ export const platformChannelEnum = pgEnum("platform_channel", [
   "SYSTEM_CRON",
   "ADMIN",
 ]);
+export const adCampaignTypeEnum = pgEnum("ad_campaign_type", [
+  "KITCHEN_BOOST",
+  "EXTERNAL",
+]);
+export const adCampaignStatusEnum = pgEnum("ad_campaign_status", [
+  "DRAFT",
+  "ACTIVE",
+  "PAUSED",
+  "ENDED",
+]);
 export const onboardingStatusEnum = pgEnum("onboarding_status", [
   "DRAFT",
   "DOCS_SUBMITTED",
@@ -592,6 +602,32 @@ export const cookMenuTemplates = pgTable(
   (t) => [
     uniqueIndex("cook_menu_templates_cook_meal_name_uidx").on(t.cookId, t.mealType, t.name),
     index("cook_menu_templates_cook_idx").on(t.cookId),
+  ],
+);
+
+/** Pin promotions — kitchen boost or external (gated by ads_enabled). */
+export const adCampaigns = pgTable(
+  "ad_campaigns",
+  {
+    id: serial("id").primaryKey(),
+    type: adCampaignTypeEnum("type").notNull(),
+    status: adCampaignStatusEnum("status").default("DRAFT").notNull(),
+    pinCode: varchar("pin_code", { length: 6 }).notNull(),
+    cookId: uuid("cook_id"),
+    title: varchar("title", { length: 120 }).notNull(),
+    body: text("body"),
+    ctaUrl: varchar("cta_url", { length: 500 }),
+    imageUrl: varchar("image_url", { length: 500 }),
+    priority: integer("priority").default(0).notNull(),
+    startsAt: timestamp("starts_at", { withTimezone: true }),
+    endsAt: timestamp("ends_at", { withTimezone: true }),
+    createdBy: varchar("created_by", { length: 80 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index("ad_campaigns_pin_status_idx").on(t.pinCode, t.status),
+    index("ad_campaigns_cook_idx").on(t.cookId),
   ],
 );
 

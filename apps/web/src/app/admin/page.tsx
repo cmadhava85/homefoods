@@ -104,7 +104,23 @@ type TurnoverReport = {
   cooks: TurnoverCook[];
 };
 
-type Tab = "payouts" | "analytics" | "cooks" | "tickets" | "orders" | "features";
+type Tab = "payouts" | "analytics" | "cooks" | "tickets" | "orders" | "features" | "ads";
+
+type AdCampaign = {
+  id: number;
+  type: "KITCHEN_BOOST" | "EXTERNAL";
+  status: "DRAFT" | "ACTIVE" | "PAUSED" | "ENDED";
+  pinCode: string;
+  cookId: string | null;
+  cookSlug: string | null;
+  kitchenName: string | null;
+  title: string;
+  body: string | null;
+  ctaUrl: string | null;
+  priority: number;
+  startsAt: string | null;
+  endsAt: string | null;
+};
 
 type SupportActivity = {
   source: string;
@@ -181,6 +197,23 @@ type SupportBundle = {
 };
 type AnalyticsPeriod = "week" | "month" | "year";
 
+type AdminOrderRow = {
+  publicId: string;
+  checkoutId: string | null;
+  status: string;
+  customerMobile: string;
+  serviceDate: string;
+  mealType: string;
+  itemName: string;
+  qty: number;
+  totalPaise: number;
+  kitchenName: string | null;
+  cookSlug: string | null;
+  settlementHold: boolean;
+};
+
+type AdminAttentionRow = AdminOrderRow & { reason: string };
+
 function rupees(paise: number) {
   return `₹${(paise / 100).toFixed(2)}`;
 }
@@ -192,6 +225,18 @@ function AdminInner() {
   const [cooks, setCooks] = useState<Cook[]>([]);
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [features, setFeatures] = useState<FeatureFlag[]>([]);
+  const [adsEnabled, setAdsEnabled] = useState(false);
+  const [adCampaigns, setAdCampaigns] = useState<AdCampaign[]>([]);
+  const [adForm, setAdForm] = useState({
+    type: "EXTERNAL" as "KITCHEN_BOOST" | "EXTERNAL",
+    status: "DRAFT" as AdCampaign["status"],
+    pinCode: "600119",
+    cookId: "",
+    title: "",
+    body: "",
+    ctaUrl: "",
+    priority: "0",
+  });
   const [turnover, setTurnover] = useState<TurnoverReport | null>(null);
   const [analyticsPeriod, setAnalyticsPeriod] = useState<AnalyticsPeriod>("month");
   const [settleFilter, setSettleFilter] = useState<"open" | "all">("open");
@@ -208,6 +253,12 @@ function AdminInner() {
   const [err, setErr] = useState<string | null>(null);
   const [orderLookup, setOrderLookup] = useState("");
   const [supportBundle, setSupportBundle] = useState<SupportBundle | null>(null);
+  const [searchMobile, setSearchMobile] = useState("");
+  const [searchCook, setSearchCook] = useState("");
+  const [searchDate, setSearchDate] = useState("");
+  const [searchStatus, setSearchStatus] = useState("");
+  const [searchRows, setSearchRows] = useState<AdminOrderRow[]>([]);
+  const [attentionRows, setAttentionRows] = useState<AdminAttentionRow[]>([]);
 
   const refreshCooks = useCallback(() => {
     return authFetch("/admin/cooks")
@@ -253,6 +304,17 @@ function AdminInner() {
         const json = await r.json();
         if (!r.ok) throw new Error(json.error ?? "Failed to load features");
         setFeatures(json.flags ?? []);
+      })
+      .catch((e) => setErr((e as Error).message));
+  }, []);
+
+  const refreshAds = useCallback(() => {
+    return authFetch("/admin/ads")
+      .then(async (r) => {
+        const json = await r.json();
+        if (!r.ok) throw new Error(json.error ?? "Failed to load ads");
+        setAdsEnabled(Boolean(json.adsEnabled));
+        setAdCampaigns((json.campaigns as AdCampaign[]) ?? []);
       })
       .catch((e) => setErr((e as Error).message));
   }, []);
@@ -361,6 +423,68 @@ function AdminInner() {
   useEffect(() => {
     if (tab === "analytics") void refreshTurnover();
   }, [tab, refreshTurnover]);
+
+  useEffect(() => {
+    if (tab === "ads") void refreshAds();
+  }, [tab, refreshAds]);
+
+  useEffect(() => {
+    if (tab === "orders") void refreshAttention();
+  }, [tab]);
+
+  async function refreshAttention() {
+    try {
+      const res = await authFetch("/admin/orders-attention");
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Failed to load attention queue");
+      setAttentionRows(Array.isArray(json.orders) ? json.orders : []);
+    } catch (e) {
+      setAttentionRows([]);
+      setErr((e as Error).message);
+    }
+  }
+
+  async function runOrderSearch() {
+    setBusy("order-search");
+    setErr(null);
+    setMsg(null);
+    try {
+      const q = new URLSearchParams();
+      if (searchMobile.trim()) q.set("mobile", searchMobile.trim());
+      if (searchCook.trim()) q.set("cookSlug", searchCook.trim());
+      if (searchDate.trim()) q.set("serviceDate", searchDate.trim());
+      if (searchStatus.trim()) q.set("status", searchStatus.trim());
+      q.set("limit", "40");
+      const res = await authFetch(`/admin/orders?${q.toString()}`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Search failed");
+      setSearchRows(Array.isArray(json.orders) ? json.orders : []);
+      if (!json.orders?.length) setMsg(t("admin.searchEmpty"));
+    } catch (e) {
+      setSearchRows([]);
+      setErr((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function openSupport(publicId: string) {
+    setOrderLookup(publicId);
+    setBusy("order-lookup");
+    setErr(null);
+    setMsg(null);
+    try {
+      const res = await authFetch(`/admin/orders/${encodeURIComponent(publicId)}`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Order not found");
+      setSupportBundle(json as SupportBundle);
+    } catch (e) {
+      setSupportBundle(null);
+      setErr((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function refund(orderId: number, ticketId: number, mode: "FULL" | "FOOD_ONLY") {
     const res = await authFetch("/internal/ops/refunds", {
@@ -505,10 +629,59 @@ function AdminInner() {
     }
   }
 
+  async function saveAdCampaign() {
+    setBusy("ad-save");
+    setErr(null);
+    setMsg(null);
+    try {
+      const res = await authFetch("/admin/ads", {
+        method: "POST",
+        body: JSON.stringify({
+          type: adForm.type,
+          status: adForm.status,
+          pinCode: adForm.pinCode,
+          cookId: adForm.type === "KITCHEN_BOOST" && adForm.cookId ? adForm.cookId : null,
+          title: adForm.title.trim(),
+          body: adForm.body.trim() || null,
+          ctaUrl: adForm.ctaUrl.trim() || null,
+          priority: Number(adForm.priority) || 0,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Could not save campaign");
+      setMsg(t("admin.adSaved"));
+      setAdForm((f) => ({ ...f, title: "", body: "", ctaUrl: "", cookId: "" }));
+      await refreshAds();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function setAdStatus(id: number, status: AdCampaign["status"]) {
+    setBusy(`ad-${id}`);
+    setErr(null);
+    try {
+      const res = await authFetch(`/admin/ads/${id}/status`, {
+        method: "PATCH",
+        body: JSON.stringify({ status }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Could not update status");
+      await refreshAds();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
   const tabLabels: Record<Tab, string> = {
     payouts: t("admin.tabPayouts"),
     analytics: t("admin.tabAnalytics"),
     features: t("admin.tabFeatures"),
+    ads: t("admin.tabAds"),
     cooks: t("admin.tabCooks"),
     tickets: t("admin.tabTickets"),
     orders: t("admin.tabOrders"),
@@ -522,7 +695,9 @@ function AdminInner() {
       </header>
 
       <div className="seg desk-tabs" role="tablist" aria-label={t("admin.title")}>
-        {(["payouts", "analytics", "features", "cooks", "tickets", "orders"] as const).map((id) => (
+        {(
+          ["payouts", "analytics", "features", "ads", "cooks", "tickets", "orders"] as const
+        ).map((id) => (
           <button
             key={id}
             type="button"
@@ -728,6 +903,179 @@ function AdminInner() {
               </div>
             </div>
           ))}
+        </section>
+      ) : null}
+
+      {tab === "ads" ? (
+        <section>
+          <div className="card">
+            <strong>{t("admin.adsTitle")}</strong>
+            <p className="muted" style={{ margin: "0.35rem 0 0" }}>
+              {t("admin.adsBlurb")}
+            </p>
+            <p className="muted" style={{ margin: "0.5rem 0 0" }}>
+              {t("admin.adsKillSwitch")}:{" "}
+              <strong>{adsEnabled ? "ON" : "OFF"}</strong>
+              {" · "}
+              <code>ads_enabled</code> ({t("admin.tabFeatures")})
+            </p>
+          </div>
+
+          <div className="card">
+            <strong>{t("admin.adNew")}</strong>
+            <div className="row" style={{ flexWrap: "wrap", gap: "0.75rem", marginTop: "0.75rem" }}>
+              <label>
+                <span className="muted">{t("admin.adType")}</span>
+                <select
+                  value={adForm.type}
+                  onChange={(e) =>
+                    setAdForm((f) => ({
+                      ...f,
+                      type: e.target.value as "KITCHEN_BOOST" | "EXTERNAL",
+                    }))
+                  }
+                >
+                  <option value="EXTERNAL">EXTERNAL</option>
+                  <option value="KITCHEN_BOOST">KITCHEN_BOOST</option>
+                </select>
+              </label>
+              <label>
+                <span className="muted">{t("admin.adStatus")}</span>
+                <select
+                  value={adForm.status}
+                  onChange={(e) =>
+                    setAdForm((f) => ({
+                      ...f,
+                      status: e.target.value as AdCampaign["status"],
+                    }))
+                  }
+                >
+                  {(["DRAFT", "ACTIVE", "PAUSED", "ENDED"] as const).map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span className="muted">PIN</span>
+                <input
+                  value={adForm.pinCode}
+                  maxLength={6}
+                  onChange={(e) =>
+                    setAdForm((f) => ({
+                      ...f,
+                      pinCode: e.target.value.replace(/\D/g, "").slice(0, 6),
+                    }))
+                  }
+                />
+              </label>
+              {adForm.type === "KITCHEN_BOOST" ? (
+                <label>
+                  <span className="muted">cookId</span>
+                  <input
+                    value={adForm.cookId}
+                    placeholder="uuid"
+                    onChange={(e) => setAdForm((f) => ({ ...f, cookId: e.target.value }))}
+                  />
+                </label>
+              ) : null}
+              <label style={{ flex: "1 1 12rem" }}>
+                <span className="muted">{t("admin.adTitleField")}</span>
+                <input
+                  value={adForm.title}
+                  onChange={(e) => setAdForm((f) => ({ ...f, title: e.target.value }))}
+                />
+              </label>
+              <label style={{ flex: "1 1 12rem" }}>
+                <span className="muted">CTA URL</span>
+                <input
+                  value={adForm.ctaUrl}
+                  onChange={(e) => setAdForm((f) => ({ ...f, ctaUrl: e.target.value }))}
+                />
+              </label>
+              <label>
+                <span className="muted">{t("admin.adPriority")}</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={adForm.priority}
+                  onChange={(e) => setAdForm((f) => ({ ...f, priority: e.target.value }))}
+                />
+              </label>
+            </div>
+            <label style={{ display: "block", marginTop: "0.5rem" }}>
+              <span className="muted">{t("admin.adBody")}</span>
+              <textarea
+                rows={2}
+                value={adForm.body}
+                onChange={(e) => setAdForm((f) => ({ ...f, body: e.target.value }))}
+              />
+            </label>
+            <button
+              className="btn mustard"
+              type="button"
+              style={{ marginTop: "0.75rem" }}
+              disabled={busy === "ad-save" || adForm.title.trim().length < 2}
+              onClick={() => void saveAdCampaign()}
+            >
+              {busy === "ad-save" ? "…" : t("admin.adSave")}
+            </button>
+          </div>
+
+          {adCampaigns.length === 0 ? (
+            <p className="muted">{t("admin.adsEmpty")}</p>
+          ) : (
+            adCampaigns.map((c) => (
+              <div key={c.id} className="card">
+                <div className="row">
+                  <div>
+                    <strong>
+                      #{c.id} · {c.title}
+                    </strong>
+                    <p className="muted" style={{ margin: "0.25rem 0 0" }}>
+                      {c.type} · {c.status} · pin {c.pinCode}
+                      {c.kitchenName ? ` · ${c.kitchenName}` : ""}
+                      {c.cookSlug ? ` (@${c.cookSlug})` : ""}
+                      {` · prio ${c.priority}`}
+                    </p>
+                  </div>
+                  <div className="actions">
+                    {c.status !== "ACTIVE" ? (
+                      <button
+                        type="button"
+                        className="btn sm mustard"
+                        disabled={busy === `ad-${c.id}` || !adsEnabled}
+                        onClick={() => void setAdStatus(c.id, "ACTIVE")}
+                      >
+                        {t("admin.adActivate")}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn sm secondary"
+                        disabled={busy === `ad-${c.id}`}
+                        onClick={() => void setAdStatus(c.id, "PAUSED")}
+                      >
+                        {t("admin.adPause")}
+                      </button>
+                    )}
+                    {c.status !== "ENDED" ? (
+                      <button
+                        type="button"
+                        className="btn sm secondary"
+                        disabled={busy === `ad-${c.id}`}
+                        onClick={() => void setAdStatus(c.id, "ENDED")}
+                      >
+                        {t("admin.adEnd")}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
         </section>
       ) : null}
 
@@ -1085,6 +1433,161 @@ function AdminInner() {
       {tab === "orders" ? (
         <section>
           <div className="card">
+            <div className="row" style={{ justifyContent: "space-between", gap: "0.5rem" }}>
+              <strong>{t("admin.attentionTitle")}</strong>
+              <button
+                className="btn secondary"
+                type="button"
+                disabled={busy === "attention"}
+                onClick={() => {
+                  setBusy("attention");
+                  void refreshAttention().finally(() => setBusy(null));
+                }}
+              >
+                {t("admin.attentionRefresh")}
+              </button>
+            </div>
+            <p className="muted" style={{ margin: "0.35rem 0 0.75rem" }}>
+              {t("admin.attentionBlurb")}
+            </p>
+            {attentionRows.length === 0 ? (
+              <p className="muted" style={{ margin: 0 }}>
+                {t("admin.attentionEmpty")}
+              </p>
+            ) : (
+              <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                {attentionRows.map((o) => (
+                  <li
+                    key={o.publicId}
+                    style={{
+                      marginBottom: "0.55rem",
+                      paddingBottom: "0.45rem",
+                      borderBottom: "1px solid color-mix(in srgb, currentColor 12%, transparent)",
+                    }}
+                  >
+                    <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap" }}>
+                      <strong>
+                        {o.publicId} · {o.qty}× {o.itemName}
+                      </strong>
+                      <span className="chip tone-warn">{o.reason}</span>
+                    </div>
+                    <p className="muted" style={{ margin: "0.25rem 0 0" }}>
+                      {o.serviceDate} · {o.kitchenName ?? o.cookSlug ?? "—"} · {o.customerMobile} ·{" "}
+                      {rupees(o.totalPaise)}
+                    </p>
+                    <button
+                      className="btn sm"
+                      type="button"
+                      style={{ marginTop: "0.35rem" }}
+                      onClick={() => void openSupport(o.publicId)}
+                    >
+                      {t("admin.openSupport")}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="card" style={{ marginTop: "0.75rem" }}>
+            <strong>{t("admin.searchTitle")}</strong>
+            <p className="muted" style={{ margin: "0.35rem 0 0.75rem" }}>
+              {t("admin.searchBlurb")}
+            </p>
+            <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap" }}>
+              <input
+                value={searchMobile}
+                placeholder={t("admin.searchMobile")}
+                onChange={(e) => setSearchMobile(e.target.value)}
+                style={{ flex: "1 1 9rem", minWidth: "8rem" }}
+              />
+              <input
+                value={searchCook}
+                placeholder={t("admin.searchCook")}
+                onChange={(e) => setSearchCook(e.target.value)}
+                style={{ flex: "1 1 9rem", minWidth: "8rem" }}
+              />
+              <input
+                type="date"
+                value={searchDate}
+                aria-label={t("admin.searchDate")}
+                onChange={(e) => setSearchDate(e.target.value)}
+                style={{ flex: "0 1 9rem" }}
+              />
+              <select
+                value={searchStatus}
+                aria-label={t("admin.searchStatus")}
+                onChange={(e) => setSearchStatus(e.target.value)}
+                style={{ flex: "0 1 10rem" }}
+              >
+                <option value="">{t("admin.searchAnyStatus")}</option>
+                {[
+                  "AWAITING_PAYMENT",
+                  "CONFIRMING_PAYMENT",
+                  "PAID",
+                  "COOKING",
+                  "PACKED",
+                  "DISPATCHED",
+                  "DELIVERED",
+                  "CANCEL_REQUESTED",
+                  "CANCELLED",
+                  "REFUNDED",
+                  "FAILED",
+                  "LOGISTICS_EXCEPTION",
+                ].map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+              <button
+                className="btn"
+                type="button"
+                disabled={busy === "order-search"}
+                onClick={() => void runOrderSearch()}
+              >
+                {busy === "order-search" ? "…" : t("admin.searchRun")}
+              </button>
+            </div>
+            {searchRows.length > 0 ? (
+              <ul style={{ listStyle: "none", margin: "0.75rem 0 0", padding: 0 }}>
+                {searchRows.map((o) => (
+                  <li
+                    key={o.publicId}
+                    style={{
+                      marginBottom: "0.55rem",
+                      paddingBottom: "0.45rem",
+                      borderBottom: "1px solid color-mix(in srgb, currentColor 12%, transparent)",
+                    }}
+                  >
+                    <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap" }}>
+                      <strong>
+                        {o.publicId} · {o.qty}× {o.itemName}
+                      </strong>
+                      <span className="chip">{o.status}</span>
+                      {o.settlementHold ? (
+                        <span className="chip tone-warn">{t("admin.onHold")}</span>
+                      ) : null}
+                    </div>
+                    <p className="muted" style={{ margin: "0.25rem 0 0" }}>
+                      {o.serviceDate} · {o.kitchenName ?? o.cookSlug ?? "—"} · {o.customerMobile} ·{" "}
+                      {rupees(o.totalPaise)}
+                    </p>
+                    <button
+                      className="btn sm"
+                      type="button"
+                      style={{ marginTop: "0.35rem" }}
+                      onClick={() => void openSupport(o.publicId)}
+                    >
+                      {t("admin.openSupport")}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+
+          <div className="card" style={{ marginTop: "0.75rem" }}>
             <strong>{t("admin.orderSupportTitle")}</strong>
             <p className="muted" style={{ margin: "0.35rem 0 0.75rem" }}>
               {t("admin.orderSupportBlurb")}

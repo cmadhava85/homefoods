@@ -20,8 +20,15 @@ describe("feature flags", () => {
     assert.equal(d.delivery_distance_limits_enabled, false);
     assert.equal(d.self_delivery_fee_enabled, false);
     assert.equal(d.child_pays_enabled, false);
+    assert.equal(d.ads_enabled, false);
     assert.equal(d.ordering_enabled, true);
     assert.equal(d.reviews_enabled, true);
+  });
+
+  it("ads_enabled stays off unless explicitly enabled", () => {
+    assert.equal(isFeatureEnabled({}, "ads_enabled"), false);
+    assert.equal(isFeatureEnabled(null, "ads_enabled"), false);
+    assert.equal(isFeatureEnabled({ ads_enabled: true }, "ads_enabled"), true);
   });
 
   it("respects explicit off and null maps", () => {

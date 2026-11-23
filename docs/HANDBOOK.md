@@ -199,7 +199,7 @@ Production boot refuses weak mocks/secrets (`assertProductionConfig`). See [INFR
 1. **Domain rule** → `packages/domain` + unit test (mutation-friendly).  
 2. **HTTP** → `apps/api/src/plugins/*` + `services/*`; use `sendCaughtError`.  
 3. **WhatsApp intent** → register in `wa/dispatch.ts` + handler under `wa/handlers/`.  
-4. **Feature flag** → `FEATURE_FLAG_DEFS` + Admin Features UI.  
+4. **Feature flag** → `FEATURE_FLAG_DEFS` + Admin Features UI (e.g. `ads_enabled` defaults OFF).  
 5. **Schema** → Drizzle migration under `packages/db/drizzle/`.  
 
 ---

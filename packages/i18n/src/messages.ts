@@ -301,6 +301,7 @@ export const messages = {
     "discover.reviews": "★ {avg} · {count} reviews",
     "discover.seeMenu": "See this week’s menu →",
     "discover.next": "Next {date}",
+    "discover.sponsored": "Sponsored",
 
     // Kitchen
     "kitchen.kicker": "Home-cooked food nearby",
@@ -787,6 +788,7 @@ export const messages = {
     "discover.reviews": "★ {avg} · {count} reviews",
     "discover.seeMenu": "இந்த week menu பாரு →",
     "discover.next": "Next {date}",
+    "discover.sponsored": "Sponsored",
 
     "kitchen.kicker": "Nearby home-cooked food",
     "kitchen.orderBy": "Order by",

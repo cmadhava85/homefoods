@@ -41,6 +41,10 @@ type CookSettingsCardsProps = {
   partnerActive: boolean;
   deliveryType: "SELF" | "PARTNER";
   partnerPlatformOn: boolean;
+  adsEnabled: boolean;
+  boostBusy: boolean;
+  boostCampaigns: Array<{ id: number; status: string; title: string; endsAt: string | null }>;
+  onRequestBoost: () => void;
 };
 
 export function CookSettingsCards({
@@ -82,6 +86,10 @@ export function CookSettingsCards({
   partnerActive,
   deliveryType,
   partnerPlatformOn,
+  adsEnabled,
+  boostBusy,
+  boostCampaigns,
+  onRequestBoost,
 }: CookSettingsCardsProps) {
   const { t } = useLocale();
 
@@ -321,6 +329,38 @@ export function CookSettingsCards({
           <p className="cook-pref-banner">{t("cook.partnerSelfMode")}</p>
         ) : null}
       </div>
+
+      {adsEnabled ? (
+        <div className="card cook-pref-card">
+          <div className="cook-pref-head">
+            <div>
+              <p className="cook-menu-kicker">{t("cook.boostKicker")}</p>
+              <strong>{t("cook.boostTitle")}</strong>
+            </div>
+          </div>
+          <p className="cook-pref-help">{t("cook.boostHelp")}</p>
+          <button
+            className="btn cook-setting-save cook-pref-save"
+            type="button"
+            disabled={boostBusy}
+            onClick={onRequestBoost}
+          >
+            {boostBusy ? t("cook.sending") : t("cook.boostRequest")}
+          </button>
+          {boostCampaigns.length > 0 ? (
+            <ul className="meta-list" style={{ marginTop: "0.75rem" }}>
+              {boostCampaigns.slice(0, 5).map((c) => (
+                <li key={c.id}>
+                  #{c.id} · {c.status}
+                  {c.endsAt ? ` · ends ${String(c.endsAt).slice(0, 10)}` : ""}
+                  {" — "}
+                  {c.title}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
     </>
   );
 }

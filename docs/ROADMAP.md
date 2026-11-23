@@ -47,11 +47,23 @@ Higher-margin small functions (≈20–100 plates). See [MVP3.md](./MVP3.md).
 | Catering RFQ (optional later) | Quote/request flow if fixed combos are not enough |
 | Radius / PostGIS discovery | When multi-pin or true distance filter is needed |
 
+## Ads & kitchen boosts (scaffolded, OFF)
+
+| Item | Notes | Status |
+|------|--------|--------|
+| `ads_enabled` flag | Kill switch — default **OFF** (Admin → Features) | **Done** |
+| `ad_campaigns` | KITCHEN_BOOST + EXTERNAL per pin; Discover sponsored badge + external strip | **Done** (gated) |
+| Cook boost request | Desk creates DRAFT; admin activates | **Done** (gated) |
+| Monetization | Flat / package pricing later — **not** a % of food | Later when pin volume is healthy |
+
+Turn on only after the lunch pin has steady supply. Until then leave `ads_enabled` off.
+
 ## Explicitly later / not near-term
 
 - Pantry shipping, steel tiffin loop  
 - Full-time rider fleet / city-wide dark-store ops  
 - Cook platform surcharge before pin has healthy supply  
+- Live ads / kitchen boosts (code ready; flag off)
 
 ## Suggested build order
 

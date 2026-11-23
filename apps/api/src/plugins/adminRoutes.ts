@@ -33,6 +33,42 @@ app.get("/admin/tickets", async (req, reply) => {
 });
 
 /**
+ * Browse / filter orders (mobile, cook, date, status). Register before :publicId.
+ */
+app.get("/admin/orders", async (req, reply) => {
+  try {
+    assertAuthed(req, ["ADMIN"]);
+    const q = z
+      .object({
+        mobile: z.string().optional(),
+        cookSlug: z.string().optional(),
+        serviceDate: z.string().optional(),
+        status: z.string().optional(),
+        limit: z.coerce.number().int().min(1).max(100).optional(),
+      })
+      .parse(req.query ?? {});
+    const { searchAdminOrders } = await import("../services/orderActivity.js");
+    return await searchAdminOrders(db, q);
+  } catch (e) {
+    return sendCaughtError(reply, e);
+  }
+});
+
+/** Ops queue: cancel asks, stuck payments, logistics exceptions. */
+app.get("/admin/orders-attention", async (req, reply) => {
+  try {
+    assertAuthed(req, ["ADMIN"]);
+    const q = z
+      .object({ limit: z.coerce.number().int().min(1).max(80).optional() })
+      .parse(req.query ?? {});
+    const { listAdminAttentionOrders } = await import("../services/orderActivity.js");
+    return await listAdminAttentionOrders(db, q.limit);
+  } catch (e) {
+    return sendCaughtError(reply, e);
+  }
+});
+
+/**
  * Ops support: order + payments + outbox + activity timeline.
  * `:key` accepts publicId (LM-…), checkoutId, traceId (trc_…), or gatewayTxnId.
  */
@@ -204,6 +240,69 @@ app.patch("/admin/features/:key", async (req, reply) => {
       actor: user?.mobile ?? "admin",
     });
     return { flags };
+  } catch (e) {
+    return sendCaughtError(reply, e);
+  }
+});
+
+app.get("/admin/ads", async (req, reply) => {
+  try {
+    assertAuthed(req, ["ADMIN"]);
+    const q = z
+      .object({
+        pin: z.string().regex(/^\d{6}$/).optional(),
+        limit: z.coerce.number().int().min(1).max(100).optional(),
+      })
+      .parse(req.query ?? {});
+    const { listAdCampaignsAdmin } = await import("../services/ads.js");
+    return await listAdCampaignsAdmin(db, { pinCode: q.pin, limit: q.limit });
+  } catch (e) {
+    return sendCaughtError(reply, e);
+  }
+});
+
+app.post("/admin/ads", async (req, reply) => {
+  try {
+    const user = assertAuthed(req, ["ADMIN"]);
+    const body = z
+      .object({
+        id: z.number().int().positive().optional(),
+        type: z.enum(["KITCHEN_BOOST", "EXTERNAL"]),
+        status: z.enum(["DRAFT", "ACTIVE", "PAUSED", "ENDED"]),
+        pinCode: z.string().regex(/^\d{6}$/),
+        cookId: z.string().uuid().nullable().optional(),
+        title: z.string().min(2).max(120),
+        body: z.string().max(500).nullable().optional(),
+        ctaUrl: z.string().max(500).nullable().optional(),
+        imageUrl: z.string().max(500).nullable().optional(),
+        priority: z.number().int().min(0).max(100).optional(),
+        startsAt: z.string().datetime().nullable().optional(),
+        endsAt: z.string().datetime().nullable().optional(),
+      })
+      .parse(req.body ?? {});
+    const { adminUpsertAdCampaign } = await import("../services/ads.js");
+    const campaign = await adminUpsertAdCampaign(db, {
+      ...body,
+      startsAt: body.startsAt ? new Date(body.startsAt) : body.startsAt === null ? null : undefined,
+      endsAt: body.endsAt ? new Date(body.endsAt) : body.endsAt === null ? null : undefined,
+      actor: user?.mobile ?? "admin",
+    });
+    return { campaign };
+  } catch (e) {
+    return sendCaughtError(reply, e);
+  }
+});
+
+app.patch("/admin/ads/:id/status", async (req, reply) => {
+  try {
+    assertAuthed(req, ["ADMIN"]);
+    const { id } = req.params as { id: string };
+    const body = z
+      .object({ status: z.enum(["DRAFT", "ACTIVE", "PAUSED", "ENDED"]) })
+      .parse(req.body ?? {});
+    const { adminSetAdCampaignStatus } = await import("../services/ads.js");
+    const campaign = await adminSetAdCampaignStatus(db, Number(id), body.status);
+    return { campaign };
   } catch (e) {
     return sendCaughtError(reply, e);
   }

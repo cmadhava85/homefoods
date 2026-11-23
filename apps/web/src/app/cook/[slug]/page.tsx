@@ -117,6 +117,15 @@ function CookDeskInner() {
   const [lateOrdersEnabled, setLateOrdersEnabled] = useState(true);
   const [latePlatformEnabled, setLatePlatformEnabled] = useState(true);
   const [togglingLate, setTogglingLate] = useState(false);
+  const [upcomingDays, setUpcomingDays] = useState<
+    Array<{
+      serviceDate: string;
+      dayLabel: string;
+      mealType: string;
+      totalPlates: number;
+      lines: Array<{ itemName: string; itemNameTa?: string | null; qty: number; orderCount: number }>;
+    }>
+  >([]);
   const [offerCookDelivery, setOfferCookDelivery] = useState(true);
   const [offerCustomerArrange, setOfferCustomerArrange] = useState(false);
   const [savingFulfillment, setSavingFulfillment] = useState(false);
@@ -125,6 +134,11 @@ function CookDeskInner() {
   >([]);
   const [templateName, setTemplateName] = useState("");
   const [postingTemplateId, setPostingTemplateId] = useState<number | null>(null);
+  const [adsEnabled, setAdsEnabled] = useState(false);
+  const [boostBusy, setBoostBusy] = useState(false);
+  const [boostCampaigns, setBoostCampaigns] = useState<
+    Array<{ id: number; status: string; title: string; endsAt: string | null }>
+  >([]);
 
   const [itemName, setItemName] = useState("");
   const [itemNameTa, setItemNameTa] = useState("");
@@ -251,6 +265,52 @@ function CookDeskInner() {
       .catch((e) => setErr(String(e)));
   }, [slug]);
 
+  const loadBoosts = useCallback(() => {
+    authFetch(`/cooks/${slug}/ads`)
+      .then(async (r) => {
+        const json = await r.json();
+        if (!r.ok) return;
+        setAdsEnabled(Boolean(json.adsEnabled));
+        setBoostCampaigns(
+          ((json.campaigns as Array<{
+            id: number;
+            status: string;
+            title: string;
+            endsAt: string | null;
+          }>) ?? []).map((c) => ({
+            id: c.id,
+            status: c.status,
+            title: c.title,
+            endsAt: c.endsAt,
+          })),
+        );
+      })
+      .catch(() => {
+        setAdsEnabled(false);
+        setBoostCampaigns([]);
+      });
+  }, [slug]);
+
+  async function requestBoost() {
+    setBoostBusy(true);
+    setErr(null);
+    setMsg(null);
+    try {
+      const res = await authFetch(`/cooks/${slug}/ads/boost`, {
+        method: "POST",
+        body: JSON.stringify({ days: 7 }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Could not request boost");
+      setMsg(json.note ?? t("cook.boostRequested"));
+      loadBoosts();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBoostBusy(false);
+    }
+  }
+
   const loadKitchenExtras = useCallback(() => {
     void Promise.all([
       authFetch(`/cooks/${slug}/meal-settings`).then(async (r) => {
@@ -367,6 +427,20 @@ function CookDeskInner() {
       return;
     }
     setErr(null);
+    void authFetch(`/cooks/${slug}/upcoming-orders?days=7`)
+      .then(async (r) => {
+        const json = (await r.json()) as {
+          days?: typeof upcomingDays;
+          error?: string;
+        };
+        if (!r.ok) {
+          setUpcomingDays([]);
+          return;
+        }
+        setUpcomingDays(Array.isArray(json.days) ? json.days : []);
+      })
+      .catch(() => setUpcomingDays([]));
+
     authFetch(`/cooks/${slug}/manifest?meal=${mealType}`)
       .then(async (r) => {
         const json = (await r.json()) as Manifest & {
@@ -413,6 +487,7 @@ function CookDeskInner() {
     loadCancelPending();
     loadSavedPlates();
     loadMenuTemplates();
+    loadBoosts();
   }, [
     slug,
     user,
@@ -422,6 +497,7 @@ function CookDeskInner() {
     loadCancelPending,
     loadSavedPlates,
     loadMenuTemplates,
+    loadBoosts,
     tab,
     targetDate,
     mealType,
@@ -1192,6 +1268,51 @@ function CookDeskInner() {
             </div>
           </section>
 
+          <section className="cook-upcoming" aria-label={t("cook.upcomingTitle")} style={{ marginBottom: "0.85rem" }}>
+            <h2 style={{ margin: "0 0 0.25rem", fontSize: "1.05rem" }}>{t("cook.upcomingTitle")}</h2>
+            <p className="muted" style={{ margin: "0 0 0.55rem", fontSize: "0.9rem" }}>
+              {t("cook.upcomingHelp")}
+            </p>
+            {upcomingDays.length === 0 ? (
+              <p className="muted" style={{ margin: 0 }}>
+                {t("cook.upcomingEmpty")}
+              </p>
+            ) : (
+              <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                {upcomingDays.map((day) => {
+                  const dateLabel = (() => {
+                    const parts = day.serviceDate.split("-");
+                    if (parts.length === 3) return `${parts[2]}/${parts[1]}`;
+                    return day.serviceDate;
+                  })();
+                  return (
+                    <li
+                      key={`${day.serviceDate}-${day.mealType}`}
+                      style={{
+                        marginBottom: "0.55rem",
+                        paddingBottom: "0.45rem",
+                        borderBottom: "1px solid color-mix(in srgb, currentColor 12%, transparent)",
+                      }}
+                    >
+                      <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap" }}>
+                        <strong>
+                          {day.dayLabel} {dateLabel}
+                        </strong>
+                        <span className="muted">
+                          {t("cook.upcomingPlates", { n: String(day.totalPlates) })}
+                          {day.mealType && day.mealType !== "LUNCH" ? ` · ${day.mealType}` : ""}
+                        </span>
+                      </div>
+                      <p style={{ margin: "0.3rem 0 0", fontSize: "0.95rem" }}>
+                        {day.lines.map((l) => `${l.qty}× ${l.itemName}`).join(" · ")}
+                      </p>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+
           {cancelPending.length > 0 ? (
             <section aria-label={t("cook.cancelRequests")} style={{ marginBottom: "0.85rem" }}>
               <h2 style={{ margin: "0 0 0.5rem" }}>{t("cook.cancelRequests")}</h2>
@@ -1653,6 +1774,10 @@ function CookDeskInner() {
         partnerActive={partnerActive}
         deliveryType={deliveryType}
         partnerPlatformOn={partnerPlatformOn}
+        adsEnabled={adsEnabled}
+        boostBusy={boostBusy}
+        boostCampaigns={boostCampaigns}
+        onRequestBoost={() => void requestBoost()}
       />
         </>
       ) : null}
