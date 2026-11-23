@@ -322,7 +322,9 @@ export function assertLateOrderTiming(
     deliveryStart.getTime() - closeHoursBeforeDelivery * 60 * 60 * 1000,
   );
   const windowLabel = formatDeliveryWindowLabel(deliveryWindow);
-  const closeLabel = `${String(lateClosesAt.getHours()).padStart(2, "0")}:${String(lateClosesAt.getMinutes()).padStart(2, "0")}`;
+  // Label in Asia/Kolkata — not process TZ (CI runners are UTC).
+  const closeParts = appZoneParts(lateClosesAt);
+  const closeLabel = `${String(closeParts.hour).padStart(2, "0")}:${String(closeParts.minute).padStart(2, "0")}`;
 
   if (now.getTime() >= lateClosesAt.getTime()) {
     throw new Error(
