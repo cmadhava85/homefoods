@@ -39,9 +39,11 @@ export function SiteFooter() {
               <li>
                 <Link href={browse}>{t("footer.discover")}</Link>
               </li>
-              <li>
-                <Link href="/wa">{t("footer.wa")}</Link>
-              </li>
+              {process.env.NODE_ENV !== "production" ? (
+                <li>
+                  <Link href="/wa">{t("footer.wa")}</Link>
+                </li>
+              ) : null}
               <li>
                 <Link href="/orders">{t("footer.myOrders")}</Link>
               </li>
@@ -67,6 +69,27 @@ export function SiteFooter() {
                   <Link href="/cook/onboard">{t("footer.enrollCook")}</Link>
                 </li>
               ) : null}
+            </ul>
+          </nav>
+
+          <nav className="site-footer-col" aria-label={t("footer.legal")}>
+            <h2 className="site-footer-heading">{t("footer.legal")}</h2>
+            <ul className="site-footer-links">
+              <li>
+                <Link href="/legal/terms">{t("footer.terms")}</Link>
+              </li>
+              <li>
+                <Link href="/legal/privacy">{t("footer.privacy")}</Link>
+              </li>
+              <li>
+                <Link href="/legal/refunds">{t("footer.refunds")}</Link>
+              </li>
+              <li>
+                <Link href="/legal/delivery">{t("footer.delivery")}</Link>
+              </li>
+              <li>
+                <Link href="/legal/contact">{t("footer.contact")}</Link>
+              </li>
             </ul>
           </nav>
         </div>

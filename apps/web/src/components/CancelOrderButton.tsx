@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useLocale } from "@/components/LocaleProvider";
 import { authFetch } from "@/lib/auth";
+import { flagOn, useFeatureFlags } from "@/lib/features";
 
 export function CancelOrderButton({
   publicId,
@@ -13,6 +14,7 @@ export function CancelOrderButton({
   label,
   className,
   onDone,
+  paid,
 }: {
   publicId?: string;
   checkoutId?: string;
@@ -21,16 +23,21 @@ export function CancelOrderButton({
   label?: string;
   className?: string;
   onDone?: (result: { mode?: string }) => void;
+  /** Already paid → an instant cancel refunds; let the customer pick credit or bank. */
+  paid?: boolean;
 }) {
   const router = useRouter();
   const { t } = useLocale();
   const [busy, setBusy] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [refundTo, setRefundTo] = useState<"SOURCE" | "CREDIT">("SOURCE");
+  const flags = useFeatureFlags();
 
   const week = Boolean(checkoutId);
   const asRequest = Boolean(cancelRequestable) && !cancellable;
   if (!cancellable && !asRequest) return null;
+  const offerRefundChoice = Boolean(paid) && !asRequest && flagOn(flags, "wallet_credit_enabled");
 
   const confirmCopy = week
     ? asRequest
@@ -49,7 +56,10 @@ export function CancelOrderButton({
       const path = week
         ? `/checkouts/${checkoutId}/cancel`
         : `/orders/${publicId}/cancel`;
-      const res = await authFetch(path, { method: "POST", body: "{}" });
+      const res = await authFetch(path, {
+        method: "POST",
+        body: JSON.stringify(offerRefundChoice ? { refundTo } : {}),
+      });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Cancel failed");
       setConfirmOpen(false);
@@ -89,6 +99,19 @@ export function CancelOrderButton({
           <p id="cancel-confirm-title" className="cancel-confirm-copy">
             {confirmCopy}
           </p>
+          {offerRefundChoice ? (
+            <fieldset className="cancel-refund-choice">
+              <legend>{t("cancel.refundTitle")}</legend>
+              <label>
+                <input type="radio" name={`refund-${checkoutId ?? publicId}`} checked={refundTo === "SOURCE"} onChange={() => setRefundTo("SOURCE")} />
+                {t("cancel.refundSource")}
+              </label>
+              <label>
+                <input type="radio" name={`refund-${checkoutId ?? publicId}`} checked={refundTo === "CREDIT"} onChange={() => setRefundTo("CREDIT")} />
+                {t("cancel.refundCredit")}
+              </label>
+            </fieldset>
+          ) : null}
           <div className="cancel-confirm-actions">
             <button
               className="btn secondary"

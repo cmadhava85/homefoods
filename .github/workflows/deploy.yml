@@ -55,8 +55,8 @@ jobs:
       MOCK_PAYMENTS: "true"
       MOCK_WHATSAPP: "true"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
           cache: npm
@@ -95,17 +95,28 @@ jobs:
       web_url: ${{ steps.web_url.outputs.url }}
 
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: google-github-actions/auth@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-      - uses: google-github-actions/setup-gcloud@v2
-
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
       - name: Auth Docker (Artifact Registry)
         run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+      - name: VPC egress flags
+        # Connector is off by default (terraform vpc_connector_enabled=false): nothing needs a private IP.
+        # --clear-vpc-connector detaches it from existing services/jobs so terraform can delete it.
+        run: |
+          if [ "${{ vars.VPC_CONNECTOR }}" = "true" ]; then
+            echo "VPC_FLAGS=--vpc-connector=localmeals-conn --vpc-egress=private-ranges-only" >> "$GITHUB_ENV"
+            echo "JOB_VPC_FLAGS=--vpc-connector=localmeals-conn --vpc-egress=private-ranges-only" >> "$GITHUB_ENV"
+          else
+            echo "VPC_FLAGS=--clear-vpc-connector" >> "$GITHUB_ENV"
+            # `run jobs deploy` has no --clear-vpc-connector; the migrate step clears it with `jobs update`.
+            echo "JOB_VPC_FLAGS=" >> "$GITHUB_ENV"
+          fi
 
       - name: Set image tag
         id: meta
@@ -147,26 +158,56 @@ jobs:
         run: |
           SOLO_SLUG="${{ vars.SOLO_KITCHEN_SLUG }}"
           HIDE_ONBOARD="${{ vars.HIDE_COOK_ONBOARD }}"
+          MENU_BASE=""
+          if [ "${{ vars.MENU_IMAGES_PUBLIC }}" = "true" ]; then MENU_BASE="https://storage.googleapis.com/${PROJECT_ID}-localmeals-menu-public"; fi
           docker build --platform=linux/amd64 -f apps/web/Dockerfile \
             --build-arg "NEXT_PUBLIC_API_URL=${{ steps.public_api.outputs.url }}" \
             --build-arg "NEXT_PUBLIC_SOLO_KITCHEN_SLUG=${SOLO_SLUG}" \
             --build-arg "NEXT_PUBLIC_HIDE_COOK_ONBOARD=${HIDE_ONBOARD}" \
+            --build-arg "NEXT_PUBLIC_MENU_IMAGES_BASE=${MENU_BASE}" \
             -t "${REGISTRY}/web:${{ steps.meta.outputs.tag }}" \
             -t "${REGISTRY}/web:latest" .
           docker push "${REGISTRY}/web:${{ steps.meta.outputs.tag }}"
           docker push "${REGISTRY}/web:latest"
 
+      - name: Run database migrations (Cloud Run Job)
+        # Runs before any new revision takes traffic. Migrations must be backward compatible
+        # with the revision still serving (expand → deploy → contract); see docs/RUNBOOK.md.
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          gcloud run jobs deploy localmeals-migrate \
+            --image="${REGISTRY}/api:${TAG}" \
+            --region="${REGION}" \
+            --service-account="${RUN_SA}" \
+            ${JOB_VPC_FLAGS} \
+            --set-cloudsql-instances="${SQL_INSTANCE}" \
+            --set-env-vars="NODE_ENV=production" \
+            --set-secrets="DATABASE_URL=DATABASE_URL:latest" \
+            --command=node \
+            --args=/app/packages/db/dist/migrate.js \
+            --max-retries=0 \
+            --task-timeout=600s \
+            --memory=512Mi \
+            --quiet
+          if [ -z "${JOB_VPC_FLAGS}" ]; then
+            gcloud run jobs update localmeals-migrate --region="${REGION}" --clear-vpc-connector --quiet
+          fi
+          gcloud run jobs execute localmeals-migrate --region="${REGION}" --wait --quiet
+
       - name: Deploy API
         run: |
           TAG="${{ steps.meta.outputs.tag }}"
-          MOCK_PAYMENTS="${{ vars.MOCK_PAYMENTS || 'true' }}"
-          MOCK_WHATSAPP="${{ vars.MOCK_WHATSAPP || 'true' }}"
-          MOCK_AUTH="${{ vars.MOCK_AUTH || 'true' }}"
+          MOCK_PAYMENTS="${{ vars.MOCK_PAYMENTS || 'false' }}"
+          MOCK_WHATSAPP="${{ vars.MOCK_WHATSAPP || 'false' }}"
+          MOCK_AUTH="${{ vars.MOCK_AUTH || 'false' }}"
           AUTH_ENFORCE="${{ vars.AUTH_ENFORCE || 'true' }}"
           WEB_ORIGIN="${{ secrets.WEB_ORIGIN }}"
 
           UPLOADS_BUCKET="${PROJECT_ID}-localmeals-uploads"
-          ENV_VARS="NODE_ENV=production,MOCK_PAYMENTS=${MOCK_PAYMENTS},MOCK_WHATSAPP=${MOCK_WHATSAPP},MOCK_AUTH=${MOCK_AUTH},AUTH_ENFORCE=${AUTH_ENFORCE},WHATSAPP_API_VERSION=v21.0,GCS_UPLOADS_BUCKET=${UPLOADS_BUCKET}"
+          # Public menu-photo bucket (terraform menu_images_public); opt-in via repo var once created.
+          MENU_BUCKET=""
+          if [ "${{ vars.MENU_IMAGES_PUBLIC }}" = "true" ]; then MENU_BUCKET="${PROJECT_ID}-localmeals-menu-public"; fi
+          ENV_VARS="NODE_ENV=production,MOCK_PAYMENTS=${MOCK_PAYMENTS},MOCK_WHATSAPP=${MOCK_WHATSAPP},MOCK_AUTH=${MOCK_AUTH},AUTH_ENFORCE=${AUTH_ENFORCE},WHATSAPP_API_VERSION=v21.0,GCS_UPLOADS_BUCKET=${UPLOADS_BUCKET},GCS_PUBLIC_MENU_BUCKET=${MENU_BUCKET}"
           if [ -n "$WEB_ORIGIN" ]; then
             ENV_VARS="${ENV_VARS},WEB_ORIGIN=${WEB_ORIGIN}"
           fi
@@ -174,15 +215,24 @@ jobs:
           if [ -n "$SOLO_SLUG" ]; then
             ENV_VARS="${ENV_VARS},SOLO_KITCHEN_SLUG=${SOLO_SLUG}"
           fi
+          # Scale-to-zero worker: only after `terraform apply` created the wake topic + scheduler.
+          if [ "${{ vars.WORKER_PUSH_MODE }}" = "true" ]; then
+            ENV_VARS="${ENV_VARS},OUTBOX_WAKE_TOPIC=projects/${PROJECT_ID}/topics/localmeals.outbox-wake"
+          fi
 
-          gcloud run deploy localmeals-api \
+          # Existing service: stage the revision without traffic; promoted after smoke passes.
+          NO_TRAFFIC=""
+          if gcloud run services describe localmeals-api --region="${REGION}" >/dev/null 2>&1; then
+            NO_TRAFFIC="--no-traffic --tag=candidate"
+          fi
+
+          gcloud run deploy localmeals-api ${NO_TRAFFIC} \
             --image="${REGISTRY}/api:${TAG}" \
             --region="${REGION}" \
             --platform=managed \
             --allow-unauthenticated \
             --service-account="${RUN_SA}" \
-            --vpc-connector=localmeals-conn \
-            --vpc-egress=private-ranges-only \
+            ${VPC_FLAGS} \
             --add-cloudsql-instances="${SQL_INSTANCE}" \
             --set-env-vars="${ENV_VARS}" \
             --set-secrets="DATABASE_URL=DATABASE_URL:latest,INTERNAL_JOB_TOKEN=INTERNAL_JOB_TOKEN:latest,AUTH_SECRET=AUTH_SECRET:latest,ADMIN_MOBILES=ADMIN_MOBILES:latest,RAZORPAY_KEY_ID=RAZORPAY_KEY_ID:latest,RAZORPAY_KEY_SECRET=RAZORPAY_KEY_SECRET:latest,RAZORPAY_WEBHOOK_SECRET=RAZORPAY_WEBHOOK_SECRET:latest,WHATSAPP_VERIFY_TOKEN=WHATSAPP_VERIFY_TOKEN:latest,WHATSAPP_ACCESS_TOKEN=WHATSAPP_ACCESS_TOKEN:latest,WHATSAPP_APP_SECRET=WHATSAPP_APP_SECRET:latest,WHATSAPP_PHONE_NUMBER_ID=WHATSAPP_PHONE_NUMBER_ID:latest" \
@@ -190,6 +240,20 @@ jobs:
             --cpu=1 \
             --max-instances=5 \
             --quiet
+
+      - name: Smoke test API candidate, then promote
+        run: |
+          CANDIDATE=$(gcloud run services describe localmeals-api --region="$REGION" --format=json \
+            | jq -r '.status.traffic[]? | select(.tag=="candidate") | .url' | head -n1)
+          if [ -n "$CANDIDATE" ]; then
+            SMOKE_API_URL="$CANDIDATE" node scripts/smoke-staging.mjs
+            gcloud run services update-traffic localmeals-api --region="$REGION" --to-latest --quiet
+            gcloud run services update-traffic localmeals-api --region="$REGION" --remove-tags=candidate --quiet
+          else
+            echo "First deploy — no previous revision; smoking the live URL."
+            SMOKE_API_URL=$(gcloud run services describe localmeals-api --region="$REGION" --format='value(status.url)') \
+              node scripts/smoke-staging.mjs
+          fi
 
       - name: Capture API URL
         id: api_url
@@ -202,23 +266,29 @@ jobs:
       - name: Deploy worker
         run: |
           TAG="${{ steps.meta.outputs.tag }}"
-          MOCK_WHATSAPP="${{ vars.MOCK_WHATSAPP || 'true' }}"
+          MOCK_WHATSAPP="${{ vars.MOCK_WHATSAPP || 'false' }}"
 
-          gcloud run deploy localmeals-worker \
+          if [ "${{ vars.WORKER_PUSH_MODE }}" = "true" ]; then
+            WORKER_SCALE="--min-instances=0 --cpu-throttling"
+            WORKER_MODE=push
+          else
+            WORKER_SCALE="--min-instances=1 --no-cpu-throttling"
+            WORKER_MODE=poll
+          fi
+
+          gcloud run deploy localmeals-worker ${WORKER_SCALE} \
             --image="${REGISTRY}/worker:${TAG}" \
             --region="${REGION}" \
             --platform=managed \
             --ingress=internal \
             --no-allow-unauthenticated \
             --service-account="${RUN_SA}" \
-            --vpc-connector=localmeals-conn \
-            --vpc-egress=private-ranges-only \
+            ${VPC_FLAGS} \
             --add-cloudsql-instances="${SQL_INSTANCE}" \
-            --set-env-vars="NODE_ENV=production,MOCK_WHATSAPP=${MOCK_WHATSAPP},WHATSAPP_API_VERSION=v21.0,ENABLE_AUTO_CUTOFF=false,ENABLE_AUTO_EOD=false,API_INTERNAL_URL=${API_URL}" \
+            --set-env-vars="NODE_ENV=production,MOCK_WHATSAPP=${MOCK_WHATSAPP},WHATSAPP_API_VERSION=v21.0,ENABLE_AUTO_CUTOFF=false,ENABLE_AUTO_EOD=false,API_INTERNAL_URL=${API_URL},WORKER_MODE=${WORKER_MODE}" \
             --set-secrets="DATABASE_URL=DATABASE_URL:latest,INTERNAL_JOB_TOKEN=INTERNAL_JOB_TOKEN:latest,WHATSAPP_VERIFY_TOKEN=WHATSAPP_VERIFY_TOKEN:latest,WHATSAPP_ACCESS_TOKEN=WHATSAPP_ACCESS_TOKEN:latest,WHATSAPP_APP_SECRET=WHATSAPP_APP_SECRET:latest,WHATSAPP_PHONE_NUMBER_ID=WHATSAPP_PHONE_NUMBER_ID:latest" \
             --memory=512Mi \
             --cpu=1 \
-            --min-instances=1 \
             --max-instances=3 \
             --quiet
 
@@ -230,7 +300,11 @@ jobs:
           if [ -n "$SOLO_SLUG" ]; then
             WEB_ENV="${WEB_ENV},SOLO_KITCHEN_SLUG=${SOLO_SLUG}"
           fi
-          gcloud run deploy localmeals-web \
+          NO_TRAFFIC=""
+          if gcloud run services describe localmeals-web --region="${REGION}" >/dev/null 2>&1; then
+            NO_TRAFFIC="--no-traffic --tag=candidate"
+          fi
+          gcloud run deploy localmeals-web ${NO_TRAFFIC} \
             --image="${REGISTRY}/web:${TAG}" \
             --region="${REGION}" \
             --platform=managed \
@@ -240,6 +314,24 @@ jobs:
             --cpu=1 \
             --max-instances=5 \
             --quiet
+
+      - name: Smoke test web candidate, then promote
+        run: |
+          CANDIDATE=$(gcloud run services describe localmeals-web --region="$REGION" --format=json \
+            | jq -r '.status.traffic[]? | select(.tag=="candidate") | .url' | head -n1)
+          TARGET="${CANDIDATE:-$(gcloud run services describe localmeals-web --region="$REGION" --format='value(status.url)')}"
+          for path in / /legal/terms /api-health-does-not-exist; do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' "${TARGET}${path}")
+            echo "GET ${path} → ${CODE}"
+            case "$path" in
+              /api-health-does-not-exist) [ "$CODE" = "404" ] || exit 1 ;;
+              *) [ "$CODE" = "200" ] || exit 1 ;;
+            esac
+          done
+          if [ -n "$CANDIDATE" ]; then
+            gcloud run services update-traffic localmeals-web --region="$REGION" --to-latest --quiet
+            gcloud run services update-traffic localmeals-web --region="$REGION" --remove-tags=candidate --quiet
+          fi
 
       - name: Capture web URL
         id: web_url
@@ -255,7 +347,7 @@ jobs:
             echo "- API: ${{ steps.api_url.outputs.url }}"
             echo "- Web: ${{ steps.web_url.outputs.url }}"
             echo "- Tag: \`${{ steps.meta.outputs.short }}\`"
-            echo "- Mocks: payments=\`${{ vars.MOCK_PAYMENTS || 'true' }}\` whatsapp=\`${{ vars.MOCK_WHATSAPP || 'true' }}\`"
+            echo "- Mocks: payments=\`${{ vars.MOCK_PAYMENTS || 'false' }}\` whatsapp=\`${{ vars.MOCK_WHATSAPP || 'false' }}\`"
             echo ""
             echo "Next: point Razorpay + Meta webhooks at the API URL, then set repo vars MOCK_*=false."
           } >> "$GITHUB_STEP_SUMMARY"

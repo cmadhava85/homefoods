@@ -18,3 +18,6 @@ apps/api/uploads
 **/.stryker-tmp/
 reports/zap/
 .gcloud-config/
+
+# DAST scan logs
+zap.out

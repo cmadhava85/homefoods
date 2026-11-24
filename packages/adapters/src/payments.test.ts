@@ -3,9 +3,14 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import {
   classifyPaymentWebhook,
+  gatewayIdempotencyHeader,
   getPaymentProvider,
   MockPaymentProvider,
+  PAYMENT_LINK_TTL_SEC,
+  paymentLinkExpireBy,
+  RAZORPAY_MIN_LINK_TTL_SEC,
   RazorpayPaymentProvider,
+  UNPAID_HOLD_TTL_SEC,
 } from "./payments.js";
 
 describe("MockPaymentProvider", () => {
@@ -39,6 +44,75 @@ describe("RazorpayPaymentProvider", () => {
     const sig = createHmac("sha256", "whsec_test").update(raw).digest("hex");
     assert.equal(pay.verifyWebhookSignature({ "x-razorpay-signature": sig }, raw), true);
     assert.equal(pay.verifyWebhookSignature({ "x-razorpay-signature": "deadbeef" }, raw), false);
+  });
+
+  it("sends expire_by beyond Razorpay's 15-minute minimum, even if a shorter one is requested", async () => {
+    process.env.RAZORPAY_KEY_ID = "rzp_test_k";
+    process.env.RAZORPAY_KEY_SECRET = "rzp_test_s";
+    const sent: Array<Record<string, unknown>> = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+      sent.push(JSON.parse(String(init?.body ?? "{}")));
+      return new Response(JSON.stringify({ id: "plink_t", short_url: "https://rzp.io/t" }), {
+        status: 200,
+      });
+    }) as typeof fetch;
+    try {
+      const pay = new RazorpayPaymentProvider();
+      const before = Math.floor(Date.now() / 1000);
+      await pay.createPayment({
+        orderPublicId: "LM-T1",
+        amountPaise: 1000,
+        customerMobile: "+919840111111",
+        idempotencyKey: "k-default",
+      });
+      await pay.createPayment({
+        orderPublicId: "LM-T2",
+        amountPaise: 1000,
+        customerMobile: "+919840111111",
+        idempotencyKey: "k-short",
+        expireAtUnix: before + 60,
+      });
+      for (const body of sent) {
+        const ttl = Number(body.expire_by) - before;
+        assert.ok(ttl > RAZORPAY_MIN_LINK_TTL_SEC, `expire_by only ${ttl}s ahead`);
+      }
+      assert.equal(Number(sent[0].expire_by) - before >= PAYMENT_LINK_TTL_SEC, true);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+});
+
+describe("RazorpayPaymentProvider refunds", () => {
+  it("always requests normal-speed refunds (no Instant Refund fee)", async () => {
+    process.env.RAZORPAY_KEY_ID = "rzp_test_k";
+    process.env.RAZORPAY_KEY_SECRET = "rzp_test_s";
+    const sent: Array<Record<string, unknown>> = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+      sent.push(JSON.parse(String(init?.body ?? "{}")));
+      return new Response(JSON.stringify({ id: "rfnd_t", payment_id: "pay_t", amount: 500 }), { status: 200 });
+    }) as typeof fetch;
+    try {
+      await new RazorpayPaymentProvider().refundPayment({ paymentId: "pay_t", amountPaise: 500 });
+      assert.equal(sent[0].speed, "normal");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+});
+
+describe("payment link / unpaid hold TTLs", () => {
+  it("hold outlives the link, and the link outlives Razorpay's minimum", () => {
+    assert.ok(PAYMENT_LINK_TTL_SEC > RAZORPAY_MIN_LINK_TTL_SEC);
+    assert.ok(UNPAID_HOLD_TTL_SEC > PAYMENT_LINK_TTL_SEC);
+    const now = 1_700_000_000_000;
+    assert.equal(paymentLinkExpireBy(now), now / 1000 + PAYMENT_LINK_TTL_SEC);
+    assert.equal(
+      paymentLinkExpireBy(now, now / 1000 + 5),
+      now / 1000 + RAZORPAY_MIN_LINK_TTL_SEC + 60,
+    );
   });
 });
 
@@ -163,5 +237,62 @@ describe("classifyPaymentWebhook", () => {
   it("ignores unknown events safely", () => {
     const e = classifyPaymentWebhook({ event: "invoice.paid", payload: {} });
     assert.equal(e.kind, "IGNORED");
+  });
+});
+
+describe("gatewayIdempotencyHeader", () => {
+  it("keeps short keys and hashes long ones without tail collisions", () => {
+    assert.equal(gatewayIdempotencyHeader("chk_abc"), "chk_abc");
+    const base = `std|+919840111111|4f4d9109-40da-4865-bac8-12454517ed32|LUNCH|2026-11-23|8400|10|NORMAL`;
+    const a = gatewayIdempotencyHeader(base);
+    const b = gatewayIdempotencyHeader(`${base}|addl|LM-1519B81EB3`);
+    assert.equal(a.length, 64);
+    assert.equal(b.length, 64);
+    assert.notEqual(a, b);
+  });
+});
+
+describe("Razorpay UPI QR (pickup)", () => {
+  it("creates a single-use fixed-amount QR and closes it on cancel", async () => {
+    process.env.RAZORPAY_KEY_ID = "rzp_test_k";
+    process.env.RAZORPAY_KEY_SECRET = "rzp_test_s";
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      calls.push({ url, body: JSON.parse(String(init?.body ?? "{}")) });
+      return new Response(JSON.stringify({ id: "qr_T1", image_url: "https://rzp.io/i/qr" }), { status: 200 });
+    }) as typeof fetch;
+    try {
+      const pay = new RazorpayPaymentProvider();
+      const before = Math.floor(Date.now() / 1000);
+      const qr = await pay.createUpiQr({ orderPublicId: "LM-Q1", amountPaise: 9000, customerMobile: "+919840111111", idempotencyKey: "k" });
+      assert.equal(qr.gatewayTxnId, "qr_T1");
+      assert.equal(qr.qrImageUrl, "https://rzp.io/i/qr");
+      assert.match(calls[0].url, /\/payments\/qr_codes$/);
+      assert.equal(calls[0].body.type, "upi_qr");
+      assert.equal(calls[0].body.usage, "single_use");
+      assert.equal(calls[0].body.fixed_amount, true);
+      assert.equal(calls[0].body.payment_amount, 9000);
+      assert.ok(Number(calls[0].body.close_by) - before > RAZORPAY_MIN_LINK_TTL_SEC);
+      await pay.cancelPaymentLink("qr_T1");
+      assert.match(calls[1].url, /\/payments\/qr_codes\/qr_T1\/close$/);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  it("classifies qr_code.credited as a capture keyed by the QR id", () => {
+    const e = classifyPaymentWebhook({
+      event: "qr_code.credited",
+      payload: {
+        qr_code: { entity: { id: "qr_T1", notes: { orderPublicId: "LM-Q1" } } },
+        payment: { entity: { id: "pay_Q", amount: 9000, notes: {} } },
+      },
+    });
+    assert.equal(e.kind, "PAYMENT_CAPTURED");
+    assert.equal(e.gatewayTxnId, "qr_T1");
+    assert.equal(e.paymentId, "pay_Q");
+    assert.equal(e.amountPaise, 9000);
+    assert.equal(e.orderPublicId, "LM-Q1");
   });
 });

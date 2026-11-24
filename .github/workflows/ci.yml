@@ -5,6 +5,10 @@ on:
     branches: [main, staging]
   pull_request:
 
+# Least-privilege token for every job in this workflow.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -31,9 +35,8 @@ jobs:
       MOCK_WHATSAPP: "true"
 
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
           cache: npm
@@ -54,20 +57,32 @@ jobs:
           test -f packages/domain/dist/index.js
           test -f packages/observability/dist/index.js
 
+      - name: Typecheck (packages + api + worker + web)
+        run: npm run typecheck
+
       - name: Migrate + seed
         run: |
           npm run db:migrate
           npm run db:seed
 
-      - name: Test (domain + adapters + api)
-        run: npm test
+      - name: Test + coverage gate (all workspaces; per-workspace thresholds)
+        run: npm run test:coverage
+
+      - name: Upload coverage (lcov)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: coverage-lcov
+          path: |
+            packages/*/coverage/lcov.info
+            apps/*/coverage/lcov.info
+          retention-days: 30
 
       - name: Security static check
         run: npm run security:check
 
-      - name: npm audit (high+)
+      - name: npm audit gate (high+, blocking; reviewed exceptions in security/audit-allowlist.json)
         run: npm run security:audit
-        continue-on-error: true
 
       - name: Typecheck web
         run: npm run build -w @localmeals/web

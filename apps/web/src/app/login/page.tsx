@@ -7,6 +7,7 @@ import { useAuth } from "@/components/AuthProvider";
 import { useLocale } from "@/components/LocaleProvider";
 import { loginPath, requestOtp, verifyOtp, type AuthRole } from "@/lib/auth";
 import { adminHref, isAdminUiPath } from "@/lib/adminPath";
+import { sameOriginPath } from "@/lib/safeRedirect";
 import { hideCookOnboard, kitchensBrowseHref } from "@/lib/soloKitchen";
 import { validateMobile, validateOtp } from "@localmeals/i18n";
 
@@ -21,8 +22,11 @@ function postLoginPath(
   user: { role: AuthRole; cookSlug?: string },
   next?: string,
 ) {
-  const n = next?.trim();
-  if (n?.startsWith("/") && !n.startsWith("//")) {
+  const n = sameOriginPath(
+    next,
+    typeof window === "undefined" ? "http://localhost" : window.location.origin,
+  );
+  if (n) {
     if (
       user.role === "CUSTOMER" &&
       !n.startsWith("/cook") &&

@@ -1,6 +1,7 @@
 {
   "name": "@localmeals/adapters",
   "version": "0.1.0",
+  "license": "UNLICENSED",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -15,7 +16,8 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "tsc -p tsconfig.json --watch",
-    "test": "node --import tsx --test src/**/*.test.ts"
+    "test": "node --import tsx --test src/**/*.test.ts",
+    "test:coverage": "node ../../scripts/node-test-coverage.mjs --lines 80 --branches 65 --functions 68"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",

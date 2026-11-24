@@ -1,5 +1,7 @@
 "use client";
 
+import { uploadSrc } from "@/lib/uploadUrl";
+
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { RequireAuth } from "@/components/RequireAuth";
@@ -39,11 +41,7 @@ const MEAL_KEYS: Record<MealType, MsgKey> = {
   DINNER: "meal.dinner",
 };
 
-function imgSrc(url: string | null | undefined) {
-  if (!url) return null;
-  if (url.startsWith("http")) return url;
-  return `${API_BASE}${url}`;
-}
+const imgSrc = uploadSrc;
 
 function CookDeskInner() {
   const { slug } = useParams<{ slug: string }>();

@@ -19,6 +19,7 @@ import {
   MEAL_PERIODS,
   resolveMealSchedule,
   serviceDateISO,
+  dayOfWeekForServiceDate,
 } from "./cutoff.js";
 
 describe("cutoff", () => {
@@ -316,5 +317,11 @@ describe("cutoff", () => {
       }),
       { startHour: 11, startMinute: 15, endHour: 12, endMinute: 45 },
     );
+  });
+
+  it("dayOfWeekForServiceDate is process-TZ independent", () => {
+    // 2024-01-01 was a Monday (1) in the civil calendar.
+    assert.equal(dayOfWeekForServiceDate("2024-01-01"), 1);
+    assert.equal(dayOfWeekForServiceDate("2024-01-07"), 0);
   });
 });

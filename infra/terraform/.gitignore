@@ -12,3 +12,8 @@ override.tf.json
 .terraformrc
 terraform.rc
 secrets/
+
+# Terraform plan files embed full state (including secrets) — never commit them.
+tfplan*
+*.tfplan
+*.plan

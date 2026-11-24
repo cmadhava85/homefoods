@@ -90,6 +90,26 @@ export const FEATURE_FLAG_DEFS = [
       "Sponsored kitchen cards + external pin promotions. Keep OFF until pin volume is healthy — does not take a % of food.",
     defaultEnabled: false,
   },
+  {
+    key: "wallet_credit_enabled",
+    label: "Wallet credit",
+    description:
+      "Customers can take refunds as LocalMeals credit (instant, no gateway fee) and credit is applied at checkout.",
+    defaultEnabled: true,
+  },
+  {
+    key: "convenience_fee_enabled",
+    label: "Convenience fee",
+    description:
+      "Pass the payment gateway cost (2.36% link / 1.17% UPI QR) to customers, shown before pay. Turn on after the policy text is reviewed.",
+    defaultEnabled: false,
+  },
+  {
+    key: "upi_qr_pickup_enabled",
+    label: "UPI QR for pickup",
+    description: "Pickup orders can pay by single-use Razorpay UPI QR (0.99%) instead of a payment link (2%).",
+    defaultEnabled: true,
+  },
 ] as const;
 
 export type FeatureFlagKey = (typeof FEATURE_FLAG_DEFS)[number]["key"];

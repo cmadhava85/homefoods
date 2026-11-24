@@ -164,21 +164,13 @@ For MVP-1 pin filter, PostGIS is optional (we store lat/lng as numbers).
 postgres://localmeals:PASSWORD@/localmeals?host=/cloudsql/PROJECT:REGION:localmeals-pg
 ```
 
-### A4. VPC connector (Cloud Run → Cloud SQL private)
+### A4. VPC connector — not needed (skip)
 
-```bash
-gcloud compute networks vpc-access connectors create localmeals-conn \
-  --region=$REGION \
-  --network=default \
-  --range=10.8.0.0/28 \
-  --min-instances=2 \
-  --max-instances=3
-```
+Cloud Run reaches Cloud SQL through the IAM-gated Cloud SQL connector (`--add-cloudsql-instances` → `/cloudsql` socket, public IP, TLS-only, no authorized networks), and no service calls a private IP, so **no Serverless VPC Access connector is created** (`vpc_connector_enabled = false`; saves ≥2 always-on connector VMs). Attach only:
 
-When deploying Cloud Run, attach:
-
-- `--vpc-connector=localmeals-conn`
 - `--add-cloudsql-instances=$PROJECT_ID:$REGION:localmeals-pg`
+
+Only if you later add private resources (Cloud SQL private IP, Memorystore, internal LB): prefer **Direct VPC egress** (`--network=default --subnet=default --vpc-egress=private-ranges-only`, no VM cost); the legacy connector remains available via `vpc_connector_enabled = true` + repo var `VPC_CONNECTOR=true`.
 
 ### A5. Secret Manager
 
@@ -229,7 +221,6 @@ gcloud run deploy localmeals-api \
   --region=$REGION \
   --platform=managed \
   --allow-unauthenticated \
-  --vpc-connector=localmeals-conn \
   --add-cloudsql-instances=$PROJECT_ID:$REGION:localmeals-pg \
   --set-secrets=DATABASE_URL=DATABASE_URL:latest,\
 WHATSAPP_VERIFY_TOKEN=WHATSAPP_VERIFY_TOKEN:latest,\
@@ -247,7 +238,6 @@ LUNCH_CUTOFF_HOUR=8,LUNCH_CUTOFF_MINUTE=0
 gcloud run deploy localmeals-worker \
   --image=${REGION}-docker.pkg.dev/$PROJECT_ID/localmeals/worker:manual \
   --region=$REGION \
-  --vpc-connector=localmeals-conn \
   --add-cloudsql-instances=$PROJECT_ID:$REGION:localmeals-pg \
   --no-allow-unauthenticated \
   --set-secrets=DATABASE_URL=DATABASE_URL:latest,... \
@@ -261,7 +251,7 @@ gcloud run deploy localmeals-web \
   --set-env-vars=NEXT_PUBLIC_API_URL=https://YOUR_API_URL
 ```
 
-Run migrations once (Cloud Run Job or local with Cloud SQL Auth Proxy):
+Migrations run automatically in the deploy pipeline (Cloud Run Job `localmeals-migrate`, see [RUNBOOK.md §4](./RUNBOOK.md)). For the very first bootstrap or a manual run, use the job or the Cloud SQL Auth Proxy:
 
 ```bash
 # Local proxy approach
@@ -525,6 +515,20 @@ Details: [OBSERVABILITY.md](./OBSERVABILITY.md). Set Terraform `alert_email` to 
 | `WEB_ORIGIN` | `http://localhost:3000` | `https://app.…` |
 | `LUNCH_CUTOFF_HOUR` | default for new cooks | `8` (cooks override in desk) |
 | `ENABLE_AUTO_CUTOFF` | `false` | prefer Scheduler, keep false on worker |
+| `ENABLE_AUTO_EXPIRE` | `true` (worker expires stale unpaid holds every 5 min) | `false` when Cloud Scheduler's `expire-unpaid` job exists (Terraform sets this) |
+| `OUTBOX_LEASE_SEC` | `120` | seconds a drain owns a claimed outbox row before another drain may retry it |
+| `ADMIN_MOBILES` | optional locally (dev fallback admin) | **required** on every `NODE_ENV=production` service, staging included (API refuses to boot without it) |
+| `TRUST_PROXY` | unset (off) | Fastify `trustProxy` (`true`, hop count, or CIDR list). Set only after verifying the Cloud Run hop chain; a wrong value lets clients spoof `X-Forwarded-For` |
+| `WORKER_MODE` | `poll` | Worker: `poll` (interval, min 1 instance) or `push` (scale to zero; `POST /drain` via Pub/Sub + 1-min Scheduler). See [COST.md](./COST.md) |
+| `OUTBOX_WAKE_TOPIC` | unset (no-op) | API: `projects/<p>/topics/localmeals.outbox-wake` — publish a debounced wake after responses that queued outbox rows |
+| `RATE_LIMIT_GLOBAL_STORE` | memory | `postgres` restores the shared-DB global limiter (route limits are always Postgres) |
+| `GCS_PUBLIC_MENU_BUCKET` | unset | API: write menu photos to this public-read bucket; legacy `/uploads/menu-*` redirect there |
+| `CONVENIENCE_FEE_BPS_LINK` / `_UPI_QR` | `236` / `117` | Gateway fee passed to customers when `convenience_fee_enabled` is on |
+| `NEXT_PUBLIC_MENU_IMAGES_BASE` | unset | Web build: `https://storage.googleapis.com/<menu bucket>` |
+| `NEXT_PUBLIC_SITE_URL` | `http://localhost:3000` | Web build: canonical origin (metadata, robots, sitemap) |
+| `NEXT_PUBLIC_LEGAL_*`, `NEXT_PUBLIC_SUPPORT_*`, `NEXT_PUBLIC_GRIEVANCE_OFFICER_*` | unset → "Draft" banner | Business identity on /legal pages (entity, address, support, grievance officer, effective date, GSTIN) |
+| `ENABLE_WA_SIMULATOR` | unset | Web: `true` re-enables the dev `/wa` simulator on a production build (404 otherwise) |
+| `WITH_OTEL` (Docker build arg) | `false` | Install OpenTelemetry SDKs into the API/worker image (needed only with `OTEL_ENABLED=true`) |
 
 ---
 

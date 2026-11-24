@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Readable } from "node:stream";
-import { gcsUploadsBucket, uploadsDir } from "./uploads.js";
+import { gcsPublicMenuBucket, gcsUploadsBucket, uploadsDir } from "./uploads.js";
 
 type ImageKind = "jpeg" | "png" | "webp" | "gif";
 
@@ -26,15 +26,28 @@ async function gcsClient() {
 }
 
 export async function writeGcsObject(name: string, buf: Buffer, contentType: string) {
-  const bucketName = gcsUploadsBucket();
+  // Menu photos are public and immutable (random names) → public bucket + long edge cache.
+  const publicMenu = name.startsWith("menu-") ? gcsPublicMenuBucket() : null;
+  const bucketName = publicMenu ?? gcsUploadsBucket();
   if (!bucketName) throw new Error("GCS_UPLOADS_BUCKET not set");
   const storage = await gcsClient();
   const file = storage.bucket(bucketName).file(name);
   await file.save(buf, {
     contentType,
     resumable: false,
-    metadata: { cacheControl: "public, max-age=86400" },
+    metadata: {
+      cacheControl: publicMenu ? "public, max-age=31536000, immutable" : "private, max-age=86400",
+    },
   });
+}
+
+/** True when a menu photo already lives in the public bucket (new uploads, or copied legacy ones). */
+export async function publicMenuObjectExists(name: string): Promise<boolean> {
+  const bucket = gcsPublicMenuBucket();
+  if (!bucket || !name.startsWith("menu-")) return false;
+  const storage = await gcsClient();
+  const [exists] = await storage.bucket(bucket).file(sanitizeUploadName(name)).exists();
+  return exists;
 }
 
 export async function openUpload(

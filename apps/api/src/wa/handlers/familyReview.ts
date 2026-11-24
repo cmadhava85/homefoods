@@ -5,9 +5,9 @@ import {
 import { publicErrorMessage } from "../../httpErrors.js";
 import type { WaSession } from "../session.js";
 
-/** Child Pays invite/accept + post-delivery review via WhatsApp. */
+/** Family-pay invite/accept + post-delivery review via WhatsApp. */
 export async function handleFamilyReview(s: WaSession): Promise<object> {
-  const { db, from, text, intent, wa, mobile, replies } = s;
+  const { db, from, text, intent, wa, mobile, replies, wt } = s;
   const { waLocale } = s;
 
   if (intent === "FAMILY") {
@@ -15,12 +15,7 @@ export async function handleFamilyReview(s: WaSession): Promise<object> {
     if (!payerMobile) {
       await wa.send({
         to: from,
-        body: [
-          "Child Pays — invite family to settle UPI for you.",
-          "Reply: Family 9876543210",
-          "They accept with: Accept family",
-          "Then on kitchen cart / Order … PAY 9876543210",
-        ].join("\n"),
+        body: wt("wa.familyHelp"),
         buttons: ["Orders", "Help", "Menu"],
       });
       return { ok: true, intent, needMobile: true, replies: replies() };
@@ -33,11 +28,7 @@ export async function handleFamilyReview(s: WaSession): Promise<object> {
       });
       await wa.send({
         to: from,
-        body: [
-          `Family invite sent to ${link.payerMobile}.`,
-          "They should reply: Accept family",
-          "When ACTIVE, use Who pays? on web or Order … PAY <their number>.",
-        ].join("\n"),
+        body: wt("wa.familyInviteSent", { mobile: link.payerMobile }),
         buttons: ["Orders", "Menu"],
       });
       return { ok: true, intent, linkId: link.id, replies: replies() };
@@ -61,7 +52,7 @@ export async function handleFamilyReview(s: WaSession): Promise<object> {
       if (!pending) {
         await wa.send({
           to: from,
-          body: "No pending family invite on this number. Ask them to send: Family <your mobile>",
+          body: wt("wa.familyNoPending"),
           buttons: ["Orders", "Help"],
         });
         return { ok: true, intent, empty: true, replies: replies() };
@@ -69,7 +60,7 @@ export async function handleFamilyReview(s: WaSession): Promise<object> {
       await acceptFamilyLink(db, { linkId: pending.id, payerMobile: mobile });
       await wa.send({
         to: from,
-        body: `You’re linked — you’ll get Pay when they bill you (Child Pays).`,
+        body: wt("wa.familyLinked"),
         buttons: ["Orders", "Menu"],
       });
       return { ok: true, intent, linkId: pending.id, replies: replies() };
@@ -88,11 +79,7 @@ export async function handleFamilyReview(s: WaSession): Promise<object> {
     if (!parsed.publicId || parsed.rating == null) {
       await wa.send({
         to: from,
-        body: [
-          "Rate a delivered order:",
-          "Review LM-1234 5 tasty thali",
-          "(1–5 stars; comment optional)",
-        ].join("\n"),
+        body: wt("wa.reviewHelp"),
         buttons: ["Orders", "Menu"],
       });
       return { ok: true, intent, needArgs: true, replies: replies() };
@@ -107,7 +94,10 @@ export async function handleFamilyReview(s: WaSession): Promise<object> {
       });
       await wa.send({
         to: from,
-        body: `Thanks — ★${review.rating} saved for ${review.orderPublicId}.`,
+        body: wt("wa.reviewThanks", {
+          rating: String(review.rating),
+          id: review.orderPublicId,
+        }),
         buttons: ["Orders", "Menu"],
       });
       return { ok: true, intent, reviewId: review.id, replies: replies() };
@@ -121,6 +111,10 @@ export async function handleFamilyReview(s: WaSession): Promise<object> {
     }
   }
 
-  await wa.send({ to: from, body: "Try Family, Accept family, or Review LM-… 5 …", buttons: ["Help"] });
+  await wa.send({
+    to: from,
+    body: wt("wa.familyOrReviewHelp"),
+    buttons: ["Help"],
+  });
   return { ok: true, intent, replies: replies() };
 }

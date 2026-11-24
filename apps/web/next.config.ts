@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import path from "node:path";
 
 const apiUpstream =
   process.env.API_INTERNAL_URL ??
@@ -7,6 +8,9 @@ const apiUpstream =
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  // Self-contained server bundle (only traced files) for a small Cloud Run image.
+  output: "standalone",
+  outputFileTracingRoot: path.join(__dirname, "../../"),
   transpilePackages: ["@localmeals/i18n", "@localmeals/domain"],
   async rewrites() {
     const api = apiUpstream.replace(/\/$/, "");

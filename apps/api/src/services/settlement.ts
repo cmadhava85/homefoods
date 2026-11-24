@@ -1,12 +1,24 @@
-import { eq } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { cookLedger, orders, settlements, type Db } from "@localmeals/db";
 import { LogEvent, createServiceLogger, newTraceId } from "@localmeals/observability";
 import { enqueueOutbox } from "./outboxEnqueue.js";
-import { serviceDateISO } from "@localmeals/domain";
+import { lineFoodNetPaise, serviceDateISO } from "@localmeals/domain";
 import { getPaymentProvider, getWhatsAppProvider, isMockPayments } from "@localmeals/adapters";
 
 const log = createServiceLogger("localmeals-api");
 
+function foodNetPaise(o: {
+  foodPaise: number;
+  qty: number;
+  foodDiscountPaise?: number | null;
+}) {
+  return lineFoodNetPaise(o);
+}
+
+/**
+ * Settle unsettled DELIVERED orders with serviceDate ≤ businessDate.
+ * Dinner/late deliveries after an earlier same-day run append onto the existing batch.
+ */
 export async function runEodSettlement(db: Db, businessDate = serviceDateISO()) {
   const { assertFeatureEnabled } = await import("./featureFlags.js");
   await assertFeatureEnabled(
@@ -15,33 +27,31 @@ export async function runEodSettlement(db: Db, businessDate = serviceDateISO()) 
     "EOD settlement is temporarily paused by admin",
   );
   const delivered = await db.query.orders.findMany({
-    where: (t, { eq: e, and: a, isNull: n }) =>
+    where: (t, { eq: e, and: a, isNull: n, lte: l }) =>
       a(
-        e(t.serviceDate, businessDate),
+        l(t.serviceDate, businessDate),
         e(t.status, "DELIVERED"),
         e(t.settlementHold, false),
         n(t.settlementId),
       ),
   });
 
-  const byCook = new Map<string, typeof delivered>();
+  const byCookDate = new Map<string, typeof delivered>();
   for (const o of delivered) {
-    const list = byCook.get(o.cookId) ?? [];
+    const key = `${o.cookId}|${o.serviceDate}`;
+    const list = byCookDate.get(key) ?? [];
     list.push(o);
-    byCook.set(o.cookId, list);
+    byCookDate.set(key, list);
   }
 
   const batches = [];
-  const skipped = [];
+  const skipped: Array<Record<string, unknown>> = [];
   const pay = getPaymentProvider();
 
-  for (const [cookId, cookOrders] of byCook) {
-    const existing = await db.query.settlements.findFirst({
-      where: (t, { eq: e, and: a }) =>
-        a(e(t.cookId, cookId), e(t.businessDate, businessDate)),
-    });
-    if (existing) {
-      skipped.push({ cookId, settlementId: existing.id, reason: "already_settled" });
+  for (const [key, cookOrders] of byCookDate) {
+    const [cookId, settleDate] = key.split("|");
+    if (cookOrders.reduce((n, o) => n + foodNetPaise(o), 0) <= 0) {
+      skipped.push({ cookId, businessDate: settleDate, reason: "zero_net" });
       continue;
     }
 
@@ -49,69 +59,101 @@ export async function runEodSettlement(db: Db, businessDate = serviceDateISO()) 
       where: (t, { eq: e }) => e(t.id, cookId),
     });
 
-    const grossPaise = cookOrders.reduce(
-      (n, o) => n + Math.max(0, o.foodPaise * o.qty - (o.foodDiscountPaise ?? 0)),
-      0,
-    );
-    const feesPaise = 0;
-
-    if (grossPaise <= 0) {
-      skipped.push({ cookId, reason: "zero_net" });
-      continue;
-    }
-
-    // Insert settlement first (PENDING), then apply clawbacks + transfer
-    const draft = await db.transaction(async (tx) => {
-      const [row] = await tx
+    // Concurrency-safe claim (Scheduler retry + worker + manual run can overlap):
+    // - one settlement row per cook/day (ON CONFLICT), locked for the claim;
+    // - orders are attached only if still unsettled, and totals grow by what *this* run claimed.
+    const claim = await db.transaction(async (tx) => {
+      await tx
         .insert(settlements)
         .values({
           cookId,
-          businessDate,
-          grossPaise,
-          feesPaise,
+          businessDate: settleDate,
+          grossPaise: 0,
+          feesPaise: 0,
           clawbackPaise: 0,
-          netPaise: grossPaise,
-          orderCount: cookOrders.length,
+          netPaise: 0,
+          orderCount: 0,
           gatewayBatchId: null,
           status: "PENDING_TRANSFER",
         })
+        .onConflictDoNothing();
+      await tx.execute(
+        sql`select id from settlements where cook_id = ${cookId} and business_date = ${settleDate} for update`,
+      );
+      const row = await tx.query.settlements.findFirst({
+        where: (t, { eq: e, and: a }) => a(e(t.cookId, cookId), e(t.businessDate, settleDate)),
+      });
+      if (!row) throw new Error("settlement row missing after upsert");
+
+      const claimedOrders = await tx
+        .update(orders)
+        .set({ settlementId: row.id, updatedAt: new Date() })
+        .where(
+          and(
+            inArray(
+              orders.id,
+              cookOrders.map((o) => o.id),
+            ),
+            isNull(orders.settlementId),
+            eq(orders.status, "DELIVERED"),
+            eq(orders.settlementHold, false),
+          ),
+        )
         .returning();
-
-      for (const o of cookOrders) {
-        await tx
-          .update(orders)
-          .set({ settlementId: row.id, updatedAt: new Date() })
-          .where(eq(orders.id, o.id));
+      if (!claimedOrders.length) {
+        if (row.orderCount === 0) await tx.delete(settlements).where(eq(settlements.id, row.id));
+        return null;
       }
-
-      return row;
+      const claimedGross = claimedOrders.reduce((n, o) => n + foodNetPaise(o), 0);
+      const [updated] = await tx
+        .update(settlements)
+        .set({
+          grossPaise: sql`${settlements.grossPaise} + ${claimedGross}`,
+          netPaise: sql`${settlements.netPaise} + ${claimedGross}`,
+          orderCount: sql`${settlements.orderCount} + ${claimedOrders.length}`,
+          status: "PENDING_TRANSFER",
+        })
+        .where(eq(settlements.id, row.id))
+        .returning();
+      return {
+        draft: updated,
+        previousGatewayBatchId: row.gatewayBatchId,
+        isAppend: row.orderCount > 0,
+        claimedOrders,
+        addGross: claimedGross,
+      };
     });
+    if (!claim) {
+      skipped.push({ cookId, businessDate: settleDate, reason: "already_claimed" });
+      continue;
+    }
+    const { draft, isAppend, addGross, previousGatewayBatchId } = claim;
+    const settledOrders = claim.claimedOrders;
 
     const { applyPendingClawbacksToSettlement } = await import("./cookClawback.js");
-    const clawbackPaise = await applyPendingClawbacksToSettlement(db, {
-      cookId,
-      settlementId: draft.id,
-      availablePaise: grossPaise,
-      businessDate,
-    });
-    const netPaise = Math.max(0, grossPaise - clawbackPaise);
+    const clawbackPaise = isAppend
+      ? 0
+      : await applyPendingClawbacksToSettlement(db, {
+          cookId,
+          settlementId: draft.id,
+          availablePaise: addGross,
+          businessDate: settleDate,
+        });
+    const transferPaise = Math.max(0, addGross - clawbackPaise);
 
-    let gatewayBatchId = `local_settle_${cookId.slice(0, 8)}_${businessDate}`;
+    let gatewayBatchId = `local_settle_${cookId.slice(0, 8)}_${settleDate}`;
     let status = "COMPLETED";
     let transferError: string | null = null;
 
     const accountId = cook?.payoutBeneficiaryRef?.trim();
-    if (netPaise <= 0) {
-      // Fully offset by prior refund recoveries — nothing to pay today
+    if (transferPaise <= 0) {
       status = "COMPLETED";
-      gatewayBatchId = `clawback_${cookId.slice(0, 8)}_${businessDate}`;
-      transferError = null;
+      gatewayBatchId = `${isAppend ? "append_" : ""}clawback_${cookId.slice(0, 8)}_${settleDate}`;
     } else if (!accountId) {
-      // Route blocked / not linked — ops pays via UPI (Admin → Payouts)
       const hasManual =
         Boolean(cook?.payoutUpiId?.trim()) || Boolean(cook?.payoutAccountNote?.trim());
       status = "AWAITING_MANUAL_PAY";
-      gatewayBatchId = `manual_${cookId.slice(0, 8)}_${businessDate}`;
+      gatewayBatchId = `${isAppend ? "manual_append_" : "manual_"}${cookId.slice(0, 8)}_${settleDate}`;
       transferError = hasManual
         ? "Pay cook via UPI/bank in Admin → Payouts (Route not linked)"
         : "Add cook UPI or bank note in Admin → Cooks, then Mark paid";
@@ -133,20 +175,22 @@ export async function runEodSettlement(db: Db, businessDate = serviceDateISO()) 
             traceId: settleTraceId,
             settlementId: draft.id,
             cookId,
-            amountPaise: netPaise,
-            businessDate,
+            amountPaise: transferPaise,
+            businessDate: settleDate,
+            append: isAppend,
           },
           "razorpay transfer",
         );
         const transfer = await pay.transferToLinkedAccount({
           accountId,
-          amountPaise: netPaise,
+          amountPaise: transferPaise,
           notes: {
             settlementId: String(draft.id),
-            businessDate,
+            businessDate: settleDate,
             cookId,
-            orderCount: String(cookOrders.length),
+            orderCount: String(settledOrders.length),
             clawbackPaise: String(clawbackPaise),
+            append: isAppend ? "1" : "0",
             traceId: settleTraceId.slice(0, 40),
           },
         });
@@ -159,7 +203,6 @@ export async function runEodSettlement(db: Db, businessDate = serviceDateISO()) 
         transferError = (e as Error).message;
         status = "TRANSFER_FAILED";
         if (!isMockPayments()) {
-          // Leave orders linked to settlement for retry/ops; don't throw whole EOD
           skipped.push({
             cookId,
             settlementId: draft.id,
@@ -170,13 +213,15 @@ export async function runEodSettlement(db: Db, businessDate = serviceDateISO()) 
       }
     }
 
+    // Totals were already incremented atomically in the claim; only fold in this run's clawback.
+    // On append keep the first transfer's id (later transfers carry notes.settlementId for webhooks).
     const [batch] = await db
       .update(settlements)
       .set({
-        gatewayBatchId,
+        gatewayBatchId: isAppend && previousGatewayBatchId ? previousGatewayBatchId : gatewayBatchId,
         status,
-        clawbackPaise,
-        netPaise,
+        clawbackPaise: sql`${settlements.clawbackPaise} + ${clawbackPaise}`,
+        netPaise: sql`greatest(0, ${settlements.netPaise} - ${clawbackPaise})`,
       })
       .where(eq(settlements.id, draft.id))
       .returning();
@@ -185,9 +230,9 @@ export async function runEodSettlement(db: Db, businessDate = serviceDateISO()) 
       cookId,
       settlementId: batch.id,
       entryType: status === "TRANSFER_FAILED" ? "EOD_TRANSFER_FAILED" : "EOD_CREDIT",
-      amountPaise: netPaise,
+      amountPaise: transferPaise,
       note: [
-        `Settlement ${businessDate} · ${cookOrders.length} orders`,
+        `${isAppend ? "Catch-up" : "Settlement"} ${settleDate} · ${settledOrders.length} orders`,
         clawbackPaise > 0 ? `clawback −₹${(clawbackPaise / 100).toFixed(0)}` : null,
         gatewayBatchId,
         transferError ? `err: ${transferError}` : null,
@@ -199,22 +244,23 @@ export async function runEodSettlement(db: Db, businessDate = serviceDateISO()) 
     await enqueueOutbox(db, "SettlementBatchCompleted", {
       settlementId: batch.id,
       cookId,
-      businessDate,
-      netPaise,
-      clawbackPaise,
-      orderCount: cookOrders.length,
+      businessDate: settleDate,
+      netPaise: batch.netPaise,
+      clawbackPaise: batch.clawbackPaise,
+      orderCount: settledOrders.length,
       gatewayBatchId,
       status,
       transferError,
+      append: isAppend,
     });
 
     const settleFields = {
       settlementId: batch.id,
       cookId,
-      businessDate,
-      netPaise,
-      clawbackPaise,
-      orderCount: cookOrders.length,
+      businessDate: settleDate,
+      netPaise: batch.netPaise,
+      clawbackPaise: batch.clawbackPaise,
+      orderCount: settledOrders.length,
       status,
       gatewayBatchId,
     };
@@ -237,7 +283,7 @@ export async function runEodSettlement(db: Db, businessDate = serviceDateISO()) 
           : "";
       await getWhatsAppProvider().send({
         to: cook.mobileNumber,
-        body: `EOD settlement ${businessDate}: ${cookOrders.length} orders · net ₹${(netPaise / 100).toFixed(2)}${clawLine} · ref ${gatewayBatchId}`,
+        body: `${isAppend ? "Catch-up" : "EOD"} settlement ${settleDate}: ${settledOrders.length} orders · ₹${(transferPaise / 100).toFixed(2)}${clawLine} · ref ${gatewayBatchId}`,
       });
     }
 

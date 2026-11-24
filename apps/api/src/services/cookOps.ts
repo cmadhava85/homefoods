@@ -36,6 +36,7 @@ import {
   WEEKDAY_SHORT,
   type DeliveryWindow,
   type MealPeriod,
+  lineFoodNetPaise,
 } from "@localmeals/domain";
 import { buildMultiStopMapsUrl, getWhatsAppProvider } from "@localmeals/adapters";
 import { enqueueOutbox } from "./outboxEnqueue.js";
@@ -472,6 +473,7 @@ export async function runMealCutoff(
         ),
     });
 
+    const newlyLockedCount = paidOrders.filter((o) => o.status === "PAID").length;
     for (const o of paidOrders) {
       if (o.status === "PAID") {
         await transitionOrder(db, o.id, "COOKING");
@@ -518,6 +520,20 @@ export async function runMealCutoff(
           .set({ routeMapsUrl, updatedAt: new Date() })
           .where(eq(orders.id, o.id));
       }
+    }
+
+    // Cut-off ticks every 15 min: only message the cook on the first lock, when new paid orders were
+    // just locked, or when the cook/admin forces it — never re-send the same manifest each tick.
+    if (existingLock && newlyLockedCount === 0 && !opts.force) {
+      results.push({
+        cookId: cook.id,
+        slugHandle: cook.slugHandle,
+        mealType,
+        headcount,
+        skipped: true,
+        reason: "already locked",
+      });
+      continue;
     }
 
     const wa = getWhatsAppProvider();
@@ -605,7 +621,7 @@ function foodLinePaise(o: {
   qty: number;
   foodDiscountPaise?: number | null;
 }) {
-  return Math.max(0, o.foodPaise * o.qty - (o.foodDiscountPaise ?? 0));
+  return lineFoodNetPaise(o);
 }
 
 function payoutLabel(settlement: {
@@ -1712,7 +1728,8 @@ export async function saveCookMenuTemplate(
   input: {
     name: string;
     mealType?: MealPeriod;
-    items?: CookMenuTemplateItem[];
+    /** `isVeg` may be omitted — normalizeTemplateItems defaults it to veg. */
+    items?: Array<Omit<CookMenuTemplateItem, "isVeg"> & { isVeg?: boolean }>;
     /** Snapshot current day menu into the template. */
     fromServiceDate?: string | null;
   },

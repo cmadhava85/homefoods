@@ -15,7 +15,7 @@ export type WaCheckoutPayload = {
   items?: Array<{ n: number; menuItemId: number; name: string; pricePaise: number }>;
   itemIndex?: number;
   forceLate?: boolean;
-  fulfillmentMode?: "DELIVERY" | "PICKUP";
+  fulfillmentMode?: "DELIVERY" | "PICKUP" | "CUSTOMER_ARRANGE";
   payerMobile?: string | null;
   /** Cook WA menu photo attach after Add. */
   menuItemId?: number;

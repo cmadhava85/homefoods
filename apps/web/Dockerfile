@@ -23,6 +23,9 @@ ARG NEXT_PUBLIC_SOLO_KITCHEN_SLUG=
 ENV NEXT_PUBLIC_SOLO_KITCHEN_SLUG=$NEXT_PUBLIC_SOLO_KITCHEN_SLUG
 ARG NEXT_PUBLIC_HIDE_COOK_ONBOARD=
 ENV NEXT_PUBLIC_HIDE_COOK_ONBOARD=$NEXT_PUBLIC_HIDE_COOK_ONBOARD
+# Public GCS base for menu photos (empty = serve through the API).
+ARG NEXT_PUBLIC_MENU_IMAGES_BASE=
+ENV NEXT_PUBLIC_MENU_IMAGES_BASE=$NEXT_PUBLIC_MENU_IMAGES_BASE
 RUN npm run build -w @localmeals/domain \
  && npm run build -w @localmeals/i18n \
  && npm run build -w @localmeals/web
@@ -30,7 +33,12 @@ RUN npm run build -w @localmeals/domain \
 FROM node:22-alpine
 WORKDIR /app
 ENV NODE_ENV=production
-COPY --from=build /app /app
+ENV HOSTNAME=0.0.0.0
+# standalone = server.js + only the node_modules files Next traced as needed at runtime.
+COPY --from=build --chown=node:node /app/apps/web/.next/standalone ./
+COPY --from=build --chown=node:node /app/apps/web/.next/static ./apps/web/.next/static
+USER node
 WORKDIR /app/apps/web
 EXPOSE 3000
-CMD ["npm", "run", "start"]
+# Next standalone reads PORT; exec form so SIGTERM from Cloud Run reaches node directly.
+CMD ["node", "server.js"]

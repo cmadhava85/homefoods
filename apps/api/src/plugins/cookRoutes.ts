@@ -1,5 +1,4 @@
 import type { FastifyInstance } from "fastify";
-import { z } from "zod";
 import type { Db } from "@localmeals/db";
 import type { AuthHelpers } from "../http/authContext.js";
 import { sendCaughtError } from "../httpErrors.js";
@@ -45,8 +44,40 @@ import {
 } from "../services/reviews.js";
 import { saveMenuImage } from "../uploads.js";
 import { REVIEW_PUBLIC_MIN_COUNT } from "@localmeals/domain";
+import { MealType } from "../openapi/shared.js";
+import {
+  AdsBoostBody,
+  CapacityTrimBody,
+  DateQuery,
+  FulfillmentBody,
+  IntakePauseBody,
+  KitchenBatchBody,
+  LateOrdersBody,
+  ManifestQuery,
+  MealQueryOnly,
+  MealSettingsParams,
+  MealSettingsPatchBody,
+  MenuItemCreateBody,
+  MenuItemPatchBody,
+  MenuQuery,
+  MenuTemplateCreateBody,
+  OrderParams,
+  PickupBody,
+  PostPlatesBody,
+  ReviewReplyBody,
+  ReviewReplyParams,
+  SavedPlateCreateBody,
+  SlugIdParams,
+  SlugParams,
+  UpcomingOrdersQuery,
+  WeekDiscountBody,
+} from "./cookRoutes.contract.js";
 
-const mealTypeSchema = z.enum(["BREAKFAST", "LUNCH", "DINNER"]);
+/** Case-insensitive meal query; unknown values fall back to LUNCH (lenient desk links). */
+function mealFromQuery(raw: string | undefined) {
+  const meal = MealType.safeParse((raw ?? "LUNCH").toUpperCase());
+  return meal.success ? meal.data : "LUNCH";
+}
 
 export async function cookRoutes(
   app: FastifyInstance,
@@ -56,7 +87,7 @@ export async function cookRoutes(
   const { db, auth } = opts;
   const { currentUser, assertAuthed, assertKitchenStaff, assertOrderKitchenStaff, bindCustomerMobile } = auth;
 app.get("/cooks/:slug/reviews", async (req, reply) => {
-  const { slug } = req.params as { slug: string };
+  const { slug } = SlugParams.parse(req.params);
   try {
     assertKitchenStaff(req, slug);
     const data = await listCookReviewsForDesk(db, slug);
@@ -71,8 +102,8 @@ app.get("/cooks/:slug/reviews", async (req, reply) => {
 });
 
 app.post("/cooks/:slug/reviews/:reviewId/reply", async (req, reply) => {
-  const { slug, reviewId } = req.params as { slug: string; reviewId: string };
-  const body = z.object({ reply: z.string().min(1).max(500) }).parse(req.body ?? {});
+  const { slug, reviewId } = ReviewReplyParams.parse(req.params);
+  const body = ReviewReplyBody.parse(req.body ?? {});
   try {
     const user = assertKitchenStaff(req, slug);
     const cook = await db.query.cookProfiles.findFirst({
@@ -92,22 +123,19 @@ app.post("/cooks/:slug/reviews/:reviewId/reply", async (req, reply) => {
 });
 
 app.get("/cooks/:slug/manifest", async (req, reply) => {
-  const { slug } = req.params as { slug: string };
-  const q = req.query as { date?: string; meal?: string };
-  const meal = mealTypeSchema.safeParse((q.meal ?? "LUNCH").toUpperCase());
+  const { slug } = SlugParams.parse(req.params);
+  const q = ManifestQuery.parse(req.query ?? {});
   try {
     assertKitchenStaff(req, slug);
-    return await getManifest(db, slug, q.date, meal.success ? meal.data : "LUNCH");
+    return await getManifest(db, slug, q.date, mealFromQuery(q.meal));
   } catch (e) {
     return sendCaughtError(reply, e);
   }
 });
 
 app.get("/cooks/:slug/upcoming-orders", async (req, reply) => {
-  const { slug } = req.params as { slug: string };
-  const q = z
-    .object({ days: z.coerce.number().int().min(1).max(14).optional() })
-    .safeParse(req.query ?? {});
+  const { slug } = SlugParams.parse(req.params);
+  const q = UpcomingOrdersQuery.safeParse(req.query ?? {});
   try {
     assertKitchenStaff(req, slug);
     return await listCookUpcomingOrders(db, slug, {
@@ -119,7 +147,7 @@ app.get("/cooks/:slug/upcoming-orders", async (req, reply) => {
 });
 
 app.get("/cooks/:slug/ads", async (req, reply) => {
-  const { slug } = req.params as { slug: string };
+  const { slug } = SlugParams.parse(req.params);
   try {
     assertKitchenStaff(req, slug);
     const { listCookBoostCampaigns } = await import("../services/ads.js");
@@ -130,13 +158,8 @@ app.get("/cooks/:slug/ads", async (req, reply) => {
 });
 
 app.post("/cooks/:slug/ads/boost", async (req, reply) => {
-  const { slug } = req.params as { slug: string };
-  const body = z
-    .object({
-      title: z.string().min(2).max(120).optional(),
-      days: z.number().int().min(1).max(30).optional(),
-    })
-    .parse(req.body ?? {});
+  const { slug } = SlugParams.parse(req.params);
+  const body = AdsBoostBody.parse(req.body ?? {});
   try {
     assertKitchenStaff(req, slug);
     const { requestCookKitchenBoost } = await import("../services/ads.js");
@@ -147,7 +170,7 @@ app.post("/cooks/:slug/ads/boost", async (req, reply) => {
 });
 
 app.get("/cooks/:slug/whatsapp-feed", async (req, reply) => {
-  const { slug } = req.params as { slug: string };
+  const { slug } = SlugParams.parse(req.params);
   try {
     assertKitchenStaff(req, slug);
     return await getCookWhatsAppFeed(db, slug);
@@ -157,7 +180,7 @@ app.get("/cooks/:slug/whatsapp-feed", async (req, reply) => {
 });
 
 app.get("/cooks/:slug/meal-settings", async (req, reply) => {
-  const { slug } = req.params as { slug: string };
+  const { slug } = SlugParams.parse(req.params);
   try {
     assertKitchenStaff(req, slug);
     return await getCookMealSettings(db, slug);
@@ -167,23 +190,9 @@ app.get("/cooks/:slug/meal-settings", async (req, reply) => {
 });
 
 app.patch("/cooks/:slug/meal-settings/:mealType", async (req, reply) => {
-  const { slug, mealType: raw } = req.params as { slug: string; mealType: string };
-  const mealType = mealTypeSchema.parse(raw.toUpperCase());
-  const body = z
-    .object({
-      enabled: z.boolean().optional(),
-      cutoffHour: z.number().int().min(0).max(23).optional(),
-      cutoffMinute: z.number().int().min(0).max(59).optional(),
-      deliveryWindow: z
-        .object({
-          startHour: z.number().int().min(0).max(23),
-          startMinute: z.number().int().min(0).max(59).default(0),
-          endHour: z.number().int().min(0).max(23),
-          endMinute: z.number().int().min(0).max(59).default(0),
-        })
-        .optional(),
-    })
-    .parse(req.body ?? {});
+  const { slug, mealType: raw } = MealSettingsParams.parse(req.params);
+  const mealType = MealType.parse(raw.toUpperCase());
+  const body = MealSettingsPatchBody.parse(req.body ?? {});
   try {
     assertKitchenStaff(req, slug);
     return await updateCookMealSettings(db, slug, mealType, body);
@@ -193,13 +202,8 @@ app.patch("/cooks/:slug/meal-settings/:mealType", async (req, reply) => {
 });
 
 app.patch("/cooks/:slug/week-discount", async (req, reply) => {
-  const { slug } = req.params as { slug: string };
-  const body = z
-    .object({
-      percent: z.number().int().min(0).max(15),
-      minDays: z.number().int().min(2).max(14).default(3),
-    })
-    .parse(req.body ?? {});
+  const { slug } = SlugParams.parse(req.params);
+  const body = WeekDiscountBody.parse(req.body ?? {});
   try {
     assertKitchenStaff(req, slug);
     return await setCookWeekDiscount(db, slug, body);
@@ -209,16 +213,8 @@ app.patch("/cooks/:slug/week-discount", async (req, reply) => {
 });
 
 app.patch("/cooks/:slug/pickup", async (req, reply) => {
-  const { slug } = req.params as { slug: string };
-  const body = z
-    .object({
-      pickupEnabled: z.boolean().optional(),
-      pickupLandmark: z.string().max(300).nullable().optional(),
-    })
-    .refine((b) => b.pickupEnabled !== undefined || b.pickupLandmark !== undefined, {
-      message: "pickupEnabled or pickupLandmark required",
-    })
-    .parse(req.body ?? {});
+  const { slug } = SlugParams.parse(req.params);
+  const body = PickupBody.parse(req.body ?? {});
   try {
     assertKitchenStaff(req, slug);
     return await setCookPickupSettings(db, slug, body);
@@ -228,8 +224,8 @@ app.patch("/cooks/:slug/pickup", async (req, reply) => {
 });
 
 app.patch("/cooks/:slug/intake-pause", async (req, reply) => {
-  const { slug } = req.params as { slug: string };
-  const body = z.object({ paused: z.boolean() }).parse(req.body ?? {});
+  const { slug } = SlugParams.parse(req.params);
+  const body = IntakePauseBody.parse(req.body ?? {});
   try {
     assertKitchenStaff(req, slug);
     return await setCookIntakePause(db, slug, body);
@@ -239,8 +235,8 @@ app.patch("/cooks/:slug/intake-pause", async (req, reply) => {
 });
 
 app.patch("/cooks/:slug/late-orders", async (req, reply) => {
-  const { slug } = req.params as { slug: string };
-  const body = z.object({ enabled: z.boolean() }).parse(req.body ?? {});
+  const { slug } = SlugParams.parse(req.params);
+  const body = LateOrdersBody.parse(req.body ?? {});
   try {
     assertKitchenStaff(req, slug);
     return await setCookLateOrders(db, slug, body);
@@ -250,7 +246,7 @@ app.patch("/cooks/:slug/late-orders", async (req, reply) => {
 });
 
 app.get("/cooks/:slug/capacity-today", async (req, reply) => {
-  const { slug } = req.params as { slug: string };
+  const { slug } = SlugParams.parse(req.params);
   try {
     assertKitchenStaff(req, slug);
     return await getCookCapacityToday(db, slug);
@@ -260,10 +256,8 @@ app.get("/cooks/:slug/capacity-today", async (req, reply) => {
 });
 
 app.patch("/cooks/:slug/capacity-today", async (req, reply) => {
-  const { slug } = req.params as { slug: string };
-  const body = z
-    .object({ remaining: z.number().int().min(0).max(500) })
-    .parse(req.body ?? {});
+  const { slug } = SlugParams.parse(req.params);
+  const body = CapacityTrimBody.parse(req.body ?? {});
   try {
     assertKitchenStaff(req, slug);
     return await trimCookRemainingPlates(db, slug, body.remaining);
@@ -273,23 +267,8 @@ app.patch("/cooks/:slug/capacity-today", async (req, reply) => {
 });
 
 app.patch("/cooks/:slug/fulfillment", async (req, reply) => {
-  const { slug } = req.params as { slug: string };
-  const body = z
-    .object({
-      cookDelivery: z.boolean().optional(),
-      customerArrange: z.boolean().optional(),
-      pickupEnabled: z.boolean().optional(),
-      pickupLandmark: z.string().max(300).nullable().optional(),
-    })
-    .refine(
-      (b) =>
-        b.cookDelivery !== undefined ||
-        b.customerArrange !== undefined ||
-        b.pickupEnabled !== undefined ||
-        b.pickupLandmark !== undefined,
-      { message: "At least one fulfillment field required" },
-    )
-    .parse(req.body ?? {});
+  const { slug } = SlugParams.parse(req.params);
+  const body = FulfillmentBody.parse(req.body ?? {});
   try {
     assertKitchenStaff(req, slug);
     return await setCookFulfillmentOffers(db, slug, body);
@@ -299,15 +278,14 @@ app.patch("/cooks/:slug/fulfillment", async (req, reply) => {
 });
 
 app.get("/cooks/:slug/menu", async (req, reply) => {
-  const { slug } = req.params as { slug: string };
-  const q = req.query as { date?: string; view?: "day" | "week"; meal?: string };
-  const meal = mealTypeSchema.safeParse((q.meal ?? "LUNCH").toUpperCase());
+  const { slug } = SlugParams.parse(req.params);
+  const q = MenuQuery.parse(req.query ?? {});
   try {
     assertKitchenStaff(req, slug);
     return await listCookDailyMenu(db, slug, {
       serviceDate: q.date,
       view: q.view === "week" ? "week" : "day",
-      mealType: meal.success ? meal.data : "LUNCH",
+      mealType: mealFromQuery(q.meal),
     });
   } catch (e) {
     return sendCaughtError(reply, e);
@@ -315,28 +293,8 @@ app.get("/cooks/:slug/menu", async (req, reply) => {
 });
 
 app.post("/cooks/:slug/menu", async (req, reply) => {
-  const { slug } = req.params as { slug: string };
-  const body = z
-    .object({
-      itemName: z.string().min(1).max(100),
-      itemNameTa: z.string().max(100).nullable().optional(),
-      priceRupees: z.number().positive().optional(),
-      pricePaise: z.number().int().positive().optional(),
-      isVeg: z.boolean().optional(),
-      allergens: z.array(z.string()).optional(),
-      totalStockAvailable: z.number().int().optional(),
-      /** Calendar day; omit for today. Pass null with dayOfWeek for weekly. */
-      serviceDate: z.string().nullable().optional(),
-      dayOfWeek: z.number().int().min(0).max(6).nullable().optional(),
-      weekly: z.boolean().optional(),
-      imageUrl: z.string().nullable().optional(),
-      mealType: z.enum(["BREAKFAST", "LUNCH", "DINNER"]).optional(),
-      saveToLibrary: z.boolean().optional(),
-    })
-    .refine((b) => b.pricePaise != null || b.priceRupees != null, {
-      message: "priceRupees or pricePaise required",
-    })
-    .parse(req.body);
+  const { slug } = SlugParams.parse(req.params);
+  const body = MenuItemCreateBody.parse(req.body);
   try {
     assertKitchenStaff(req, slug);
     const weekly = body.weekly || (body.dayOfWeek != null && body.serviceDate === null);
@@ -353,31 +311,19 @@ app.post("/cooks/:slug/menu", async (req, reply) => {
 });
 
 app.get("/cooks/:slug/saved-plates", async (req, reply) => {
-  const { slug } = req.params as { slug: string };
-  const q = req.query as { meal?: string };
-  const meal = mealTypeSchema.safeParse((q.meal ?? "LUNCH").toUpperCase());
+  const { slug } = SlugParams.parse(req.params);
+  const q = MealQueryOnly.parse(req.query ?? {});
   try {
     assertKitchenStaff(req, slug);
-    return await listCookSavedPlates(db, slug, meal.success ? meal.data : "LUNCH");
+    return await listCookSavedPlates(db, slug, mealFromQuery(q.meal));
   } catch (e) {
     return sendCaughtError(reply, e);
   }
 });
 
 app.post("/cooks/:slug/saved-plates", async (req, reply) => {
-  const { slug } = req.params as { slug: string };
-  const body = z
-    .object({
-      itemName: z.string().min(1).max(100).optional(),
-      itemNameTa: z.string().max(100).nullable().optional(),
-      priceRupees: z.number().positive().optional(),
-      pricePaise: z.number().int().positive().optional(),
-      isVeg: z.boolean().optional(),
-      imageUrl: z.string().nullable().optional(),
-      mealType: mealTypeSchema.optional(),
-      fromMenuId: z.number().int().optional(),
-    })
-    .parse(req.body ?? {});
+  const { slug } = SlugParams.parse(req.params);
+  const body = SavedPlateCreateBody.parse(req.body ?? {});
   try {
     assertKitchenStaff(req, slug);
     const row = await saveCookSavedPlate(db, slug, body);
@@ -388,7 +334,7 @@ app.post("/cooks/:slug/saved-plates", async (req, reply) => {
 });
 
 app.delete("/cooks/:slug/saved-plates/:id", async (req, reply) => {
-  const { slug, id } = req.params as { slug: string; id: string };
+  const { slug, id } = SlugIdParams.parse(req.params);
   try {
     assertKitchenStaff(req, slug);
     return await deleteCookSavedPlate(db, slug, Number(id));
@@ -398,14 +344,8 @@ app.delete("/cooks/:slug/saved-plates/:id", async (req, reply) => {
 });
 
 app.post("/cooks/:slug/saved-plates/:id/post", async (req, reply) => {
-  const { slug, id } = req.params as { slug: string; id: string };
-  const body = z
-    .object({
-      serviceDate: z.string().nullable().optional(),
-      weekly: z.boolean().optional(),
-      dayOfWeek: z.number().int().min(0).max(6).nullable().optional(),
-    })
-    .parse(req.body ?? {});
+  const { slug, id } = SlugIdParams.parse(req.params);
+  const body = PostPlatesBody.parse(req.body ?? {});
   try {
     assertKitchenStaff(req, slug);
     const item = await postCookSavedPlate(db, slug, Number(id), body);
@@ -416,37 +356,19 @@ app.post("/cooks/:slug/saved-plates/:id/post", async (req, reply) => {
 });
 
 app.get("/cooks/:slug/menu-templates", async (req, reply) => {
-  const { slug } = req.params as { slug: string };
-  const q = req.query as { meal?: string };
-  const meal = mealTypeSchema.safeParse((q.meal ?? "LUNCH").toUpperCase());
+  const { slug } = SlugParams.parse(req.params);
+  const q = MealQueryOnly.parse(req.query ?? {});
   try {
     assertKitchenStaff(req, slug);
-    return await listCookMenuTemplates(db, slug, meal.success ? meal.data : "LUNCH");
+    return await listCookMenuTemplates(db, slug, mealFromQuery(q.meal));
   } catch (e) {
     return sendCaughtError(reply, e);
   }
 });
 
 app.post("/cooks/:slug/menu-templates", async (req, reply) => {
-  const { slug } = req.params as { slug: string };
-  const body = z
-    .object({
-      name: z.string().min(2).max(80),
-      mealType: mealTypeSchema.optional(),
-      fromServiceDate: z.string().nullable().optional(),
-      items: z
-        .array(
-          z.object({
-            itemName: z.string().min(1).max(100),
-            itemNameTa: z.string().max(100).nullable().optional(),
-            pricePaise: z.number().int().positive(),
-            isVeg: z.boolean().optional(),
-            imageUrl: z.string().nullable().optional(),
-          }),
-        )
-        .optional(),
-    })
-    .parse(req.body ?? {});
+  const { slug } = SlugParams.parse(req.params);
+  const body = MenuTemplateCreateBody.parse(req.body ?? {});
   try {
     assertKitchenStaff(req, slug);
     const row = await saveCookMenuTemplate(db, slug, body);
@@ -457,7 +379,7 @@ app.post("/cooks/:slug/menu-templates", async (req, reply) => {
 });
 
 app.delete("/cooks/:slug/menu-templates/:id", async (req, reply) => {
-  const { slug, id } = req.params as { slug: string; id: string };
+  const { slug, id } = SlugIdParams.parse(req.params);
   try {
     assertKitchenStaff(req, slug);
     return await deleteCookMenuTemplate(db, slug, Number(id));
@@ -467,14 +389,8 @@ app.delete("/cooks/:slug/menu-templates/:id", async (req, reply) => {
 });
 
 app.post("/cooks/:slug/menu-templates/:id/post", async (req, reply) => {
-  const { slug, id } = req.params as { slug: string; id: string };
-  const body = z
-    .object({
-      serviceDate: z.string().nullable().optional(),
-      weekly: z.boolean().optional(),
-      dayOfWeek: z.number().int().min(0).max(6).nullable().optional(),
-    })
-    .parse(req.body ?? {});
+  const { slug, id } = SlugIdParams.parse(req.params);
+  const body = PostPlatesBody.parse(req.body ?? {});
   try {
     assertKitchenStaff(req, slug);
     const result = await postCookMenuTemplate(db, slug, Number(id), body);
@@ -485,7 +401,7 @@ app.post("/cooks/:slug/menu-templates/:id/post", async (req, reply) => {
 });
 
 app.post("/cooks/:slug/menu/photo", async (req, reply) => {
-  const { slug } = req.params as { slug: string };
+  const { slug } = SlugParams.parse(req.params);
   try {
     assertKitchenStaff(req, slug);
     const file = await req.file();
@@ -498,22 +414,8 @@ app.post("/cooks/:slug/menu/photo", async (req, reply) => {
 });
 
 app.patch("/cooks/:slug/menu/:id", async (req, reply) => {
-  const { slug, id } = req.params as { slug: string; id: string };
-  const body = z
-    .object({
-      itemName: z.string().min(1).max(100).optional(),
-      itemNameTa: z.string().max(100).nullable().optional(),
-      priceRupees: z.number().positive().optional(),
-      pricePaise: z.number().int().positive().optional(),
-      isVeg: z.boolean().optional(),
-      allergens: z.array(z.string()).optional(),
-      totalStockAvailable: z.number().int().optional(),
-      isAvailable: z.boolean().optional(),
-      imageUrl: z.string().nullable().optional(),
-      dayOfWeek: z.number().int().min(0).max(6).nullable().optional(),
-      serviceDate: z.string().nullable().optional(),
-    })
-    .parse(req.body);
+  const { slug, id } = SlugIdParams.parse(req.params);
+  const body = MenuItemPatchBody.parse(req.body);
   try {
     assertKitchenStaff(req, slug);
     return await updateCookMenuItem(db, slug, Number(id), body);
@@ -523,7 +425,7 @@ app.patch("/cooks/:slug/menu/:id", async (req, reply) => {
 });
 
 app.delete("/cooks/:slug/menu/:id", async (req, reply) => {
-  const { slug, id } = req.params as { slug: string; id: string };
+  const { slug, id } = SlugIdParams.parse(req.params);
   try {
     assertKitchenStaff(req, slug);
     return await deleteCookMenuItem(db, slug, Number(id));
@@ -533,8 +435,8 @@ app.delete("/cooks/:slug/menu/:id", async (req, reply) => {
 });
 
 app.get("/cooks/:slug/late-pending", async (req, reply) => {
-  const { slug } = req.params as { slug: string };
-  const q = req.query as { date?: string };
+  const { slug } = SlugParams.parse(req.params);
+  const q = DateQuery.parse(req.query ?? {});
   try {
     assertKitchenStaff(req, slug);
     return await listPendingLateOrders(db, slug, q.date);
@@ -544,8 +446,8 @@ app.get("/cooks/:slug/late-pending", async (req, reply) => {
 });
 
 app.get("/cooks/:slug/cancel-pending", async (req, reply) => {
-  const { slug } = req.params as { slug: string };
-  const q = req.query as { date?: string };
+  const { slug } = SlugParams.parse(req.params);
+  const q = DateQuery.parse(req.query ?? {});
   try {
     assertKitchenStaff(req, slug);
     return await listPendingCancelRequests(db, slug, q.date);
@@ -555,10 +457,8 @@ app.get("/cooks/:slug/cancel-pending", async (req, reply) => {
 });
 
 app.post("/cooks/:slug/cooking", async (req, reply) => {
-  const { slug } = req.params as { slug: string };
-  const body = z
-    .object({ mealType: mealTypeSchema.optional(), serviceDate: z.string().optional() })
-    .parse(req.body ?? {});
+  const { slug } = SlugParams.parse(req.params);
+  const body = KitchenBatchBody.parse(req.body ?? {});
   try {
     assertKitchenStaff(req, slug);
     return await markStartCooking(db, slug, body.serviceDate, body.mealType ?? "LUNCH");
@@ -568,10 +468,8 @@ app.post("/cooks/:slug/cooking", async (req, reply) => {
 });
 
 app.post("/cooks/:slug/pack", async (req, reply) => {
-  const { slug } = req.params as { slug: string };
-  const body = z
-    .object({ mealType: mealTypeSchema.optional(), serviceDate: z.string().optional() })
-    .parse(req.body ?? {});
+  const { slug } = SlugParams.parse(req.params);
+  const body = KitchenBatchBody.parse(req.body ?? {});
   try {
     assertKitchenStaff(req, slug);
     return await markPacked(db, slug, body.serviceDate, body.mealType ?? "LUNCH");
@@ -581,10 +479,8 @@ app.post("/cooks/:slug/pack", async (req, reply) => {
 });
 
 app.post("/cooks/:slug/dispatch", async (req, reply) => {
-  const { slug } = req.params as { slug: string };
-  const body = z
-    .object({ mealType: mealTypeSchema.optional(), serviceDate: z.string().optional() })
-    .parse(req.body ?? {});
+  const { slug } = SlugParams.parse(req.params);
+  const body = KitchenBatchBody.parse(req.body ?? {});
   try {
     assertKitchenStaff(req, slug);
     return await markDispatched(db, slug, body.serviceDate, body.mealType ?? "LUNCH");
@@ -594,7 +490,7 @@ app.post("/cooks/:slug/dispatch", async (req, reply) => {
 });
 
 app.post("/orders/:publicId/cooking", async (req, reply) => {
-  const { publicId } = req.params as { publicId: string };
+  const { publicId } = OrderParams.parse(req.params);
   try {
     await assertOrderKitchenStaff(req, publicId);
     return await advanceOrderKitchenStatus(db, publicId, "COOKING", {
@@ -606,7 +502,7 @@ app.post("/orders/:publicId/cooking", async (req, reply) => {
 });
 
 app.post("/orders/:publicId/pack", async (req, reply) => {
-  const { publicId } = req.params as { publicId: string };
+  const { publicId } = OrderParams.parse(req.params);
   try {
     await assertOrderKitchenStaff(req, publicId);
     return await advanceOrderKitchenStatus(db, publicId, "PACKED", {
@@ -618,7 +514,7 @@ app.post("/orders/:publicId/pack", async (req, reply) => {
 });
 
 app.post("/orders/:publicId/dispatch", async (req, reply) => {
-  const { publicId } = req.params as { publicId: string };
+  const { publicId } = OrderParams.parse(req.params);
   try {
     await assertOrderKitchenStaff(req, publicId);
     return await advanceOrderKitchenStatus(db, publicId, "DISPATCHED", {
@@ -631,7 +527,7 @@ app.post("/orders/:publicId/dispatch", async (req, reply) => {
 
 /** Partner mock / ops: ASSIGNING_RIDER → DISPATCHED when rider is found. */
 app.post("/orders/:publicId/rider-assigned", async (req, reply) => {
-  const { publicId } = req.params as { publicId: string };
+  const { publicId } = OrderParams.parse(req.params);
   try {
     const { cook } = await assertOrderKitchenStaff(req, publicId);
     const { markPartnerRiderAssigned } = await import("../services/cookOps.js");
@@ -642,7 +538,7 @@ app.post("/orders/:publicId/rider-assigned", async (req, reply) => {
 });
 
 app.post("/orders/:publicId/delivered", async (req, reply) => {
-  const { publicId } = req.params as { publicId: string };
+  const { publicId } = OrderParams.parse(req.params);
   try {
     await assertOrderKitchenStaff(req, publicId);
     return await markDelivered(db, publicId);

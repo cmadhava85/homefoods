@@ -19,6 +19,7 @@ function setProdBase() {
   process.env.WHATSAPP_APP_SECRET = "s";
   process.env.WHATSAPP_ACCESS_TOKEN = "a";
   process.env.WHATSAPP_PHONE_NUMBER_ID = "1";
+  process.env.ADMIN_MOBILES = "+919900000009";
 }
 
 describe("assertProductionConfig", () => {
@@ -45,6 +46,16 @@ describe("assertProductionConfig", () => {
     setProdBase();
     process.env.MOCK_PAYMENTS = "true";
     assert.throws(() => assertProductionConfig(), /MOCK_PAYMENTS/);
+  });
+
+  it("requires ADMIN_MOBILES at boot, including mock-auth staging", () => {
+    setProdBase();
+    delete process.env.ADMIN_MOBILES;
+    assert.throws(() => assertProductionConfig(), /missing ADMIN_MOBILES/);
+    process.env.APP_ENV = "staging";
+    process.env.MOCK_AUTH = "true";
+    process.env.MOCK_WHATSAPP = "true";
+    assert.throws(() => assertProductionConfig(), /missing ADMIN_MOBILES/);
   });
 
   it("fails when MOCK_WHATSAPP or MOCK_AUTH stay on", () => {

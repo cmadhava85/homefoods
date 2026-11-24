@@ -477,6 +477,7 @@ function OrdersInner() {
             ) : null}
             <CancelOrderButton
               publicId={o.publicId}
+              paid={o.status === "PAID"}
               cancellable={o.cancellable}
               cancelRequestable={o.cancelRequestable}
               className="order-action-link"
@@ -632,6 +633,7 @@ function OrdersInner() {
                   </Link>
                   <CancelOrderButton
                     checkoutId={checkoutId}
+                    paid={lines.some((l) => l.status === "PAID")}
                     cancellable={weekCancellable}
                     cancelRequestable={weekRequestable}
                     className="order-action-link"

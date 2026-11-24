@@ -2,6 +2,8 @@ import "./env.js";
 import { assertProductionConfig } from "./prodConfig.js";
 import { startTelemetry } from "./telemetry.js";
 import { buildApp } from "./app.js";
+import { closeDb, createDb } from "@localmeals/db";
+import { installProcessLifecycle } from "@localmeals/observability";
 
 try {
   assertProductionConfig();
@@ -12,16 +14,20 @@ try {
 
 const port = Number(process.env.PORT ?? process.env.API_PORT ?? 4000);
 
-process.on("unhandledRejection", (reason) => {
-  console.error("[api] unhandledRejection", reason);
-});
-process.on("uncaughtException", (err) => {
-  console.error("[api] uncaughtException", err);
-});
+const flushTelemetry = await startTelemetry("localmeals-api");
 
-await startTelemetry("localmeals-api");
-
-const app = buildApp();
+const db = createDb();
+const app = buildApp(db);
+installProcessLifecycle({
+  service: "localmeals-api",
+  logger: app.log,
+  steps: [
+    // Stops accepting connections and waits for in-flight requests to finish.
+    { name: "http", run: () => app.close() },
+    { name: "db", run: () => closeDb(db) },
+    { name: "telemetry", run: flushTelemetry },
+  ],
+});
 app
   .listen({ port, host: "0.0.0.0" })
   .then(() => {

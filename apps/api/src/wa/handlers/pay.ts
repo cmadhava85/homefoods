@@ -1,3 +1,4 @@
+import { lineGatewayPaise } from "@localmeals/domain";
 import { parsePayCommand } from "@localmeals/adapters";
 import {
   findAwaitingPaymentByPublicId,
@@ -69,8 +70,7 @@ export async function handlePay(s: WaSession): Promise<object> {
         });
         return { ok: true, intent, empty: true, replies: replies() };
       }
-      const totalPaise =
-        pending.foodPaise * pending.qty + pending.deliveryPaise + pending.platformFeePaise;
+      const totalPaise = lineGatewayPaise(pending);
       const payTarget = pending.checkoutId ?? pending.publicId;
       await wa.send({
         to: from,

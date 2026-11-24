@@ -64,6 +64,14 @@ resource "google_cloud_run_v2_service" "api" {
         value = "production"
       }
       env {
+        name  = "OUTBOX_WAKE_TOPIC"
+        value = local.outbox_wake_topic
+      }
+      env {
+        name  = "GCS_PUBLIC_MENU_BUCKET"
+        value = var.menu_images_public ? google_storage_bucket.menu_public[0].name : ""
+      }
+      env {
         name  = "MOCK_WHATSAPP"
         value = tostring(var.mock_whatsapp)
       }
@@ -147,9 +155,12 @@ resource "google_cloud_run_v2_service" "api" {
       }
     }
 
-    vpc_access {
-      connector = google_vpc_access_connector.connector.id
-      egress    = "PRIVATE_RANGES_ONLY"
+    dynamic "vpc_access" {
+      for_each = var.vpc_connector_enabled ? [google_vpc_access_connector.connector[0].id] : []
+      content {
+        connector = vpc_access.value
+        egress    = "PRIVATE_RANGES_ONLY"
+      }
     }
   }
 
@@ -187,7 +198,8 @@ resource "google_cloud_run_v2_service" "worker" {
     service_account = google_service_account.run.email
 
     scaling {
-      min_instance_count = var.worker_min_instances
+      # Push mode is request-driven, so it can scale to zero.
+      min_instance_count = local.worker_push ? 0 : var.worker_min_instances
       max_instance_count = var.worker_max_instances
     }
 
@@ -225,6 +237,11 @@ resource "google_cloud_run_v2_service" "worker" {
       env {
         name  = "ENABLE_AUTO_EOD"
         value = "false"
+      }
+      env {
+        # Cloud Scheduler's expire-unpaid job owns this when the scheduler is created.
+        name  = "ENABLE_AUTO_EXPIRE"
+        value = local.create_scheduler ? "false" : "true"
       }
       env {
         name  = "LOG_LEVEL"
@@ -288,9 +305,14 @@ resource "google_cloud_run_v2_service" "worker" {
         }
       }
 
+      env {
+        name  = "WORKER_MODE"
+        value = local.worker_push ? "push" : "poll"
+      }
+
       resources {
-        # Worker polls continuously when min≥1 — keep CPU allocated.
-        cpu_idle = false
+        # Poller needs CPU between requests; push mode only works inside /drain requests.
+        cpu_idle = local.worker_push
         limits = {
           cpu    = "1"
           memory = "512Mi"
@@ -298,9 +320,12 @@ resource "google_cloud_run_v2_service" "worker" {
       }
     }
 
-    vpc_access {
-      connector = google_vpc_access_connector.connector.id
-      egress    = "PRIVATE_RANGES_ONLY"
+    dynamic "vpc_access" {
+      for_each = var.vpc_connector_enabled ? [google_vpc_access_connector.connector[0].id] : []
+      content {
+        connector = vpc_access.value
+        egress    = "PRIVATE_RANGES_ONLY"
+      }
     }
   }
 

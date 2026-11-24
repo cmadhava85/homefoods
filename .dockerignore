@@ -1,0 +1,32 @@
+# Keep the Docker build context small and free of local secrets.
+# Every Dockerfile COPYs explicit paths; nothing below is needed in an image.
+
+# Local secrets / credentials — must never reach the Docker daemon or a registry
+.env
+.env.*
+!.env.example
+.gcloud-config
+**/*.pem
+**/*.key
+**/application_default_credentials.json
+infra/terraform/*.tfstate*
+infra/terraform/*.tfvars
+infra/terraform/tfplan*
+infra/terraform/.terraform
+
+# Dependencies and build output (installed/built inside the image)
+**/node_modules
+**/dist
+**/.next
+**/*.tsbuildinfo
+
+# Tooling output
+.git
+**/.stryker-tmp
+**/reports
+test-results
+playwright-report
+coverage
+**/coverage
+zap.out
+.zap/*.out

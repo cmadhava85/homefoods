@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { and, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import {
   addresses,
   orders,
@@ -7,6 +7,7 @@ import {
   platformEventLedger,
   users,
   type Db,
+  type DbOrTx,
 } from "@localmeals/db";
 import {
   LogEvent,
@@ -25,6 +26,7 @@ import {
   assertSelfDeliveryAllowed,
   assertTransition,
   buildIdempotencyKey,
+  DomainError,
   addDaysISO,
   cookFulfillmentOffersFromRow,
   dayOfWeekForServiceDate,
@@ -40,6 +42,7 @@ import {
   mealLabel,
   normalizeFulfillmentMode,
   normalizeWeekDiscountRule,
+  weekDiscountSurvivesCancel,
   orderTotalPaise,
   parseServiceDate,
   resolveMealSchedule,
@@ -52,8 +55,11 @@ import {
   type MealPeriod,
   type MealSettingsRow,
   type OrderState,
+  lineTotalPaise,
+  lineGatewayPaise,
+  type PaymentMethod,
 } from "@localmeals/domain";
-import { getPaymentProvider } from "@localmeals/adapters";
+import { getPaymentProvider, UNPAID_HOLD_TTL_SEC } from "@localmeals/adapters";
 import {
   platformFeePaise,
   platformFeePaiseForCheckoutLine,
@@ -112,7 +118,180 @@ const ALREADY_PAID: OrderState[] = [
   "DISPATCHED",
   "DELAYED",
   "DELIVERED",
+  "ASSIGNING_RIDER",
+  "RETURNED_TO_KITCHEN",
+  "LOGISTICS_EXCEPTION",
+  "CANCEL_REQUESTED",
+  // Paid then refunded — a late duplicate capture webhook must be a no-op, not another refund.
+  "REFUNDED",
 ];
+
+/** Stable paid lines that may receive the ₹7 fee / lose week discount during cart rebalance. */
+const REBALANCE_ACTIVE: OrderState[] = ALREADY_PAID.filter(
+  (s) => s !== "CANCEL_REQUESTED" && s !== "REFUNDED",
+);
+
+/** A PENDING auto-refund claim older than this is assumed orphaned (crash mid-refund) and re-claimable. */
+const REFUND_CLAIM_STALE_MS = 10 * 60 * 1000;
+
+/** Statuses that may still transition to PAID from a gateway capture. */
+const PAYABLE_FROM: OrderState[] = [
+  "AWAITING_PAYMENT",
+  "CONFIRMING_PAYMENT",
+  "FAILED",
+];
+
+async function cancelOpenPaymentLink(gatewayTxnId: string | null | undefined) {
+  if (!gatewayTxnId) return;
+  const pay = getPaymentProvider();
+  if (!pay.cancelPaymentLink) return;
+  try {
+    await pay.cancelPaymentLink(gatewayTxnId);
+  } catch (err) {
+    orderLog.warn(
+      {
+        event: LogEvent.ORDER_UNPAID_EXPIRED,
+        gatewayTxnId,
+        err: err instanceof Error ? err.message : String(err),
+      },
+      "payment link cancel failed (best-effort)",
+    );
+  }
+}
+
+/**
+ * Customer paid a link covering lines that were already cancelled (hold expiry, unpaid cancel,
+ * over-capacity recovery). Refund exactly those lines once — a payments REFUND row keyed on the
+ * line set is the idempotency claim, so webhook retries / paid+captured pairs never double-refund
+ * or double-notify. A FAILED claim is retried on the next delivery.
+ */
+async function refundCaptureOnTerminalOrder(
+  db: Db,
+  lines: (typeof orders.$inferSelect)[],
+  input: {
+    gatewayTxnId?: string;
+    paymentId?: string;
+    rawPayload?: unknown;
+  },
+  // Only the gateway-charged part was captured; credit holds on these lines lapsed when they ended.
+  amountPaise = lines.reduce((s, o) => s + lineGatewayPaise(o), 0),
+) {
+  const head = lines[0];
+  const lineIds = lines.map((o) => o.id).sort((a, b) => a - b);
+  const claimKey = `term_${createHash("sha256").update(lineIds.join(",")).digest("hex").slice(0, 32)}`;
+  const result = {
+    ...head,
+    orders: lines,
+    checkoutId: head.checkoutId,
+    paidAfterTerminal: true as const,
+    autoRefundId: null as string | null,
+  };
+
+  const [claimed] = await db
+    .insert(payments)
+    .values({
+      orderId: head.id,
+      kind: "REFUND",
+      amountPaise,
+      status: "PENDING",
+      gatewayTxnId: `pending_${claimKey}`,
+      idempotencyKey: claimKey,
+      rawPayload: { reason: "paid_after_terminal", lineIds },
+    })
+    .onConflictDoNothing()
+    .returning({ id: payments.id });
+  let claimId = claimed?.id;
+  if (!claimId) {
+    // Reclaim FAILED, or PENDING left orphaned after a crash between gateway refund and finalize.
+    // Fresh PENDING stays locked so concurrent webhook retries don't double-call Razorpay.
+    const staleBefore = new Date(Date.now() - REFUND_CLAIM_STALE_MS);
+    const [retry] = await db
+      .update(payments)
+      .set({
+        status: "PENDING",
+        createdAt: new Date(),
+        rawPayload: { reason: "paid_after_terminal", lineIds, retry: true },
+      })
+      .where(
+        and(
+          eq(payments.idempotencyKey, claimKey),
+          or(
+            eq(payments.status, "FAILED"),
+            and(eq(payments.status, "PENDING"), lt(payments.createdAt, staleBefore)),
+          ),
+        ),
+      )
+      .returning({ id: payments.id });
+    if (!retry) return result; // already refunded (or in flight) for this capture
+    claimId = retry.id;
+  }
+
+  const pay = getPaymentProvider();
+  const paymentRef = input.paymentId || input.gatewayTxnId || head.gatewayTxnId || head.publicId;
+  let gatewayRefund: Awaited<ReturnType<typeof pay.refundPayment>> | null = null;
+  let refundError: string | null = null;
+  try {
+    gatewayRefund = await pay.refundPayment({
+      paymentId: paymentRef,
+      amountPaise,
+      receipt: claimKey.slice(0, 40),
+      notes: {
+        orderPublicId: head.publicId,
+        reason: "paid_after_terminal",
+        priorStatus: head.status,
+      },
+    });
+  } catch (err) {
+    refundError = err instanceof Error ? err.message : String(err);
+    orderLog.error(
+      { event: LogEvent.ORDER_PAID, publicId: head.publicId, err: refundError },
+      "auto-refund after terminal capture failed — will retry on next webhook; ops may refund manually",
+    );
+  }
+
+  await db.transaction(async (tx) => {
+    await tx
+      .update(payments)
+      .set({
+        status: gatewayRefund ? "REFUNDED" : "FAILED",
+        gatewayTxnId: gatewayRefund?.refundId ?? `pending_${claimKey}`,
+        rawPayload: { reason: "paid_after_terminal", lineIds, paymentRef, gatewayRefund, refundError },
+      })
+      .where(eq(payments.id, claimId!));
+
+    await tx.insert(platformEventLedger).values({
+      associatedMobile: head.customerMobile,
+      orderId: head.id,
+      cookId: head.cookId,
+      channel: head.channel,
+      eventName: gatewayRefund ? "PAID_AFTER_TERMINAL_AUTO_REFUND" : "PAID_AFTER_TERMINAL_REFUND_FAILED",
+      rawPayload: {
+        statuses: lines.map((o) => ({ publicId: o.publicId, status: o.status })),
+        amountPaise,
+        paymentRef,
+        gatewayRefund,
+        refundError,
+        gatewayTxnId: input.gatewayTxnId ?? null,
+        paymentId: input.paymentId ?? null,
+        raw: input.rawPayload ?? null,
+      },
+    });
+
+    if (gatewayRefund) {
+      await enqueueOutbox(tx, "OrderRefunded", {
+        orderId: head.id,
+        publicId: head.publicId,
+        customerMobile: head.customerMobile,
+        mode: "FULL",
+        refundId: gatewayRefund.refundId,
+        source: "paid_after_terminal",
+        amountPaise,
+      });
+    }
+  });
+
+  return { ...result, autoRefundId: gatewayRefund?.refundId ?? null };
+}
 
 function publicId() {
   // 10 hex chars ≈ 40 bits entropy — harder to enumerate than short time+3-digit ids.
@@ -167,6 +346,16 @@ async function paymentUrlFromLedger(db: Db, orderId: number): Promise<string | u
   return undefined;
 }
 
+/** Pickup UPI QR image stored on the CHARGE row (null for links / credit). */
+export async function resolvePaymentQrUrl(db: Db, gatewayTxnId: string | null): Promise<string | null> {
+  if (!gatewayTxnId || !/^(qr_|mock_qr_)/.test(gatewayTxnId)) return null;
+  const row = await db.query.payments.findFirst({
+    where: (t, { eq: e, and: a }) => a(e(t.gatewayTxnId, gatewayTxnId), e(t.kind, "CHARGE")),
+  });
+  const url = (row?.rawPayload as { qrImageUrl?: unknown } | null)?.qrImageUrl;
+  return typeof url === "string" ? url : null;
+}
+
 export async function resolveCustomerPaymentUrl(
   db: Db,
   opts: {
@@ -194,10 +383,7 @@ function lineTotal(o: {
   qty: number;
   foodDiscountPaise?: number | null;
 }) {
-  return orderTotalPaise({
-    ...o,
-    foodDiscountPaise: o.foodDiscountPaise ?? 0,
-  });
+  return lineTotalPaise(o);
 }
 
 export async function loadMealSettingsRows(db: Db, cookId: string): Promise<MealSettingsRow[]> {
@@ -483,17 +669,15 @@ export async function listKitchens(db: Db, pinCode?: string) {
   return out;
 }
 
-function menusForServiceDate(
-  rows: Array<{
+function menusForServiceDate<
+  T extends {
     serviceDate: string | null;
     dayOfWeek: number | null;
     isAvailable: boolean;
     itemName: string;
     mealType?: string;
-  }>,
-  serviceDate: string,
-  mealType: MealPeriod = "LUNCH",
-) {
+  },
+>(rows: T[], serviceDate: string, mealType: MealPeriod = "LUNCH"): T[] {
   const dayOfWeek = dayOfWeekForServiceDate(serviceDate);
   const forMeal = rows.filter((r) => (r.mealType ?? "LUNCH") === mealType);
   const dated = forMeal.filter((r) => r.serviceDate === serviceDate && r.isAvailable);
@@ -881,15 +1065,114 @@ const CAPACITY_HOLD_STATUSES = [
   "CANCEL_REQUESTED",
 ] as const;
 
-/** Abandoned UPI carts release capacity after this TTL (same calendar day). */
-const UNPAID_HOLD_TTL_MS = 15 * 60 * 1000;
+/**
+ * Abandoned UPI carts release capacity after this TTL (same calendar day).
+ * Must outlive the payment link so a hold never expires while its link is still payable.
+ */
+const UNPAID_HOLD_TTL_MS = UNPAID_HOLD_TTL_SEC * 1000;
 
-async function lockCookCapacityRow(db: Db, cookId: string) {
+async function lockCookCapacityRow(db: DbOrTx, cookId: string) {
   await db.execute(sql`select id from cook_profiles where id = ${cookId} for update`);
 }
 
-export async function usedKitchenDayQty(
+async function paymentKeyTaken(db: DbOrTx, key: string) {
+  const row = await db.query.payments.findFirst({
+    where: (t, { eq: e }) => e(t.idempotencyKey, key),
+    columns: { id: true },
+  });
+  return Boolean(row);
+}
+
+/**
+ * Gateway link creation failed after the order rows were committed — release them so
+ * capacity frees immediately and a retry with the same key creates a fresh order.
+ */
+async function releaseUnlinkedOrders(
   db: Db,
+  rows: Array<typeof orders.$inferSelect>,
+  err: unknown,
+) {
+  const ids = rows.map((r) => r.id);
+  if (!ids.length) return;
+  await db.transaction(async (tx) => {
+    const released = await tx
+      .update(orders)
+      .set({ status: "CANCELLED", idempotencyKey: null, updatedAt: new Date() })
+      .where(
+        and(
+          inArray(orders.id, ids),
+          eq(orders.status, "AWAITING_PAYMENT"),
+          isNull(orders.gatewayTxnId),
+        ),
+      )
+      .returning({ id: orders.id });
+    for (const r of rows.filter((row) => released.some((x) => x.id === row.id))) {
+      await tx.insert(platformEventLedger).values({
+        associatedMobile: r.customerMobile,
+        orderId: r.id,
+        cookId: r.cookId,
+        channel: r.channel,
+        eventName: "PAYMENT_LINK_CREATE_FAILED",
+        rawPayload: {
+          publicId: r.publicId,
+          checkoutId: r.checkoutId,
+          error: err instanceof Error ? err.message.slice(0, 300) : String(err),
+        },
+      });
+    }
+  });
+}
+
+function paymentGatewayError(err: unknown): DomainError {
+  orderLog.error(
+    {
+      event: LogEvent.THIRD_PARTY_REQUEST,
+      provider: "payment",
+      action: "createPayment",
+      err: err instanceof Error ? err.message : String(err),
+    },
+    "payment link creation failed — order released",
+  );
+  return new DomainError(
+    "Couldn't create the payment link — please try again in a minute",
+    502,
+    "payment_gateway_unavailable",
+  );
+}
+
+function isUniqueViolation(err: unknown) {
+  const msg = err instanceof Error ? err.message : String(err ?? "");
+  return /duplicate key|unique constraint/i.test(msg);
+}
+
+/** Replay an existing unpaid order (same Idempotency-Key) with its payment URL. */
+async function replayExistingOrder(db: Db, existing: typeof orders.$inferSelect) {
+  bindTrace({
+    traceId: existing.traceId,
+    publicId: existing.publicId,
+    checkoutId: existing.checkoutId,
+    customerMobile: existing.customerMobile,
+    cookId: existing.cookId,
+    orderId: existing.id,
+    status: existing.status,
+    amountPaise: lineTotal(existing),
+    mealType: existing.mealType,
+    serviceDate: existing.serviceDate,
+  });
+  return {
+    ...existing,
+    paymentUrl: await resolveCustomerPaymentUrl(db, {
+      orderId: existing.id,
+      publicId: existing.publicId,
+      gatewayTxnId: existing.gatewayTxnId,
+      checkoutId: existing.checkoutId,
+    }),
+    gatewayTxnId: existing.gatewayTxnId,
+  };
+}
+
+export async function usedKitchenDayQty(
+  db: DbOrTx,
   cookId: string,
   serviceDate: string,
   opts?: { menuItemId?: number },
@@ -909,7 +1192,7 @@ export async function usedKitchenDayQty(
 }
 
 async function assertCapacity(
-  db: Db,
+  db: DbOrTx,
   cookId: string,
   serviceDate: string,
   addQty: number,
@@ -930,7 +1213,7 @@ async function assertCapacity(
 
 /** Enforce cook-set plate stock when totalStockAvailable ≥ 0 (−1 = unlimited). */
 async function assertMenuStock(
-  db: Db,
+  db: DbOrTx,
   menu: {
     id: number;
     cookId: string;
@@ -975,6 +1258,10 @@ export async function createOrder(
     addressId?: number | null;
     /** Optional HTTP Idempotency-Key (preferred over business-derived key). */
     clientIdempotencyKey?: string | null;
+    /** Spend wallet credit first (default true when the flag is on). */
+    useCredit?: boolean;
+    /** UPI_QR only for PICKUP with upi_qr_pickup_enabled; otherwise LINK. */
+    paymentMethod?: "LINK" | "UPI_QR";
   },
 ) {
   const { assertFeatureEnabled } = await import("./featureFlags.js");
@@ -1055,6 +1342,16 @@ export async function createOrder(
     baseDeliveryPaise: fulfillDeliveryPaise,
   });
   const feePaise = platformFeePaise();
+  const { checkoutPricingOptions, lockCustomerCredit, priceLinesForCustomer } = await import(
+    "./credits.js"
+  );
+  const pricingOpts = await checkoutPricingOptions(db, {
+    // Child Pays bills another phone — the senior's credit is not spent on it.
+    useCredit: payerMobile ? false : input.useCredit,
+    paymentMethod: input.paymentMethod,
+    fulfillmentMode,
+  });
+  // Line base before credit / convenience fee (also feeds the business idempotency key).
   const amountPaise = orderTotalPaise({
     foodPaise: menu.pricePaise,
     deliveryPaise,
@@ -1108,92 +1405,123 @@ export async function createOrder(
     }
     // Same deterministic key but order already progressed — allow an additional order.
     orderIdempotencyKey = `${orderIdempotencyKey}|addl|${publicId()}`;
+  } else if (await paymentKeyTaken(db, orderIdempotencyKey)) {
+    // A cancelled order released this key, but its CHARGE row still holds it (unique) — re-order safely.
+    orderIdempotencyKey = `${orderIdempotencyKey}|addl|${publicId()}`;
   }
 
   const pay = getPaymentProvider();
   const billMobile = payerMobile ?? input.customerMobile;
+  const pid = publicId();
+  const traceId = newTraceId();
+  bindTrace({
+    traceId,
+    publicId: pid,
+    customerMobile: input.customerMobile,
+    cookSlug: cook.slugHandle,
+    cookId: cook.id,
+    status: "AWAITING_PAYMENT",
+    amountPaise,
+    mealType,
+    serviceDate,
+  });
 
-  return db.transaction(async (tx) => {
-    // Soft hold under cook row lock — prevents double UPI oversell.
-    await assertCapacity(tx, cook.id, serviceDate, input.qty, { lock: true });
-    await assertMenuStock(tx, menu, serviceDate, input.qty);
-
-    const pid = publicId();
-    const traceId = newTraceId();
-    bindTrace({
-      traceId,
-      publicId: pid,
-      customerMobile: input.customerMobile,
-      cookSlug: cook.slugHandle,
-      cookId: cook.id,
-      status: "AWAITING_PAYMENT",
-      amountPaise,
-      mealType,
-      serviceDate,
-    });
-    const [order] = await tx
-      .insert(orders)
-      .values({
-        publicId: pid,
-        traceId,
-        customerMobile: input.customerMobile,
-        payerMobile,
-        cookId: cook.id,
-        menuItemId: menu.id,
-        addressId: address.id,
-        mealType,
-        serviceDate,
-        itemName: menu.itemName,
-        itemNameTa: menu.itemNameTa ?? null,
-        qty: input.qty,
-        spice: input.spice,
-        foodPaise: menu.pricePaise,
-        deliveryPaise,
-        platformFeePaise: feePaise,
-        status: "AWAITING_PAYMENT",
-        fulfillmentMode,
-        deliveryTargetAddress,
-        channel,
-        idempotencyKey: orderIdempotencyKey,
-      })
-      .returning();
-
-    orderLog.info(
-      {
-        event: LogEvent.THIRD_PARTY_REQUEST,
-        provider: "payment",
-        action: "createPayment",
-        ...orderTriageFields({
+  // 1) Reserve capacity under cook lock — do NOT call Razorpay while holding it (H1).
+  let order: typeof orders.$inferSelect;
+  try {
+    order = await db.transaction(async (tx) => {
+      await assertCapacity(tx, cook.id, serviceDate, input.qty, { lock: true });
+      await assertMenuStock(tx, menu, serviceDate, input.qty);
+      await lockCustomerCredit(tx, input.customerMobile);
+      const pricing = await priceLinesForCustomer(tx, input.customerMobile, [amountPaise], pricingOpts);
+      const [row] = await tx
+        .insert(orders)
+        .values({
+          publicId: pid,
           traceId,
-          publicId: order.publicId,
-          orderId: order.id,
           customerMobile: input.customerMobile,
-          cookSlug: cook.slugHandle,
+          payerMobile,
           cookId: cook.id,
-          amountPaise,
+          menuItemId: menu.id,
+          addressId: address.id,
           mealType,
           serviceDate,
+          itemName: menu.itemName,
+          itemNameTa: menu.itemNameTa ?? null,
+          qty: input.qty,
+          spice: input.spice,
+          foodPaise: menu.pricePaise,
+          deliveryPaise,
+          platformFeePaise: feePaise,
+          convenienceFeePaise: pricing.priced[0].convenienceFeePaise,
+          creditAppliedPaise: pricing.priced[0].creditAppliedPaise,
+          paymentMethod: pricing.method,
           status: "AWAITING_PAYMENT",
+          fulfillmentMode,
+          deliveryTargetAddress,
           channel,
-        }),
-      },
-      "payment createPayment",
-    );
-    const payment = await pay.createPayment({
+          idempotencyKey: orderIdempotencyKey,
+        })
+        .returning();
+      return row;
+    });
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      const existing = await db.query.orders.findFirst({
+        where: (t, { eq: e }) => e(t.idempotencyKey, orderIdempotencyKey),
+      });
+      if (existing) return replayExistingOrder(db, existing);
+    }
+    throw err;
+  }
+
+  // 2) Gateway call outside the lock.
+  orderLog.info(
+    {
+      event: LogEvent.THIRD_PARTY_REQUEST,
+      provider: "payment",
+      action: "createPayment",
+      ...orderTriageFields({
+        traceId,
+        publicId: order.publicId,
+        orderId: order.id,
+        customerMobile: input.customerMobile,
+        cookSlug: cook.slugHandle,
+        cookId: cook.id,
+        amountPaise,
+        mealType,
+        serviceDate,
+        status: "AWAITING_PAYMENT",
+        channel,
+      }),
+    },
+    "payment createPayment",
+  );
+  const chargePaise = lineGatewayPaise(order);
+  let payment: Awaited<ReturnType<typeof pay.createPayment>>;
+  try {
+    payment = await createGatewayCharge(pay, order.paymentMethod as PaymentMethod, {
       orderPublicId: order.publicId,
-      amountPaise,
+      amountPaise: chargePaise,
       customerMobile: billMobile,
       idempotencyKey: orderIdempotencyKey,
       traceId,
     });
+  } catch (err) {
+    await releaseUnlinkedOrders(db, [order], err);
+    throw paymentGatewayError(err);
+  }
 
+  // 3) Attach payment + notify in a short txn.
+  const created = await db.transaction(async (tx) => {
     await tx.insert(payments).values({
       orderId: order.id,
       kind: "CHARGE",
-      amountPaise,
+      amountPaise: chargePaise,
       status: "CREATED",
       gatewayTxnId: payment.gatewayTxnId,
       idempotencyKey: orderIdempotencyKey,
+      rawPayload: payment.qrImageUrl ? { qrImageUrl: payment.qrImageUrl } : undefined,
     });
 
     const [updated] = await tx
@@ -1216,27 +1544,28 @@ export async function createOrder(
       },
     });
 
-    await enqueueOutbox(tx, "OrderCreated", {
-        orderId: order.id,
-        publicId: order.publicId,
-        traceId,
-        checkoutId: null,
-        cookId: cook.id,
-        cookSlug: cook.slugHandle,
-        kitchenName: cook.kitchenName,
-        customerMobile: input.customerMobile,
-        payerMobile,
-        billMobile,
-        childPays: Boolean(payerMobile),
-        itemName: menu.itemName,
-        qty: input.qty,
-        spice: input.spice,
-        serviceDate,
-        mealType,
-        amountPaise,
-        paymentUrl: payment.paymentUrl,
-        gatewayTxnId: payment.gatewayTxnId,
-      });
+    // Fully credit-paid: no pay prompt — markOrderPaid below sends OrderPaid.
+    if (order.paymentMethod !== "CREDIT") await enqueueOutbox(tx, "OrderCreated", {
+      orderId: order.id,
+      publicId: order.publicId,
+      traceId,
+      checkoutId: null,
+      cookId: cook.id,
+      cookSlug: cook.slugHandle,
+      kitchenName: cook.kitchenName,
+      customerMobile: input.customerMobile,
+      payerMobile,
+      billMobile,
+      childPays: Boolean(payerMobile),
+      itemName: menu.itemName,
+      qty: input.qty,
+      spice: input.spice,
+      serviceDate,
+      mealType,
+      amountPaise: chargePaise,
+      paymentUrl: payment.paymentUrl,
+      gatewayTxnId: payment.gatewayTxnId,
+    });
 
     orderLog.info(
       {
@@ -1264,15 +1593,15 @@ export async function createOrder(
 
     if (payerMobile) {
       await enqueueOutbox(tx, "ChildPaysRequested", {
-          checkoutId: null,
-          orderPublicId: order.publicId,
-          payerMobile,
-          seniorMobile: input.customerMobile,
-          kitchenName: cook.kitchenName,
-          paymentUrl: payment.paymentUrl,
-          amountPaise,
-          lineCount: 1,
-        });
+        checkoutId: null,
+        orderPublicId: order.publicId,
+        payerMobile,
+        seniorMobile: input.customerMobile,
+        kitchenName: cook.kitchenName,
+        paymentUrl: payment.paymentUrl,
+        amountPaise: chargePaise,
+        lineCount: 1,
+      });
       const { recordOrderActivity } = await import("./orderActivity.js");
       await recordOrderActivity(tx, {
         orderId: order.id,
@@ -1288,8 +1617,33 @@ export async function createOrder(
       ...updated,
       paymentUrl: payment.paymentUrl,
       gatewayTxnId: payment.gatewayTxnId,
+      qrImageUrl: payment.qrImageUrl ?? null,
     };
   });
+  if (created.paymentMethod === "CREDIT") {
+    await markOrderPaid(db, { gatewayTxnId: created.gatewayTxnId! });
+    const paid = await db.query.orders.findFirst({ where: (t, { eq: e }) => e(t.id, created.id) });
+    return { ...created, ...paid };
+  }
+  return created;
+}
+
+/** Payment link, pickup UPI QR, or nothing at all when credit covers the whole charge. */
+async function createGatewayCharge(
+  pay: ReturnType<typeof getPaymentProvider>,
+  method: PaymentMethod,
+  input: Parameters<ReturnType<typeof getPaymentProvider>["createPayment"]>[0],
+): Promise<Awaited<ReturnType<ReturnType<typeof getPaymentProvider>["createPayment"]>>> {
+  if (method === "CREDIT") {
+    const web = process.env.WEB_ORIGIN ?? "http://localhost:3000";
+    return {
+      gatewayTxnId: `credit_${input.orderPublicId}`,
+      paymentUrl: `${web}/order/confirmed/${input.orderPublicId}`,
+      provider: "mock",
+    };
+  }
+  if (method === "UPI_QR") return pay.createUpiQr(input);
+  return pay.createPayment(input);
 }
 
 export async function markOrderPaid(
@@ -1351,7 +1705,16 @@ export async function markOrderPaid(
     };
   }
 
-  const expectedPaise = group.reduce((s, o) => s + lineTotal(o), 0);
+  // Paid after every line was cancelled (hold expiry / unpaid cancel) — refund; don't resurrect.
+  if (group.every((o) => o.status === "CANCELLED")) {
+    const paid =
+      typeof input.paidAmountPaise === "number" && input.paidAmountPaise > 0
+        ? input.paidAmountPaise
+        : undefined;
+    return refundCaptureOnTerminalOrder(db, group, input, paid);
+  }
+
+  const expectedPaise = group.reduce((s, o) => s + lineGatewayPaise(o), 0);
   if (
     typeof input.paidAmountPaise === "number" &&
     input.paidAmountPaise > 0 &&
@@ -1370,31 +1733,93 @@ export async function markOrderPaid(
   const checkoutDayCount = checkoutSorted.length;
 
   const updatedRows = await db.transaction(async (tx) => {
+    const ids = group.map((o) => o.id);
+    await tx.execute(
+      sql`select id from orders where id in (${sql.join(
+        ids.map((id) => sql`${id}`),
+        sql`, `,
+      )}) for update`,
+    );
+
+    const locked = await tx.query.orders.findMany({
+      where: (t, { inArray: ia }) => ia(t.id, ids),
+    });
+    const byId = new Map(locked.map((o) => [o.id, o]));
+
     const out = [];
     for (const order of group) {
-      if (ALREADY_PAID.includes(order.status as OrderState)) {
-        out.push(order);
+      const fresh = byId.get(order.id) ?? order;
+      if (ALREADY_PAID.includes(fresh.status as OrderState)) {
+        out.push(fresh);
+        continue;
+      }
+      if (fresh.status === "CANCELLED") {
+        // Cancelled before this capture landed — refunded after commit.
+        out.push(fresh);
         continue;
       }
       // UPI may have marked FAILED on an abandoned attempt before capture —
       // allow gateway-confirmed recovery without a formal FAILED→PAID edge.
-      if (order.status === "FAILED") {
-        /* recovery from false failure */
+      // Capacity was released on FAILED — re-check so recovery cannot oversell;
+      // if the kitchen filled up meanwhile, cancel the line and refund it (never 4xx the webhook).
+      if (fresh.status === "FAILED") {
+        try {
+          await tx.execute(sql`savepoint failed_recovery_capacity`);
+          await assertCapacity(tx, fresh.cookId, fresh.serviceDate, fresh.qty, {
+            lock: true,
+          });
+          await tx.execute(sql`release savepoint failed_recovery_capacity`);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (!/capacity/i.test(msg)) throw err;
+          await tx.execute(sql`rollback to savepoint failed_recovery_capacity`);
+          const [cancelled] = await tx
+            .update(orders)
+            .set({ status: "CANCELLED", idempotencyKey: null, updatedAt: new Date() })
+            .where(and(eq(orders.id, fresh.id), eq(orders.status, "FAILED")))
+            .returning();
+          await tx.insert(platformEventLedger).values({
+            associatedMobile: fresh.customerMobile,
+            orderId: fresh.id,
+            cookId: fresh.cookId,
+            channel: fresh.channel,
+            eventName: "PAID_OVER_CAPACITY",
+            rawPayload: { publicId: fresh.publicId, paymentId: input.paymentId ?? null },
+          });
+          out.push(cancelled ?? fresh);
+          continue;
+        }
       } else {
-        assertTransition(order.status as OrderState, "PAID");
+        assertTransition(fresh.status as OrderState, "PAID");
       }
 
       const deliveryWindow = cook
         ? formatDeliveryWindowLabel(
-            (await scheduleForCook(db, cook, order.mealType as MealPeriod)).deliveryWindow,
+            (await scheduleForCook(db, cook, fresh.mealType as MealPeriod)).deliveryWindow,
           )
         : null;
 
       let [updated] = await tx
         .update(orders)
         .set({ status: "PAID", updatedAt: new Date() })
-        .where(eq(orders.id, order.id))
+        .where(
+          and(eq(orders.id, fresh.id), inArray(orders.status, [...PAYABLE_FROM])),
+        )
         .returning();
+
+      if (updated) {
+        const { debitCreditForPaidLine } = await import("./credits.js");
+        await debitCreditForPaidLine(tx, updated);
+      }
+
+      if (!updated) {
+        // Another writer won — skip duplicate OrderPaid / ledger.
+        const again = await tx.query.orders.findFirst({
+          where: (t, { eq: e }) => e(t.id, fresh.id),
+        });
+        if (again) out.push(again);
+        continue;
+      }
 
       await tx
         .update(payments)
@@ -1408,38 +1833,38 @@ export async function markOrderPaid(
             paymentLinkId: input.gatewayTxnId,
           },
         })
-        .where(eq(payments.orderId, order.id));
+        .where(eq(payments.orderId, fresh.id));
 
       const checkoutDayOrdinal =
-        checkoutSorted.findIndex((o) => o.id === order.id) + 1;
+        checkoutSorted.findIndex((o) => o.id === fresh.id) + 1;
 
       await enqueueOutbox(tx, "OrderPaid", {
-          orderId: order.id,
-          publicId: order.publicId,
-          traceId: order.traceId,
-          checkoutId: order.checkoutId,
-          cookId: order.cookId,
+          orderId: fresh.id,
+          publicId: fresh.publicId,
+          traceId: fresh.traceId,
+          checkoutId: fresh.checkoutId,
+          cookId: fresh.cookId,
           cookMobile: cook?.mobileNumber ?? null,
           cookSlug: cook?.slugHandle ?? null,
-          itemName: order.itemName,
-          qty: order.qty,
-          spice: order.spice,
-          mealType: order.mealType,
-          serviceDate: order.serviceDate,
+          itemName: fresh.itemName,
+          qty: fresh.qty,
+          spice: fresh.spice,
+          mealType: fresh.mealType,
+          serviceDate: fresh.serviceDate,
           /** Week cart: one outbox row per day; cook WA shows day N of M. */
           checkoutDayCount,
           checkoutDayOrdinal,
-          deliveryTargetAddress: order.deliveryTargetAddress,
-          customerMobile: order.customerMobile,
+          deliveryTargetAddress: fresh.deliveryTargetAddress,
+          customerMobile: fresh.customerMobile,
           deliveryWindow,
           paymentId: input.paymentId ?? null,
         });
 
       await tx.insert(platformEventLedger).values({
-        associatedMobile: order.customerMobile,
-        orderId: order.id,
-        cookId: order.cookId,
-        channel: order.channel,
+        associatedMobile: fresh.customerMobile,
+        orderId: fresh.id,
+        cookId: fresh.cookId,
+        channel: fresh.channel,
         eventName: "ORDER_PAID",
         rawPayload: input.rawPayload as object,
       });
@@ -1447,9 +1872,9 @@ export async function markOrderPaid(
       const lock = await tx.query.cutoffLocks.findFirst({
         where: (t, { eq: e, and: a }) =>
           a(
-            e(t.cookId, order.cookId),
-            e(t.serviceDate, order.serviceDate),
-            e(t.mealType, order.mealType),
+            e(t.cookId, fresh.cookId),
+            e(t.serviceDate, fresh.serviceDate),
+            e(t.mealType, fresh.mealType),
           ),
       });
       if (lock) {
@@ -1457,22 +1882,22 @@ export async function markOrderPaid(
         [updated] = await tx
           .update(orders)
           .set({ status: "COOKING", updatedAt: new Date() })
-          .where(eq(orders.id, order.id))
+          .where(eq(orders.id, fresh.id))
           .returning();
         const { recordOrderActivity } = await import("./orderActivity.js");
         await recordOrderActivity(tx, {
-          orderId: order.id,
-          customerMobile: order.customerMobile,
-          cookId: order.cookId,
+          orderId: fresh.id,
+          customerMobile: fresh.customerMobile,
+          cookId: fresh.cookId,
           channel: "SYSTEM_CRON",
           eventName: "ORDER_STATUS_COOKING",
           payload: {
             fromStatus: "PAID",
             toStatus: "COOKING",
             reason: "cutoff_lock",
-            serviceDate: order.serviceDate,
-            mealType: order.mealType,
-            publicId: order.publicId,
+            serviceDate: fresh.serviceDate,
+            mealType: fresh.mealType,
+            publicId: fresh.publicId,
           },
         });
       }
@@ -1481,31 +1906,41 @@ export async function markOrderPaid(
         {
           event: LogEvent.ORDER_PAID,
           ...orderTriageFields({
-            traceId: order.traceId,
-            publicId: order.publicId,
-            checkoutId: order.checkoutId,
-            orderId: order.id,
-            customerMobile: order.customerMobile,
+            traceId: fresh.traceId,
+            publicId: fresh.publicId,
+            checkoutId: fresh.checkoutId,
+            orderId: fresh.id,
+            customerMobile: fresh.customerMobile,
             cookSlug: cook?.slugHandle,
-            cookId: order.cookId,
+            cookId: fresh.cookId,
             kitchenName: cook?.kitchenName,
             status: updated.status,
-            amountPaise: lineTotal(order),
-            mealType: order.mealType,
-            serviceDate: order.serviceDate,
-            itemName: order.itemName,
-            qty: order.qty,
-            fulfillmentMode: order.fulfillmentMode,
-            channel: order.channel,
+            amountPaise: lineTotal(fresh),
+            mealType: fresh.mealType,
+            serviceDate: fresh.serviceDate,
+            itemName: fresh.itemName,
+            qty: fresh.qty,
+            fulfillmentMode: fresh.fulfillmentMode,
+            channel: fresh.channel,
           }),
           paymentId: input.paymentId ?? null,
-          gatewayTxnId: input.gatewayTxnId ?? order.gatewayTxnId,
+          gatewayTxnId: input.gatewayTxnId ?? fresh.gatewayTxnId,
         },
         "order paid",
       );
     }
     return out;
   });
+
+  // Lines this capture paid for but that are cancelled (expired hold raced us, unpaid day cancelled,
+  // or over-capacity recovery) — refund exactly those lines, once per line set.
+  const cancelledLines = updatedRows.filter((o) => o.status === "CANCELLED");
+  if (cancelledLines.length && cancelledLines.length === updatedRows.length) {
+    return refundCaptureOnTerminalOrder(db, cancelledLines, input);
+  }
+  if (cancelledLines.length) {
+    await refundCaptureOnTerminalOrder(db, cancelledLines, input);
+  }
 
   return {
     ...updatedRows[0],
@@ -1528,6 +1963,10 @@ export async function createOrderBatch(
     addressId?: number | null;
     /** Optional HTTP Idempotency-Key for the whole cart payment. */
     clientIdempotencyKey?: string | null;
+    /** Spend wallet credit first (default true when the flag is on). */
+    useCredit?: boolean;
+    /** UPI_QR only for PICKUP with upi_qr_pickup_enabled; otherwise LINK. */
+    paymentMethod?: "LINK" | "UPI_QR";
     lines: Array<{
       menuItemId: number;
       serviceDate: string;
@@ -1837,6 +2276,11 @@ export async function createOrderBatch(
     }
   }
 
+  // Cancelled checkouts drop their order keys but their CHARGE row keeps this one.
+  const paymentKey = (await paymentKeyTaken(db, batchIdempotency))
+    ? `${batchIdempotency}|addl|${publicId()}`
+    : batchIdempotency;
+
   // Abandoned unpaid lines from earlier attempts with these salted keys
   for (const o of existingLines) {
     if (o.status === "AWAITING_PAYMENT") {
@@ -1853,90 +2297,152 @@ export async function createOrderBatch(
   }
 
   const pay = getPaymentProvider();
+  const billMobile = payerMobile ?? input.customerMobile;
+  const { checkoutPricingOptions, lockCustomerCredit, priceLinesForCustomer } = await import(
+    "./credits.js"
+  );
+  const pricingOpts = await checkoutPricingOptions(db, {
+    useCredit: payerMobile ? false : input.useCredit,
+    paymentMethod: input.paymentMethod,
+    fulfillmentMode,
+  });
 
-  return db.transaction(async (tx) => {
-    // One lock for the kitchen; re-check every service date + plate stock inside the cart tx.
-    await lockCookCapacityRow(tx, cook.id);
-    for (const [serviceDate, qty] of qtyByDate) {
-      await assertCapacity(tx, cook.id, serviceDate, qty);
-    }
-    for (const p of prepared) {
-      await assertMenuStock(tx, p.menu, p.serviceDate, p.qty);
-    }
+  // 1) Reserve + insert lines under cook lock (no Razorpay).
+  let created: (typeof orders.$inferSelect)[];
+  try {
+    created = await db.transaction(async (tx) => {
+      await lockCookCapacityRow(tx, cook.id);
+      for (const [serviceDate, qty] of qtyByDate) {
+        await assertCapacity(tx, cook.id, serviceDate, qty);
+      }
+      for (const p of prepared) {
+        await assertMenuStock(tx, p.menu, p.serviceDate, p.qty);
+      }
+      await lockCustomerCredit(tx, input.customerMobile);
+      const pricing = await priceLinesForCustomer(
+        tx,
+        input.customerMobile,
+        prepared.map((p) => p.amountPaise),
+        pricingOpts,
+      );
 
-    const created = [];
-    for (const p of prepared) {
-      const pid = publicId();
-      const [order] = await tx
-        .insert(orders)
-        .values({
-          publicId: pid,
-          traceId,
-          customerMobile: input.customerMobile,
-          payerMobile,
-          cookId: cook.id,
-          menuItemId: p.menu.id,
-          addressId: address.id,
-          mealType: p.mealType,
-          serviceDate: p.serviceDate,
-          itemName: p.menu.itemName,
-          itemNameTa: p.menu.itemNameTa ?? null,
-          qty: p.qty,
-          spice: p.spice,
-          foodPaise: p.menu.pricePaise,
-          foodDiscountPaise: p.foodDiscountPaise,
-          weekDiscountPercent: p.weekDiscountPercent,
-          deliveryPaise,
-          platformFeePaise: p.platformFeePaise,
-          status: "AWAITING_PAYMENT",
-          fulfillmentMode,
-          deliveryTargetAddress: targetAddress,
-          channel,
-          checkoutId,
-          idempotencyKey: p.idempotencyKey,
-        })
-        .returning();
-      created.push(order);
+      const rows = [];
+      for (const [i, p] of prepared.entries()) {
+        const pid = publicId();
+        const [order] = await tx
+          .insert(orders)
+          .values({
+            publicId: pid,
+            traceId,
+            customerMobile: input.customerMobile,
+            payerMobile,
+            cookId: cook.id,
+            menuItemId: p.menu.id,
+            addressId: address.id,
+            mealType: p.mealType,
+            serviceDate: p.serviceDate,
+            itemName: p.menu.itemName,
+            itemNameTa: p.menu.itemNameTa ?? null,
+            qty: p.qty,
+            spice: p.spice,
+            foodPaise: p.menu.pricePaise,
+            foodDiscountPaise: p.foodDiscountPaise,
+            weekDiscountPercent: p.weekDiscountPercent,
+            deliveryPaise,
+            platformFeePaise: p.platformFeePaise,
+            convenienceFeePaise: pricing.priced[i].convenienceFeePaise,
+            creditAppliedPaise: pricing.priced[i].creditAppliedPaise,
+            paymentMethod: pricing.method,
+            status: "AWAITING_PAYMENT",
+            fulfillmentMode,
+            deliveryTargetAddress: targetAddress,
+            channel,
+            checkoutId,
+            idempotencyKey: p.idempotencyKey,
+          })
+          .returning();
+        rows.push(order);
+      }
+      return rows;
+    });
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      const existing = await db.query.orders.findFirst({
+        where: (t, { eq: e }) => e(t.idempotencyKey, prepared[0]?.idempotencyKey ?? ""),
+      });
+      if (existing?.checkoutId) {
+        const lines = await db.query.orders.findMany({
+          where: (t, { eq: e }) => e(t.checkoutId, existing.checkoutId!),
+        });
+        return {
+          checkoutId: existing.checkoutId,
+          publicId: existing.checkoutId,
+          paymentUrl: await resolveCustomerPaymentUrl(db, {
+            orderId: existing.id,
+            publicId: existing.publicId,
+            gatewayTxnId: existing.gatewayTxnId,
+            checkoutId: existing.checkoutId,
+          }),
+          gatewayTxnId: existing.gatewayTxnId,
+          totalPaise: lines.reduce((s, o) => s + lineTotal(o), 0),
+          foodDiscountTotalPaise: lines.reduce((s, o) => s + (o.foodDiscountPaise ?? 0), 0),
+          weekDiscountPercent: lines[0]?.weekDiscountPercent ?? null,
+          status: "AWAITING_PAYMENT" as const,
+          orders: lines,
+        };
+      }
     }
+    throw err;
+  }
 
-    const billMobile = payerMobile ?? input.customerMobile;
-    orderLog.info(
-      {
-        event: LogEvent.THIRD_PARTY_REQUEST,
-        provider: "payment",
-        action: "createPayment",
-        ...orderTriageFields({
-          traceId,
-          checkoutId,
-          customerMobile: input.customerMobile,
-          cookSlug: cook.slugHandle,
-          cookId: cook.id,
-          amountPaise: totalPaise,
-          mealType: created[0]?.mealType,
-          status: "AWAITING_PAYMENT",
-          channel,
-          fulfillmentMode,
-        }),
-        lineCount: created.length,
-      },
-      "payment createPayment (checkout)",
-    );
-    const payment = await pay.createPayment({
+  // 2) Gateway outside lock.
+  orderLog.info(
+    {
+      event: LogEvent.THIRD_PARTY_REQUEST,
+      provider: "payment",
+      action: "createPayment",
+      ...orderTriageFields({
+        traceId,
+        checkoutId,
+        customerMobile: input.customerMobile,
+        cookSlug: cook.slugHandle,
+        cookId: cook.id,
+        amountPaise: totalPaise,
+        mealType: created[0]?.mealType,
+        status: "AWAITING_PAYMENT",
+        channel,
+        fulfillmentMode,
+      }),
+      lineCount: created.length,
+    },
+    "payment createPayment (checkout)",
+  );
+  const chargePaise = created.reduce((s, o) => s + lineGatewayPaise(o), 0);
+  const chargeMethod = created[0].paymentMethod as PaymentMethod;
+  let payment: Awaited<ReturnType<typeof pay.createPayment>>;
+  try {
+    payment = await createGatewayCharge(pay, chargeMethod, {
       orderPublicId: checkoutId,
-      amountPaise: totalPaise,
+      amountPaise: chargePaise,
       customerMobile: billMobile,
-      idempotencyKey: batchIdempotency,
+      idempotencyKey: paymentKey,
       traceId,
     });
+  } catch (err) {
+    await releaseUnlinkedOrders(db, created, err);
+    throw paymentGatewayError(err);
+  }
 
-    // One payment row on the first order for the full cart total; lines share gatewayTxnId
+  // 3) Attach payment + notify.
+  const result = await db.transaction(async (tx) => {
     await tx.insert(payments).values({
       orderId: created[0].id,
       kind: "CHARGE",
-      amountPaise: totalPaise,
+      amountPaise: chargePaise,
       status: "CREATED",
       gatewayTxnId: payment.gatewayTxnId,
-      idempotencyKey: batchIdempotency,
+      idempotencyKey: paymentKey,
+      rawPayload: payment.qrImageUrl ? { qrImageUrl: payment.qrImageUrl } : undefined,
     });
 
     for (const order of created) {
@@ -1961,7 +2467,7 @@ export async function createOrderBatch(
       },
     });
 
-    await enqueueOutbox(tx, "OrderCreated", {
+    if (chargeMethod !== "CREDIT") await enqueueOutbox(tx, "OrderCreated", {
         checkoutId,
         traceId,
         orderIds: created.map((o) => o.id),
@@ -1975,7 +2481,7 @@ export async function createOrderBatch(
         childPays: Boolean(payerMobile),
         paymentUrl: payment.paymentUrl,
         gatewayTxnId: payment.gatewayTxnId,
-        amountPaise: totalPaise,
+        amountPaise: chargePaise,
         lines: created.map((o) => ({
           publicId: o.publicId,
           itemName: o.itemName,
@@ -2015,7 +2521,7 @@ export async function createOrderBatch(
           seniorMobile: input.customerMobile,
           kitchenName: cook.kitchenName,
           paymentUrl: payment.paymentUrl,
-          amountPaise: totalPaise,
+          amountPaise: chargePaise,
           lineCount: created.length,
         });
       const { recordOrderActivity } = await import("./orderActivity.js");
@@ -2040,13 +2546,24 @@ export async function createOrderBatch(
       traceId,
       gatewayTxnId: payment.gatewayTxnId,
       paymentUrl: payment.paymentUrl,
-      totalPaise,
+      qrImageUrl: payment.qrImageUrl ?? null,
+      totalPaise: refreshed.reduce((s, o) => s + lineTotal(o), 0),
+      chargePaise,
+      creditAppliedPaise: refreshed.reduce((s, o) => s + o.creditAppliedPaise, 0),
       foodDiscountTotalPaise,
       weekDiscountPercent: discountOn ? weekRule.percent : null,
-      status: "AWAITING_PAYMENT" as const,
+      status: "AWAITING_PAYMENT" as "AWAITING_PAYMENT" | "PAID",
       orders: refreshed,
     };
   });
+  if (chargeMethod === "CREDIT") {
+    await markOrderPaid(db, { gatewayTxnId: payment.gatewayTxnId });
+    const paid = await db.query.orders.findMany({
+      where: (t, { eq: e }) => e(t.checkoutId, checkoutId),
+    });
+    return { ...result, status: "PAID" as const, orders: paid };
+  }
+  return result;
 }
 
 export async function getCheckoutById(db: Db, checkoutId: string) {
@@ -2080,6 +2597,9 @@ export async function getCheckoutById(db: Db, checkoutId: string) {
       gatewayTxnId: rows[0].gatewayTxnId,
       checkoutId,
     }),
+    qrImageUrl: await resolvePaymentQrUrl(db, rows[0].gatewayTxnId),
+    chargePaise: rows.reduce((sum, o) => sum + lineGatewayPaise(o), 0),
+    creditAppliedPaise: rows.reduce((sum, o) => sum + o.creditAppliedPaise, 0),
     totalPaise,
     kitchenName: cook?.kitchenName ?? null,
     cookSlug: cook?.slugHandle ?? null,
@@ -2140,7 +2660,7 @@ export async function isOrderCancellable(
   );
 }
 
-/** Paid + past cut-off → customer may ask kitchen to cancel (not instant). */
+/** Paid/cooking + past cut-off → customer may ask kitchen to cancel (not instant). */
 export async function isOrderCancelRequestable(
   db: Db,
   order: {
@@ -2151,7 +2671,7 @@ export async function isOrderCancelRequestable(
   },
   cook?: { id: string } | null,
 ): Promise<boolean> {
-  if (order.status !== "PAID") return false;
+  if (order.status !== "PAID" && order.status !== "COOKING") return false;
   const profile =
     cook ??
     (await db.query.cookProfiles.findFirst({
@@ -2168,6 +2688,81 @@ export async function isOrderCancelRequestable(
 }
 
 type ActivityChannel = "VOICE_IVR" | "WHATSAPP_BOT" | "WEB_STOREFRONT" | "SYSTEM_CRON" | "ADMIN";
+
+const CHECKOUT_TERMINAL = new Set(["CANCELLED", "REFUNDED", "FAILED"]);
+
+/**
+ * Customer cancels one day of a paid week cart (called inside refundOrder's claim txn, order row locked):
+ * - Move the ₹7 platform fee onto the earliest remaining day (don't refund the fee while days remain).
+ * - If the remaining *calendar days* drop below minDays, claw the remaining paid days' week discount
+ *   out of this refund (the cart no longer qualifies). Percent comes from the order snapshot; minDays
+ *   from the cook profile (not snapshotted).
+ * Unpaid siblings are left alone: the shared payment link amount is fixed, so changing their totals
+ * would make the eventual capture mismatch.
+ */
+export async function rebalanceCheckoutForLineCancel(tx: DbOrTx, orderId: number) {
+  const order = await tx.query.orders.findFirst({ where: (t, { eq: e }) => e(t.id, orderId) });
+  if (!order?.checkoutId) return;
+  const siblings = await tx.query.orders.findMany({
+    where: (t, { eq: e }) => e(t.checkoutId, order.checkoutId!),
+  });
+  const remaining = siblings
+    .filter((o) => o.id !== order.id && !CHECKOUT_TERMINAL.has(o.status))
+    .sort((a, b) => a.serviceDate.localeCompare(b.serviceDate) || a.id - b.id);
+  if (!remaining.length) return;
+
+  // Prefer a stable paid sibling for the fee — never park it on CANCEL_REQUESTED (that cancel
+  // may later refund the fee while other days continue without it).
+  const feeTarget = remaining.find((o) =>
+    REBALANCE_ACTIVE.includes(o.status as OrderState),
+  );
+  if (order.platformFeePaise > 0 && feeTarget) {
+    await tx
+      .update(orders)
+      .set({
+        platformFeePaise: sql`${orders.platformFeePaise} + ${order.platformFeePaise}`,
+        updatedAt: new Date(),
+      })
+      .where(eq(orders.id, feeTarget.id));
+    await tx
+      .update(orders)
+      .set({ platformFeePaise: 0, updatedAt: new Date() })
+      .where(eq(orders.id, order.id));
+  }
+
+  if (order.weekDiscountPercent == null) return;
+  const cook = await tx.query.cookProfiles.findFirst({
+    where: (t, { eq: e }) => e(t.id, order.cookId),
+  });
+  const rule = normalizeWeekDiscountRule({
+    percent: order.weekDiscountPercent,
+    minDays: cook?.weekDiscountMinDays,
+  });
+  if (weekDiscountSurvivesCancel(remaining.map((o) => o.serviceDate), rule)) return;
+
+  // Move (not copy) the discount: remaining paid days become full price and this refund shrinks
+  // by the same amount, so repeated or whole-cart cancels never claw the same discount twice.
+  // Skip CANCEL_REQUESTED siblings — if that cancel is later declined they must keep their discount.
+  const clawFrom = remaining.filter(
+    (s) => REBALANCE_ACTIVE.includes(s.status as OrderState) && (s.foodDiscountPaise ?? 0) > 0,
+  );
+  const clawDiscountPaise = clawFrom.reduce((n, s) => n + (s.foodDiscountPaise ?? 0), 0);
+  if (clawDiscountPaise > 0) {
+    for (const s of clawFrom) {
+      await tx
+        .update(orders)
+        .set({ foodDiscountPaise: 0, weekDiscountPercent: null, updatedAt: new Date() })
+        .where(eq(orders.id, s.id));
+    }
+    await tx
+      .update(orders)
+      .set({
+        foodDiscountPaise: (order.foodDiscountPaise ?? 0) + clawDiscountPaise,
+        updatedAt: new Date(),
+      })
+      .where(eq(orders.id, order.id));
+  }
+}
 
 async function finalizeCancelInTx(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2219,13 +2814,13 @@ async function finalizeCancelInTx(
 export async function cancelOrder(
   db: Db,
   publicId: string,
-  opts: { channel?: ActivityChannel } = {},
+  opts: { channel?: ActivityChannel; refundTo?: "SOURCE" | "CREDIT" } = {},
 ) {
   const activityChannel = opts.channel ?? "WEB_STOREFRONT";
   const order = await db.query.orders.findFirst({
     where: (t, { eq: e }) => e(t.publicId, publicId),
   });
-  if (!order) throw new Error("Order not found");
+  if (!order) throw DomainError.notFound("Order not found");
   if (order.status === "CANCELLED") {
     return { ...order, cancellable: false, cancelRequestable: false, mode: "already_cancelled" as const };
   }
@@ -2243,9 +2838,9 @@ export async function cancelOrder(
   });
   if (!cook) throw new Error("Cook not found");
 
-  // After cut-off on PAID → request cook approval instead of hard-failing.
+  // After cut-off on PAID/COOKING → request cook approval instead of hard-failing.
   if (
-    order.status === "PAID" &&
+    (order.status === "PAID" || order.status === "COOKING") &&
     (await isOrderCancelRequestable(db, order, cook))
   ) {
     return requestCancelOrder(db, publicId, { channel: activityChannel });
@@ -2261,6 +2856,8 @@ export async function cancelOrder(
       orderId: order.id,
       mode: "FULL",
       reason: "Customer cancelled before cut-off",
+      rebalanceCheckout: true,
+      refundTo: opts.refundTo,
     });
     return {
       ...refunded,
@@ -2273,6 +2870,18 @@ export async function cancelOrder(
   const updated = await db.transaction(async (tx) =>
     finalizeCancelInTx(tx, order, cook, wasPaid, activityChannel),
   );
+  // A week cart shares one link — keep it payable while any sibling day is still unpaid.
+  const siblingsAwaitingPay = order.checkoutId
+    ? await db.query.orders.findFirst({
+        where: (t, { eq: e, and: a, ne: n, inArray: ia }) =>
+          a(
+            e(t.checkoutId, order.checkoutId!),
+            n(t.id, order.id),
+            ia(t.status, ["AWAITING_PAYMENT", "CONFIRMING_PAYMENT"]),
+          ),
+      })
+    : null;
+  if (!siblingsAwaitingPay) await cancelOpenPaymentLink(order.gatewayTxnId);
   return {
     ...updated,
     cancellable: false,
@@ -2281,7 +2890,7 @@ export async function cancelOrder(
   };
 }
 
-/** Customer asks kitchen to cancel after cut-off (PAID only). */
+/** Customer asks kitchen to cancel after cut-off (PAID or COOKING). */
 export async function requestCancelOrder(
   db: Db,
   publicId: string,
@@ -2300,7 +2909,7 @@ export async function requestCancelOrder(
       mode: "cancel_requested" as const,
     };
   }
-  if (order.status !== "PAID") {
+  if (order.status !== "PAID" && order.status !== "COOKING") {
     throw new Error("Only paid orders waiting for the kitchen can request a cancel after cut-off");
   }
   const cook = await db.query.cookProfiles.findFirst({
@@ -2310,14 +2919,22 @@ export async function requestCancelOrder(
   if (!(await isOrderCancelRequestable(db, order, cook))) {
     throw new Error("Use Cancel before cut-off — kitchen request is only after cut-off");
   }
-  assertTransition("PAID", "CANCEL_REQUESTED");
+  assertTransition(order.status as OrderState, "CANCEL_REQUESTED");
 
   return db.transaction(async (tx) => {
     const [updated] = await tx
       .update(orders)
       .set({ status: "CANCEL_REQUESTED", updatedAt: new Date() })
-      .where(eq(orders.id, order.id))
+      .where(
+        and(
+          eq(orders.id, order.id),
+          inArray(orders.status, ["PAID", "COOKING"]),
+        ),
+      )
       .returning();
+    if (!updated) {
+      throw new Error("Order status changed — refresh and try again");
+    }
     await enqueueOutbox(tx, "CancelRequested", {
         orderId: order.id,
         publicId: order.publicId,
@@ -2389,10 +3006,11 @@ export async function acceptCancelRequest(
     orderId: order.id,
     mode: "FULL",
     reason: "Cook accepted customer cancel request after cut-off",
+    rebalanceCheckout: true,
   });
 }
 
-/** Cook declines — order returns to PAID kitchen queue. */
+/** Cook declines — restore PAID, or COOKING if cut-off already locked. */
 export async function declineCancelRequest(
   db: Db,
   publicId: string,
@@ -2407,17 +3025,38 @@ export async function declineCancelRequest(
   if (order.status !== "CANCEL_REQUESTED") {
     throw new Error("No cancel request pending for this order");
   }
-  assertTransition("CANCEL_REQUESTED", "PAID");
   const cook = await db.query.cookProfiles.findFirst({
     where: (t, { eq: e }) => e(t.id, order.cookId),
   });
+  const lock = await db.query.cutoffLocks.findFirst({
+    where: (t, { eq: e, and: a }) =>
+      a(
+        e(t.cookId, order.cookId),
+        e(t.serviceDate, order.serviceDate),
+        e(t.mealType, order.mealType),
+      ),
+  });
+  const restoreStatus: OrderState = lock ? "COOKING" : "PAID";
+  assertTransition("CANCEL_REQUESTED", restoreStatus);
 
   return db.transaction(async (tx) => {
+    await tx.execute(sql`select id from orders where id = ${order.id} for update`);
+    const refundInFlight = await tx.query.payments.findFirst({
+      where: (t, { eq: e, and: a, inArray: ia }) =>
+        a(e(t.orderId, order.id), e(t.kind, "REFUND"), ia(t.status, ["PENDING", "REFUNDED"])),
+    });
+    if (refundInFlight) {
+      throw DomainError.conflict("This cancel request was already accepted — refund is in progress");
+    }
     const [updated] = await tx
       .update(orders)
-      .set({ status: "PAID", updatedAt: new Date() })
-      .where(eq(orders.id, order.id))
+      .set({ status: restoreStatus, updatedAt: new Date() })
+      .where(and(eq(orders.id, order.id), eq(orders.status, "CANCEL_REQUESTED")))
       .returning();
+    if (!updated) {
+      // Accept (refund) or another decline won the race — don't resurrect the order.
+      throw DomainError.conflict("This cancel request was already handled — refresh");
+    }
     await enqueueOutbox(tx, "CancelDeclined", {
         publicId: order.publicId,
         customerMobile: order.customerMobile,
@@ -2435,6 +3074,7 @@ export async function declineCancelRequest(
       eventName: "ORDER_CANCEL_DECLINED",
       payload: {
         reason: reason?.slice(0, 200) || "Kitchen could not cancel — food is being prepared",
+        restoredStatus: restoreStatus,
       },
     });
     return { ...updated, mode: "cancel_declined" as const };
@@ -2475,7 +3115,7 @@ export async function listPendingCancelRequests(db: Db, cookSlug: string, date?:
 export async function cancelCheckout(
   db: Db,
   checkoutId: string,
-  opts: { channel?: ActivityChannel } = {},
+  opts: { channel?: ActivityChannel; refundTo?: "SOURCE" | "CREDIT" } = {},
 ) {
   const rows = await db.query.orders.findMany({
     where: (t, { eq: e }) => e(t.checkoutId, checkoutId),
@@ -2747,45 +3387,58 @@ export async function approveLateOrder(db: Db, publicId: string) {
   const payKey = `${order.idempotencyKey}|pay`;
   const billMobile = order.payerMobile ?? order.customerMobile;
 
+  bindTrace({
+    traceId: order.traceId,
+    publicId: order.publicId,
+    checkoutId: order.checkoutId,
+    customerMobile: order.customerMobile,
+    cookId: order.cookId,
+    orderId: order.id,
+    status: "AWAITING_PAYMENT",
+    amountPaise,
+    mealType: order.mealType,
+    serviceDate: order.serviceDate,
+  });
+  orderLog.info(
+    {
+      event: LogEvent.THIRD_PARTY_REQUEST,
+      provider: "payment",
+      action: "createPayment",
+      ...orderTriageFields({
+        traceId: order.traceId,
+        publicId: order.publicId,
+        orderId: order.id,
+        customerMobile: order.customerMobile,
+        cookId: order.cookId,
+        amountPaise,
+        mealType: order.mealType,
+        serviceDate: order.serviceDate,
+        status: "AWAITING_PAYMENT",
+      }),
+    },
+    "payment createPayment (late approve)",
+  );
+  const payment = await pay.createPayment({
+    orderPublicId: order.publicId,
+    amountPaise,
+    customerMobile: billMobile,
+    idempotencyKey: payKey,
+    traceId: order.traceId,
+  });
+
   return db.transaction(async (tx) => {
-    bindTrace({
-      traceId: order.traceId,
-      publicId: order.publicId,
-      checkoutId: order.checkoutId,
-      customerMobile: order.customerMobile,
-      cookId: order.cookId,
-      orderId: order.id,
-      status: "AWAITING_PAYMENT",
-      amountPaise,
-      mealType: order.mealType,
-      serviceDate: order.serviceDate,
-    });
-    orderLog.info(
-      {
-        event: LogEvent.THIRD_PARTY_REQUEST,
-        provider: "payment",
-        action: "createPayment",
-        ...orderTriageFields({
-          traceId: order.traceId,
-          publicId: order.publicId,
-          orderId: order.id,
-          customerMobile: order.customerMobile,
-          cookId: order.cookId,
-          amountPaise,
-          mealType: order.mealType,
-          serviceDate: order.serviceDate,
-          status: "AWAITING_PAYMENT",
-        }),
-      },
-      "payment createPayment (late approve)",
-    );
-    const payment = await pay.createPayment({
-      orderPublicId: order.publicId,
-      amountPaise,
-      customerMobile: billMobile,
-      idempotencyKey: payKey,
-      traceId: order.traceId,
-    });
+    const [updated] = await tx
+      .update(orders)
+      .set({
+        status: "AWAITING_PAYMENT",
+        gatewayTxnId: payment.gatewayTxnId,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(orders.id, order.id), eq(orders.status, "PENDING_APPROVAL")))
+      .returning();
+    if (!updated) {
+      throw DomainError.conflict("Late order was already handled — refresh and try again");
+    }
 
     await tx.insert(payments).values({
       orderId: order.id,
@@ -2795,16 +3448,6 @@ export async function approveLateOrder(db: Db, publicId: string) {
       gatewayTxnId: payment.gatewayTxnId,
       idempotencyKey: payKey,
     });
-
-    const [updated] = await tx
-      .update(orders)
-      .set({
-        status: "AWAITING_PAYMENT",
-        gatewayTxnId: payment.gatewayTxnId,
-        updatedAt: new Date(),
-      })
-      .where(eq(orders.id, order.id))
-      .returning();
 
     await tx.insert(platformEventLedger).values({
       associatedMobile: cook.mobileNumber,
@@ -3080,6 +3723,7 @@ export async function expireStalePaymentHolds(
       status: orders.status,
       serviceDate: orders.serviceDate,
       customerMobile: orders.customerMobile,
+      gatewayTxnId: orders.gatewayTxnId,
     })
     .from(orders)
     .where(and(eq(orders.status, "AWAITING_PAYMENT"), lt(orders.updatedAt, cutoff)))
@@ -3089,7 +3733,8 @@ export async function expireStalePaymentHolds(
   for (const row of stale) {
     try {
       assertTransition(row.status as OrderState, "CANCELLED");
-      await db
+      await cancelOpenPaymentLink(row.gatewayTxnId);
+      const [updated] = await db
         .update(orders)
         .set({
           status: "CANCELLED",
@@ -3097,7 +3742,9 @@ export async function expireStalePaymentHolds(
           gatewayTxnId: null,
           updatedAt: new Date(),
         })
-        .where(eq(orders.id, row.id));
+        .where(and(eq(orders.id, row.id), eq(orders.status, "AWAITING_PAYMENT")))
+        .returning();
+      if (!updated) continue;
       await db.insert(platformEventLedger).values({
         associatedMobile: row.customerMobile,
         orderId: row.id,
@@ -3108,6 +3755,7 @@ export async function expireStalePaymentHolds(
           serviceDate: row.serviceDate,
           previousStatus: row.status,
           olderThanMs,
+          cancelledLink: row.gatewayTxnId,
         },
       });
       cancelled += 1;
@@ -3214,8 +3862,7 @@ export async function listOrdersForCustomer(
   customerMobile: string,
   opts: number | { limit?: number; offset?: number } = 50,
 ) {
-  // Keep Open clean: unpaid for yesterday (or earlier) should not stay Pay-now.
-  await expireUnpaidOrdersPastServiceDate(db);
+  // Expiry runs on the scheduled internal job — keep list GETs read-only (H7).
 
   const parsed = typeof opts === "number" ? { limit: opts } : opts;
   const limit = Math.min(Math.max(parsed.limit ?? 50, 1), 100);

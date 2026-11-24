@@ -16,7 +16,7 @@ import {
   type MsgKey,
 } from "@localmeals/i18n";
 import { authFetch, getStoredUser } from "@/lib/auth";
-import { LOCALE_STORAGE_KEY, readStoredLocale } from "@/lib/locale";
+import { LOCALE_STORAGE_KEY, readStoredLocale, writeLocaleCookie } from "@/lib/locale";
 
 type LocaleContextValue = {
   locale: Locale;
@@ -43,6 +43,7 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
     } catch {
       /* ignore */
     }
+    writeLocaleCookie(locale);
   }, [locale, ready]);
 
   const setLocale = useCallback((next: Locale) => {
@@ -52,6 +53,7 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
     } catch {
       /* ignore */
     }
+    writeLocaleCookie(next);
     // Persist on profile when signed in (fire-and-forget)
     if (getStoredUser()) {
       void authFetch("/me/profile", {

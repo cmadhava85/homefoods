@@ -52,3 +52,14 @@ auth_enforce  = true
 # GitHub Actions → Cloud Run (Workload Identity)
 # create_github_wif = true
 # github_repository = "YOUR_USER/localmeals"
+
+# --- Production readiness ---
+# db_tier              = "db-g1-small"   # f1-micro: shared core, no SLA, ~25 connections
+# db_availability_type = "REGIONAL"      # HA failover (~2x DB cost)
+# db_pitr_enabled      = true
+# db_log_retention_days    = 7
+# db_backup_retained_count = 14
+# alert_email          = "ops@example.com"  # enables uptime checks + all alert policies
+# billing_account_id   = "XXXXXX-XXXXXX-XXXXXX"
+# monthly_budget_inr   = 5000
+# vpc_connector_enabled = false   # only for private-IP resources; prefer Direct VPC egress

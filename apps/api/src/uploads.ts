@@ -18,6 +18,17 @@ export function gcsUploadsBucket(): string | null {
   return b || null;
 }
 
+/** Public-read bucket for menu photos only (served directly by GCS, not the API). */
+export function gcsPublicMenuBucket(): string | null {
+  const b = process.env.GCS_PUBLIC_MENU_BUCKET?.trim();
+  return b || null;
+}
+
+export function publicMenuObjectUrl(name: string): string | null {
+  const bucket = gcsPublicMenuBucket();
+  return bucket && name.startsWith("menu-") ? `https://storage.googleapis.com/${bucket}/${name}` : null;
+}
+
 export function usesGcsUploads(): boolean {
   return Boolean(gcsUploadsBucket());
 }

@@ -18,13 +18,51 @@ variable "name_prefix" {
 
 variable "db_tier" {
   type        = string
-  description = "Cloud SQL machine tier (ENTERPRISE edition)"
+  description = "Cloud SQL machine tier (ENTERPRISE edition). db-f1-micro is shared-core with no SLA and ~25 connections — use db-g1-small or db-custom-1-3840 for production launch."
   default     = "db-f1-micro"
+}
+
+variable "db_availability_type" {
+  type        = string
+  description = "ZONAL (single zone) or REGIONAL (HA standby + automatic failover)"
+  default     = "ZONAL"
+  validation {
+    condition     = contains(["ZONAL", "REGIONAL"], var.db_availability_type)
+    error_message = "db_availability_type must be ZONAL or REGIONAL."
+  }
+}
+
+variable "db_pitr_enabled" {
+  type        = bool
+  description = "Enable point-in-time recovery (WAL archiving) on Cloud SQL"
+  default     = true
+}
+
+variable "db_log_retention_days" {
+  type        = number
+  description = "Days of transaction logs kept for PITR (1-7 on ENTERPRISE)"
+  default     = 7
+  validation {
+    condition     = var.db_log_retention_days >= 1 && var.db_log_retention_days <= 7
+    error_message = "db_log_retention_days must be 1-7 on ENTERPRISE edition."
+  }
+}
+
+variable "db_backup_retained_count" {
+  type        = number
+  description = "Number of automated daily backups to keep"
+  default     = 14
 }
 
 variable "db_disk_size_gb" {
   type    = number
   default = 10
+}
+
+variable "vpc_connector_enabled" {
+  type        = bool
+  description = "Create the Serverless VPC Access connector and attach API/worker (only needed for private-IP resources)"
+  default     = false
 }
 
 variable "vpc_connector_range" {
@@ -202,14 +240,14 @@ variable "create_scheduler" {
 
 variable "lunch_cutoff_schedule" {
   type        = string
-  description = "Cron for lunch cut-off (Asia/Kolkata)"
-  default     = "0 8 * * *"
+  description = "Cron for meal cut-off ticks — breakfast/lunch/dinner jobs share this (Asia/Kolkata)"
+  default     = "*/15 * * * *"
 }
 
 variable "eod_schedule" {
   type        = string
-  description = "Cron for EOD settlement (Asia/Kolkata)"
-  default     = "0 18 * * *"
+  description = "Cron for EOD settlement (Asia/Kolkata) — after dinner window"
+  default     = "0 21 * * *"
 }
 
 variable "api_custom_domain" {
@@ -270,4 +308,40 @@ variable "github_repository" {
   type        = string
   description = "GitHub repo allowed to deploy (OWNER/REPO)"
   default     = ""
+}
+
+variable "db_connections_alert_threshold" {
+  type        = number
+  description = "Alert when Postgres backends exceed this (f1-micro max_connections ≈ 25)"
+  default     = 20
+}
+
+variable "billing_account_id" {
+  type        = string
+  description = "Billing account id (XXXXXX-XXXXXX-XXXXXX) for the monthly budget; empty = no budget"
+  default     = ""
+}
+
+variable "monthly_budget_inr" {
+  type        = number
+  description = "Monthly GCP budget in INR (alerts at 50/90/100% actual and 100% forecast)"
+  default     = 5000
+}
+
+variable "log_exclusions_enabled" {
+  type        = bool
+  description = "Drop non-error Cloud Run platform request logs (duplicates of the app request.completed log) before ingestion"
+  default     = true
+}
+
+variable "worker_push_mode" {
+  type        = bool
+  description = "Scale-to-zero worker woken via Pub/Sub push + 1-min Scheduler fallback (false = always-on poller)"
+  default     = true
+}
+
+variable "menu_images_public" {
+  type        = bool
+  description = "Serve menu photos from a public-read bucket (concern photos stay private)"
+  default     = true
 }

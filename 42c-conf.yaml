@@ -1,0 +1,13 @@
+# 42Crunch API Security Audit — Ford thresholds (us.42crunch.cloud).
+# CI: .github/workflows/security.yml job "api-audit" (runs only when the API_TOKEN_42C secret is set).
+audit:
+  branches:
+    "*":
+      fail_on:
+        invalid_contract: true
+        score:
+          global: 80
+          security: 30
+      discovery: false
+      mapping:
+        apps/api/openapi.json: localmeals-api

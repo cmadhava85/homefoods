@@ -7,6 +7,9 @@ import { createPostgresClient } from "./client.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 async function main() {
+  if (process.env.NODE_ENV === "production" && !process.env.DATABASE_URL) {
+    throw new Error("DATABASE_URL is required in production (refusing localhost default)");
+  }
   const url = process.env.DATABASE_URL ?? "postgres://localmeals:localmeals@localhost:5432/localmeals";
   const sql = createPostgresClient(url, { max: 1 });
   const db = drizzle(sql);

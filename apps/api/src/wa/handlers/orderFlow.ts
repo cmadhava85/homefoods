@@ -1,3 +1,4 @@
+import { lineGatewayPaise } from "@localmeals/domain";
 import {
   parseCancelCommand,
   parseFollowCommand,
@@ -193,7 +194,7 @@ export async function handleOrderFlow(s: WaSession): Promise<object> {
           "",
           "Then: Week <kitchen> lunch all   or   Week <kitchen> dinner Mon Wed",
         ].join("\n"),
-        buttons: kitchens.slice(0, 3).map((k) => `Week ${k.slugHandle}`),
+        buttons: ["Whole week", "Menu", "Orders"],
       });
       return { ok: true, intent, needSlug: true, replies: replies() };
     }
@@ -456,12 +457,27 @@ export async function handleOrderFlow(s: WaSession): Promise<object> {
         payerMobile: parsed.payerMobile ?? null,
         lines,
       });
-      const discountLine =
-        batch.foodDiscountTotalPaise > 0
-          ? `Week discount −₹${(batch.foodDiscountTotalPaise / 100).toFixed(0)} (food only)`
-          : week.weekDiscount?.label
-            ? `Tip: ${week.weekDiscount.label} on week carts`
-            : null;
+      const foodGross = batch.orders.reduce((s, o) => s + o.foodPaise * o.qty, 0);
+      const deliverySum = batch.orders.reduce((s, o) => s + o.deliveryPaise, 0);
+      const platformSum = batch.orders.reduce((s, o) => s + o.platformFeePaise, 0);
+      const discountSum = batch.foodDiscountTotalPaise ?? 0;
+      const weekFee = batch.orders.reduce((s, o) => s + (o.convenienceFeePaise ?? 0), 0);
+      const weekCredit = batch.orders.reduce((s, o) => s + (o.creditAppliedPaise ?? 0), 0);
+      const priceLine =
+        discountSum > 0
+          ? wt("wa.priceBreakdownDiscount", {
+              food: (foodGross / 100).toFixed(0),
+              discount: (discountSum / 100).toFixed(0),
+              delivery: (deliverySum / 100).toFixed(0),
+              platform: (platformSum / 100).toFixed(0),
+              total: ((batch.totalPaise - weekFee) / 100).toFixed(0),
+            })
+          : wt("wa.priceBreakdown", {
+              food: (foodGross / 100).toFixed(0),
+              delivery: (deliverySum / 100).toFixed(0),
+              platform: (platformSum / 100).toFixed(0),
+              total: ((batch.totalPaise - weekFee) / 100).toFixed(0),
+            });
       await wa.send({
         to: from,
         body: [
@@ -476,15 +492,25 @@ export async function handleOrderFlow(s: WaSession): Promise<object> {
           ...batch.orders.map(
             (o) => `• ${o.serviceDate} · ${o.qty}× ${localizedDishName(waLocale, o)}`,
           ),
-          discountLine,
-          `Total ₹${(batch.totalPaise / 100).toFixed(0)}`,
-          batch.paymentUrl ? `Pay: ${batch.paymentUrl}` : null,
+          priceLine,
+          weekFee || weekCredit
+            ? wt("wa.feeCreditLine", {
+                fee: (weekFee / 100).toFixed(2),
+                credit: (weekCredit / 100).toFixed(2),
+                pay: (batch.orders.reduce((s, o) => s + lineGatewayPaise(o), 0) / 100).toFixed(2),
+              })
+            : null,
+          batch.status === "PAID"
+            ? wt("wa.paidWithCredit")
+            : batch.paymentUrl
+              ? `Pay: ${batch.paymentUrl}`
+              : null,
           "",
-          "One payment covers all days. Delivery + ₹7 fee never discounted.",
+          "One payment covers all days.",
         ]
           .filter(Boolean)
           .join("\n"),
-        buttons: [`Pay ${batch.checkoutId}`, "Orders", "Cancel"],
+        buttons: ["Pay", "Orders", "Menu"],
       });
       return {
         ok: true,

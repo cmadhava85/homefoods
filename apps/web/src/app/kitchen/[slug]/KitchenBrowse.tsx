@@ -1,5 +1,7 @@
 "use client";
 
+import { uploadSrc } from "@/lib/uploadUrl";
+
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -23,6 +25,11 @@ import { isExternalPaymentUrl, payPageHref } from "@/lib/payments";
 import { isSoloKitchenMode, platformFeePaise } from "@/lib/soloKitchen";
 import { localizedDishName } from "@localmeals/i18n";
 import { OrderForm, type CartAddPayload } from "./OrderForm";
+import {
+  ConfirmPayDialog,
+  type ConfirmPayChoice,
+  type ConfirmPaySummary,
+} from "@/components/ConfirmPayDialog";
 
 type MealType = "BREAKFAST" | "LUNCH" | "DINNER";
 
@@ -32,6 +39,7 @@ type MenuItem = {
   itemNameTa?: string | null;
   pricePaise: number;
   isVeg: boolean;
+  allergens?: string[] | null;
   imageUrl?: string | null;
   serviceDate?: string | null;
   dayOfWeek?: number | null;
@@ -95,11 +103,7 @@ type PublicReview = {
 
 type CartLine = CartAddPayload & { mealType: MealType; mealLabel: string };
 
-function imgSrc(url: string | null | undefined) {
-  if (!url) return null;
-  if (url.startsWith("http")) return url;
-  return `${API_BASE}${url}`;
-}
+const imgSrc = uploadSrc;
 
 export function KitchenBrowse({
   slug,
@@ -160,6 +164,7 @@ export function KitchenBrowse({
   const [cartExpanded, setCartExpanded] = useState(false);
   const [checkoutErr, setCheckoutErr] = useState<string | null>(null);
   const [checkingOut, setCheckingOut] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [reviews, setReviews] = useState<PublicReview[]>([]);
   const [payers, setPayers] = useState<string[]>([]);
   const [payerMobile, setPayerMobile] = useState<string>("");
@@ -536,6 +541,12 @@ export function KitchenBrowse({
     }
     const overlaps = cart.some((c) => orderedDates.has(c.serviceDate));
     if (overlaps && !window.confirm(t("kitchen.confirmAnotherOrder"))) return;
+    // Confirm-before-pay: breakdown, credit, payment method, cut-off note.
+    setConfirmOpen(true);
+  }
+
+  async function placeCheckout(choice: ConfirmPayChoice) {
+    if (!user) return;
     setCheckingOut(true);
     setCheckoutErr(null);
     try {
@@ -548,6 +559,8 @@ export function KitchenBrowse({
           payerMobile: payerMobile || null,
           fulfillmentMode: effectiveFulfillment,
           addressId: needsAddress ? Number(addressId) : null,
+          useCredit: choice.useCredit,
+          paymentMethod: choice.paymentMethod,
           lines: cart.map((c) => ({
             menuItemId: c.menuItemId,
             serviceDate: c.serviceDate,
@@ -558,8 +571,14 @@ export function KitchenBrowse({
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Checkout failed");
+      setConfirmOpen(false);
       setCart([]);
       setAddressId("");
+      // Fully paid by LocalMeals credit — nothing to pay.
+      if (json.status === "PAID") {
+        router.push(`/order/confirmed/${json.checkoutId}`);
+        return;
+      }
       // Child Pays: senior waits — payer gets the pay link / WA
       if (payerMobile) {
         router.push(`/order/confirmed/${json.checkoutId}`);
@@ -571,11 +590,37 @@ export function KitchenBrowse({
       }
       router.push(payPageHref(json.checkoutId, json.gatewayTxnId));
     } catch (e) {
+      setConfirmOpen(false);
       setCheckoutErr(e instanceof Error ? e.message : "Checkout failed");
     } finally {
       setCheckingOut(false);
     }
   }
+
+  const confirmSummary: ConfirmPaySummary = useMemo(() => {
+    const pct = weekDiscountOn ? (weekRule?.percent ?? 0) : 0;
+    const platform = cart.length > 0 ? platformFeePaise() : 0;
+    const sorted = [...cart].sort((a, b) => a.serviceDate.localeCompare(b.serviceDate));
+    return {
+      rows: sorted.map((c, i) => ({
+        key: `${c.serviceDate}-${c.menuItemId}-${i}`,
+        label: `${c.serviceDate} · ${c.qty}× ${c.itemName}`,
+        amountPaise: c.pricePaise * c.qty,
+      })),
+      lineBasesPaise: sorted.map((c, i) => {
+        const food = c.pricePaise * c.qty;
+        const discount = pct > 0 ? Math.floor((food * pct) / 100) : 0;
+        return food - discount + deliveryPaise + (i === 0 ? platform : 0);
+      }),
+      foodPaise: cartFoodPaise,
+      discountPaise: cartDiscountPaise,
+      deliveryPaise: cartDeliveryPaise,
+      platformPaise: platform,
+      fulfillmentMode: effectiveFulfillment,
+      cutoff: data?.cutoff ?? data?.lunchCutoff ?? null,
+      childPays: Boolean(payerMobile),
+    };
+  }, [cart, weekDiscountOn, weekRule?.percent, deliveryPaise, cartFoodPaise, cartDiscountPaise, cartDeliveryPaise, effectiveFulfillment, data?.cutoff, data?.lunchCutoff, payerMobile]);
 
   if (err) return <p className="err">{err}</p>;
   if (!data || !day) return <p className="muted">Loading week’s menu…</p>;
@@ -601,6 +646,14 @@ export function KitchenBrowse({
         cart.length && cartExpanded ? " has-cart-expanded" : ""
       }`}
     >
+      {confirmOpen ? (
+        <ConfirmPayDialog
+          summary={confirmSummary}
+          busy={checkingOut}
+          onCancel={() => setConfirmOpen(false)}
+          onConfirm={(choice) => void placeCheckout(choice)}
+        />
+      ) : null}
       <header className="kitchen-hero">
         <div className="kitchen-hero-top">
           <div className="kitchen-hero-titles">
@@ -863,6 +916,9 @@ export function KitchenBrowse({
                           <p className="muted plate-sub">
                             {m.isVeg ? t("common.veg") : t("common.nonVeg")}
                             {source ? ` · ${source}` : ""}
+                            {m.allergens?.length
+                              ? ` · ${t("kitchen.allergens")}: ${m.allergens.join(", ")}`
+                              : ""}
                           </p>
                         </div>
                         <strong className="plate-price">₹{(m.pricePaise / 100).toFixed(0)}</strong>
@@ -1141,7 +1197,7 @@ export function KitchenBrowse({
                   className="btn mustard"
                   type="button"
                   disabled={checkingOut || deliveryBlocked}
-                  onClick={checkout}
+                  onClick={() => void checkout()}
                 >
                   {checkingOut
                     ? t("cart.checkingOut")

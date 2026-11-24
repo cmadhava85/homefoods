@@ -76,6 +76,13 @@ describe("publicErrorMessage", () => {
       publicErrorMessage(new Error("Choose a delivery address"), "ta"),
       t("ta", "error.chooseAddress"),
     );
+    assert.equal(
+      publicErrorMessage(
+        new Error('duplicate key value violates unique constraint "orders_idempotency_uidx"'),
+        "en",
+      ),
+      t("en", "error.conflict"),
+    );
   });
 
   it("softens signature failures", () => {
@@ -112,7 +119,8 @@ describe("httpStatusForError", () => {
     // "not allowed" also matches the 403 regex — CORS message is intentionally 403 today.
     assert.equal(httpStatusForError(new Error("CORS origin not allowed")), 403);
     assert.equal(httpStatusForError(new Error("ECONNREFUSED postgres")), 500);
-    assert.equal(httpStatusForError(new Error("duplicate key value")), 500);
+    // Idempotent-create race: a conflict the client can retry/refresh, not a server fault.
+    assert.equal(httpStatusForError(new Error("duplicate key value")), 409);
     assert.equal(httpStatusForError(new Error("violates foreign key constraint")), 500);
     assert.equal(httpStatusForError(new Error("connection refused")), 500);
     assert.equal(httpStatusForError(new Error("drizzle query failed")), 500);

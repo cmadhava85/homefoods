@@ -34,6 +34,10 @@ export function assertProductionConfig() {
   if (process.env.AUTH_ENFORCE === "false") {
     weak.push("AUTH_ENFORCE must not be false in production");
   }
+  // No default admin on a production service (incl. APP_ENV=staging) — fail at boot, not at first login.
+  if (!process.env.ADMIN_MOBILES?.trim()) {
+    missing.push("ADMIN_MOBILES");
+  }
 
   if (process.env.MOCK_PAYMENTS === "false") {
     for (const k of ["RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET", "RAZORPAY_WEBHOOK_SECRET"]) {

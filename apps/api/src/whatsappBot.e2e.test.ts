@@ -147,7 +147,9 @@ describe("WhatsApp bot e2e", () => {
 
     const cancel = await wa(from, `Cancel ${pick.publicId}`);
     assert.equal(cancel.intent, "CANCEL");
-    assert.match(replyBody(cancel), /cancel|request|Cancel/i);
+    // Real ids are hex (LM-72A1417C34) — the command must target that order, not fall back to the list.
+    assert.equal(cancel.publicId, pick.publicId, replyBody(cancel));
+    assert.match(replyBody(cancel), /Cancelled|Asked kitchen/i);
 
     assert.ok(
       mock.sent.length > sentBefore,

@@ -446,4 +446,87 @@ describe("security regressions", () => {
     });
     assert.ok(res.statusCode === 401 || res.statusCode === 403);
   });
+
+  /** Simulate a NODE_ENV=production service (e.g. public staging) for one block. */
+  async function asProduction<T>(fn: () => Promise<T>): Promise<T> {
+    const prev = {
+      NODE_ENV: process.env.NODE_ENV,
+      AUTH_SECRET: process.env.AUTH_SECRET,
+      ADMIN_MOBILES: process.env.ADMIN_MOBILES,
+    };
+    process.env.NODE_ENV = "production";
+    process.env.AUTH_SECRET = "test-only-strong-secret-value-for-prod-mode";
+    process.env.ADMIN_MOBILES = "+919900000077";
+    try {
+      return await fn();
+    } finally {
+      for (const [k, v] of Object.entries(prev)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  }
+
+  it("OTP request does not reveal whether a number is an admin or registered cook", async () => {
+    await db.execute(sql`DELETE FROM rate_limit_buckets`);
+    const notAdmin = await app.inject({
+      method: "POST",
+      url: "/auth/otp/request",
+      payload: { mobile: testMobile("73"), role: "ADMIN" },
+    });
+    const notCook = await app.inject({
+      method: "POST",
+      url: "/auth/otp/request",
+      payload: { mobile: testMobile("74"), role: "COOK" },
+    });
+    for (const res of [notAdmin, notCook]) {
+      assert.equal(res.statusCode, 200, res.body);
+      assert.deepEqual(Object.keys(res.json()).sort(), ["expiresInSec", "mobile", "ok", "role"]);
+    }
+    const stored = await db.execute(
+      sql`select 1 from auth_otps where mobile_number in (${notAdmin.json().mobile}, ${notCook.json().mobile})`,
+    );
+    assert.equal(Array.from(stored as unknown as unknown[]).length, 0, "no code is issued for ineligible numbers");
+  });
+
+  it("mock auth on a production service never issues an ADMIN session", async () => {
+    await asProduction(async () => {
+      await db.execute(sql`DELETE FROM rate_limit_buckets`);
+      const req = await app.inject({
+        method: "POST",
+        url: "/auth/otp/request",
+        payload: { mobile: "+919900000077", role: "ADMIN" },
+      });
+      assert.equal(req.statusCode, 200, req.body);
+      assert.equal(req.json().mockCode, undefined, "admin code must never be echoed");
+      const ver = await app.inject({
+        method: "POST",
+        url: "/auth/otp/verify",
+        payload: { mobile: "+919900000077", role: "ADMIN", code: "123456" },
+      });
+      assert.ok(ver.statusCode >= 400, `demo code minted an admin session: ${ver.body}`);
+      // The well-known dev admin number is not an admin on a production service.
+      const fallback = await app.inject({
+        method: "POST",
+        url: "/auth/otp/verify",
+        payload: { mobile: "+919900000001", role: "ADMIN", code: "123456" },
+      });
+      assert.ok(fallback.statusCode >= 400, fallback.body);
+    });
+  });
+
+  it("production login sets the HttpOnly cookie but does not return the token in the body", async () => {
+    await asProduction(async () => {
+      await db.execute(sql`DELETE FROM rate_limit_buckets`);
+      const ver = await app.inject({
+        method: "POST",
+        url: "/auth/otp/verify",
+        payload: { mobile: testMobile("75"), role: "CUSTOMER", code: "123456" },
+      });
+      assert.equal(ver.statusCode, 200, ver.body);
+      assert.equal(ver.json().token, undefined);
+      assert.ok(ver.json().user);
+      assert.match(String(ver.headers["set-cookie"]), /lm_session=.+HttpOnly/);
+    });
+  });
 });

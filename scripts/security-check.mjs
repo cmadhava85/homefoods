@@ -5,6 +5,7 @@
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import { execFileSync } from "node:child_process";
 
 const root = new URL("..", import.meta.url).pathname;
 const failures = [];
@@ -61,9 +62,30 @@ if (/function assertAuthed[\s\S]*?if\s*\(\s*!authEnforced\(\)\s*\)\s*return\s+cu
   failures.push("http/authContext.ts: assertAuthed must not soft-open when authEnforced is false");
 }
 
+// Tracked files that must never be committed. Pattern scanners (gitleaks) cannot see inside binary
+// Terraform plans or archives — the leaked tfplan was a zip — so block these by name/type.
+const forbiddenTracked = [
+  { re: /(^|\/)tfplan[^/]*$|\.tfplan$/, msg: "Terraform plan (embeds full state incl. secrets)" },
+  { re: /\.tfstate(\.backup)?$|\.tfstate\.[^/]+$/, msg: "Terraform state (plaintext secrets)" },
+  { re: /\.tfvars$/, msg: "Terraform variables (environment-specific / secret values)" },
+  { re: /(^|\/)\.env(\.(?!example$)[^/]+)?$/, msg: ".env file (use .env.example)" },
+  { re: /application_default_credentials\.json$|(^|\/)adc\.json$|\.boto$/, msg: "Google credentials" },
+  { re: /\.(pem|key|p12|pfx|jks|keystore)$/, msg: "private key / keystore" },
+  { re: /(^|\/)\.gcloud-config\//, msg: "gcloud config directory (tokens, logs)" },
+  { re: /^infra\/.*\.(zip|gz|tgz|tar|7z)$/, msg: "archive under infra/ (opaque to secret scanners)" },
+];
+const tracked = execFileSync("git", ["ls-files"], { cwd: root, encoding: "utf8" })
+  .split("\n")
+  .filter(Boolean);
+for (const path of tracked) {
+  for (const rule of forbiddenTracked) {
+    if (rule.re.test(path)) failures.push(`${path}: tracked ${rule.msg} — remove from git and rotate any secrets`);
+  }
+}
+
 if (failures.length) {
   console.error("security-check failed:\n" + failures.map((f) => ` - ${f}`).join("\n"));
   process.exit(1);
 }
 
-console.log(`security-check ok (${files.length} files scanned)`);
+console.log(`security-check ok (${files.length} files scanned, ${tracked.length} tracked paths checked)`);

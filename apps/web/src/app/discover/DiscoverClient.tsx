@@ -1,5 +1,7 @@
 "use client";
 
+import { uploadSrc } from "@/lib/uploadUrl";
+
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
@@ -52,11 +54,7 @@ const FALLBACK_IMGS = [
 const PIN_KEY = "lm_pin";
 
 function imgSrc(url: string | null | undefined, i: number) {
-  if (url) {
-    if (url.startsWith("http")) return url;
-    return `${API_BASE}${url}`;
-  }
-  return FALLBACK_IMGS[i % FALLBACK_IMGS.length];
+  return uploadSrc(url) ?? FALLBACK_IMGS[i % FALLBACK_IMGS.length];
 }
 
 export function DiscoverClient() {

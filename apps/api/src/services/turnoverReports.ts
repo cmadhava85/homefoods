@@ -1,4 +1,4 @@
-import { addDaysISO, serviceDateISO } from "@localmeals/domain";
+import { addDaysISO, lineFoodNetPaise, serviceDateISO } from "@localmeals/domain";
 
 /** Order statuses that count toward marketplace GMV (paid pipeline). */
 export const GMV_STATUSES = [
@@ -163,7 +163,7 @@ export function aggregateTurnoverFromRows(
 
   for (const o of orderRows) {
     const row = ensure(o.cookId);
-    const netFood = Math.max(0, o.foodPaise * o.qty - (o.foodDiscountPaise ?? 0));
+    const netFood = lineFoodNetPaise(o);
     if (o.status === REFUNDED) {
       row.refundedFoodPaise += netFood;
       row.refundedOrderCount += 1;

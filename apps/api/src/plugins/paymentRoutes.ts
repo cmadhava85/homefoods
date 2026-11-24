@@ -1,9 +1,10 @@
 import type { FastifyInstance } from "fastify";
-import { z } from "zod";
 import type { Db } from "@localmeals/db";
 import { LogEvent } from "@localmeals/observability";
 import type { AuthHelpers } from "../http/authContext.js";
 import { sendCaughtError } from "../httpErrors.js";
+import { lineGatewayPaise } from "@localmeals/domain";
+import { ConfirmReturnBody, MockConfirmBody } from "./paymentRoutes.contract.js";
 import {
   classifyPaymentWebhook,
   getPaymentProvider,
@@ -88,7 +89,7 @@ app.post("/payments/mock-confirm", async (req, reply) => {
   if (process.env.NODE_ENV === "production") {
     return reply.code(403).send({ error: "Mock pay is not available" });
   }
-  const body = z.object({ gatewayTxnId: z.string().min(3) }).parse(req.body);
+  const body = MockConfirmBody.parse(req.body);
   if (!body.gatewayTxnId.startsWith("mock_")) {
     return reply.code(400).send({ error: "Mock confirm only accepts mock_ payment ids" });
   }
@@ -111,14 +112,7 @@ app.post("/payments/mock-confirm", async (req, reply) => {
 app.post("/payments/confirm-return", {
   config: { rateLimit: { max: 30, timeWindow: "1 minute" } },
 }, async (req, reply) => {
-  const body = z
-    .object({
-      publicId: z.string().min(3),
-      paymentLinkId: z.string().optional(),
-      paymentId: z.string().optional(),
-      linkStatus: z.string().optional(),
-    })
-    .parse(req.body);
+  const body = ConfirmReturnBody.parse(req.body);
 
   const isCheckout = body.publicId.startsWith("CHK-");
   let rows = isCheckout
@@ -200,14 +194,8 @@ app.post("/payments/confirm-return", {
     };
   }
 
-  const expectedPaise = rows.reduce(
-    (s, o) =>
-      s +
-      Math.max(0, o.foodPaise * o.qty - (o.foodDiscountPaise ?? 0)) +
-      o.deliveryPaise +
-      o.platformFeePaise,
-    0,
-  );
+  // Gateway charge = line totals minus LocalMeals credit applied.
+  const expectedPaise = rows.reduce((s, o) => s + lineGatewayPaise(o), 0);
   // Live gateway: amount must be present and match. Mock may omit amountPaise.
   if (!isMockPayments()) {
     if (typeof live.amountPaise !== "number" || live.amountPaise <= 0) {

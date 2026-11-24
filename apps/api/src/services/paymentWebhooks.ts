@@ -6,6 +6,7 @@ import {
   platformEventLedger,
   settlements,
   type Db,
+  type DbOrTx,
 } from "@localmeals/db";
 import {
   LogEvent,
@@ -14,7 +15,7 @@ import {
   orderTriageFields,
 } from "@localmeals/observability";
 import { enqueueOutbox } from "./outboxEnqueue.js";
-import { assertTransition, type OrderState } from "@localmeals/domain";
+import { assertTransition, lineTotalPaise, type OrderState } from "@localmeals/domain";
 import type { GatewayWebhookEvent } from "@localmeals/adapters";
 import { markOrderPaid } from "./orders.js";
 
@@ -57,7 +58,7 @@ function bindTraceFromEventOrOrders(
 }
 
 async function audit(
-  db: Db,
+  db: DbOrTx,
   event: GatewayWebhookEvent,
   extra: { orderId?: number; cookId?: string; mobile?: string; traceId?: string } = {},
 ) {
@@ -112,101 +113,107 @@ async function markPaymentFailed(db: Db, event: GatewayWebhookEvent) {
     return { ok: true, kind: event.kind, matched: 0 };
   }
 
-  const updated = [];
-  for (const order of rows) {
-    if (order.status !== "AWAITING_PAYMENT" && order.status !== "CONFIRMING_PAYMENT") {
-      continue;
-    }
-    assertTransition(order.status as OrderState, "FAILED");
-    const [row] = await db
-      .update(orders)
-      .set({ status: "FAILED", updatedAt: new Date() })
-      .where(eq(orders.id, order.id))
-      .returning();
-    await db
-      .update(payments)
-      .set({ status: "FAILED", rawPayload: event.raw as object })
-      .where(and(eq(payments.orderId, order.id), eq(payments.kind, "CHARGE")));
-    await enqueueOutbox(db, "OrderPaymentFailed", {
+  return db.transaction(async (tx) => {
+    const updated = [];
+    for (const order of rows) {
+      if (order.status !== "AWAITING_PAYMENT" && order.status !== "CONFIRMING_PAYMENT") {
+        continue;
+      }
+      assertTransition(order.status as OrderState, "FAILED");
+      const [row] = await tx
+        .update(orders)
+        .set({ status: "FAILED", updatedAt: new Date() })
+        .where(and(eq(orders.id, order.id), eq(orders.status, order.status)))
+        .returning();
+      if (!row) continue;
+      await tx
+        .update(payments)
+        .set({ status: "FAILED", rawPayload: event.raw as object })
+        .where(and(eq(payments.orderId, order.id), eq(payments.kind, "CHARGE")));
+      await enqueueOutbox(tx, "OrderPaymentFailed", {
         orderId: order.id,
         publicId: order.publicId,
         customerMobile: order.customerMobile,
         reason: event.event,
       });
-    updated.push(row);
-    await audit(db, event, {
-      orderId: order.id,
-      cookId: order.cookId,
-      mobile: order.customerMobile,
-      traceId: order.traceId,
-    });
-    payLog.warn(
-      {
-        event: LogEvent.PAYMENT_FAILED,
-        kind: event.kind,
-        ...orderTriageFields({
-          traceId: order.traceId,
-          publicId: order.publicId,
-          checkoutId: order.checkoutId,
-          orderId: order.id,
-          customerMobile: order.customerMobile,
-          cookId: order.cookId,
-          status: "FAILED",
-          amountPaise: event.amountPaise,
-          mealType: order.mealType,
-          serviceDate: order.serviceDate,
-          itemName: order.itemName,
-        }),
-        gatewayTxnId: event.gatewayTxnId,
-      },
-      "payment failed",
-    );
-  }
-  return { ok: true, kind: event.kind, matched: updated.length, orders: updated };
+      updated.push(row);
+      await audit(tx, event, {
+        orderId: order.id,
+        cookId: order.cookId,
+        mobile: order.customerMobile,
+        traceId: order.traceId,
+      });
+      payLog.warn(
+        {
+          event: LogEvent.PAYMENT_FAILED,
+          kind: event.kind,
+          ...orderTriageFields({
+            traceId: order.traceId,
+            publicId: order.publicId,
+            checkoutId: order.checkoutId,
+            orderId: order.id,
+            customerMobile: order.customerMobile,
+            cookId: order.cookId,
+            status: "FAILED",
+            amountPaise: event.amountPaise,
+            mealType: order.mealType,
+            serviceDate: order.serviceDate,
+            itemName: order.itemName,
+          }),
+          gatewayTxnId: event.gatewayTxnId,
+        },
+        "payment failed",
+      );
+    }
+    return { ok: true, kind: event.kind, matched: updated.length, orders: updated };
+  });
 }
 
 async function markPaymentAuthorized(db: Db, event: GatewayWebhookEvent) {
   const rows = await findOrdersForPayment(db, event);
   bindTraceFromEventOrOrders(event, rows);
-  const updated = [];
-  for (const order of rows) {
-    if (order.status !== "AWAITING_PAYMENT") continue;
-    assertTransition(order.status as OrderState, "CONFIRMING_PAYMENT");
-    const [row] = await db
-      .update(orders)
-      .set({ status: "CONFIRMING_PAYMENT", updatedAt: new Date() })
-      .where(eq(orders.id, order.id))
-      .returning();
-    updated.push(row);
-    await audit(db, event, {
-      orderId: order.id,
-      cookId: order.cookId,
-      mobile: order.customerMobile,
-    });
-    payLog.info(
-      {
-        event: LogEvent.PAYMENT_CONFIRMING,
-        kind: event.kind,
-        ...orderTriageFields({
-          traceId: order.traceId,
-          publicId: order.publicId,
-          checkoutId: order.checkoutId,
-          orderId: order.id,
-          customerMobile: order.customerMobile,
-          cookId: order.cookId,
-          status: "CONFIRMING_PAYMENT",
-          amountPaise: event.amountPaise,
-          mealType: order.mealType,
-          serviceDate: order.serviceDate,
-          itemName: order.itemName,
-        }),
-        gatewayTxnId: event.gatewayTxnId,
-      },
-      "payment confirming",
-    );
-  }
-  if (!updated.length) await audit(db, event);
-  return { ok: true, kind: event.kind, matched: updated.length, orders: updated };
+  return db.transaction(async (tx) => {
+    const updated = [];
+    for (const order of rows) {
+      if (order.status !== "AWAITING_PAYMENT") continue;
+      assertTransition(order.status as OrderState, "CONFIRMING_PAYMENT");
+      const [row] = await tx
+        .update(orders)
+        .set({ status: "CONFIRMING_PAYMENT", updatedAt: new Date() })
+        .where(and(eq(orders.id, order.id), eq(orders.status, "AWAITING_PAYMENT")))
+        .returning();
+      if (!row) continue;
+      updated.push(row);
+      await audit(tx, event, {
+        orderId: order.id,
+        cookId: order.cookId,
+        mobile: order.customerMobile,
+      });
+      payLog.info(
+        {
+          event: LogEvent.PAYMENT_CONFIRMING,
+          kind: event.kind,
+          ...orderTriageFields({
+            traceId: order.traceId,
+            publicId: order.publicId,
+            checkoutId: order.checkoutId,
+            orderId: order.id,
+            customerMobile: order.customerMobile,
+            cookId: order.cookId,
+            status: "CONFIRMING_PAYMENT",
+            amountPaise: event.amountPaise,
+            mealType: order.mealType,
+            serviceDate: order.serviceDate,
+            itemName: order.itemName,
+          }),
+          gatewayTxnId: event.gatewayTxnId,
+        },
+        "payment confirming",
+      );
+    }
+    if (!updated.length) await audit(tx, event);
+    return { ok: true, kind: event.kind, matched: updated.length, orders: updated };
+  });
 }
 
 async function syncRefundProcessed(db: Db, event: GatewayWebhookEvent) {
@@ -217,66 +224,85 @@ async function syncRefundProcessed(db: Db, event: GatewayWebhookEvent) {
     return { ok: true, kind: event.kind, matched: 0 };
   }
 
-  const updated = [];
-  for (const order of rows) {
-    if (order.status === "REFUNDED") {
-      try {
-        await db.insert(payments).values({
+  const updated = await db.transaction(async (tx) => {
+    const out = [];
+    for (const order of rows) {
+      if (order.status === "REFUNDED") {
+        // Redelivered refund webhook: ON CONFLICT, not try/catch — a failed statement would abort
+        // this transaction and turn a harmless retry into a 5xx (Razorpay then retries forever).
+        await tx
+          .insert(payments)
+          .values({
+            orderId: order.id,
+            kind: "REFUND",
+            amountPaise: event.amountPaise ?? 0,
+            status: "REFUNDED",
+            gatewayTxnId: event.refundId ?? `refund_${order.gatewayTxnId}`,
+            rawPayload: event.raw as object,
+            idempotencyKey: event.refundId ? `rzp_refund_${event.refundId}` : undefined,
+          })
+          .onConflictDoNothing();
+        await audit(tx, event, {
+          orderId: order.id,
+          cookId: order.cookId,
+          mobile: order.customerMobile,
+        });
+        continue;
+      }
+      if (
+        ![
+          "PAID",
+          "COOKING",
+          "PACKED",
+          "DISPATCHED",
+          "DELAYED",
+          "RETURNED_TO_KITCHEN",
+          "LOGISTICS_EXCEPTION",
+          "CANCEL_REQUESTED",
+        ].includes(order.status)
+      ) {
+        await audit(tx, event, { orderId: order.id, cookId: order.cookId });
+        continue;
+      }
+      assertTransition(order.status as OrderState, "REFUNDED");
+      const [row] = await tx
+        .update(orders)
+        .set({
+          status: "REFUNDED",
+          settlementHold: true,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(orders.id, order.id), eq(orders.status, order.status)))
+        .returning();
+      if (!row) continue;
+      await tx
+        .insert(payments)
+        .values({
           orderId: order.id,
           kind: "REFUND",
-          amountPaise: event.amountPaise ?? 0,
+          amountPaise: event.amountPaise ?? lineTotalPaise(order),
           status: "REFUNDED",
           gatewayTxnId: event.refundId ?? `refund_${order.gatewayTxnId}`,
           rawPayload: event.raw as object,
           idempotencyKey: event.refundId ? `rzp_refund_${event.refundId}` : undefined,
-        });
-      } catch {
-        /* duplicate refund webhook */
-      }
-      await audit(db, event, { orderId: order.id, cookId: order.cookId, mobile: order.customerMobile });
-      continue;
-    }
-    if (!["PAID", "COOKING", "PACKED", "DISPATCHED", "DELAYED", "RETURNED_TO_KITCHEN", "LOGISTICS_EXCEPTION"].includes(order.status)) {
-      await audit(db, event, { orderId: order.id, cookId: order.cookId });
-      continue;
-    }
-    assertTransition(order.status as OrderState, "REFUNDED");
-    const [row] = await db
-      .update(orders)
-      .set({
-        status: "REFUNDED",
-        settlementHold: true,
-        updatedAt: new Date(),
-      })
-      .where(eq(orders.id, order.id))
-      .returning();
-    await db.insert(payments).values({
-      orderId: order.id,
-      kind: "REFUND",
-      amountPaise:
-        event.amountPaise ??
-        Math.max(0, order.foodPaise * order.qty - (order.foodDiscountPaise ?? 0)) +
-          order.deliveryPaise +
-          order.platformFeePaise,
-      status: "REFUNDED",
-      gatewayTxnId: event.refundId ?? `refund_${order.gatewayTxnId}`,
-      rawPayload: event.raw as object,
-      idempotencyKey: event.refundId ? `rzp_refund_${event.refundId}` : undefined,
-    });
-    await enqueueOutbox(db, "OrderRefunded", {
+        })
+        .onConflictDoNothing();
+      await enqueueOutbox(tx, "OrderRefunded", {
         orderId: order.id,
         publicId: order.publicId,
         customerMobile: order.customerMobile,
         source: "gateway_webhook",
         refundId: event.refundId,
       });
-    updated.push(row);
-    await audit(db, event, {
-      orderId: order.id,
-      cookId: order.cookId,
-      mobile: order.customerMobile,
-    });
-  }
+      out.push(row);
+      await audit(tx, event, {
+        orderId: order.id,
+        cookId: order.cookId,
+        mobile: order.customerMobile,
+      });
+    }
+    return out;
+  });
   return { ok: true, kind: event.kind, matched: updated.length, orders: updated };
 }
 

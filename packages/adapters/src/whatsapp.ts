@@ -228,6 +228,9 @@ export type WhatsAppIntent =
   | "FAMILY"
   | "FAMILY_ACCEPT"
   | "REVIEW"
+  | "STOP"
+  | "START"
+  | "REORDER"
   | "COOK_STATUS"
   | "COOK_COOKING"
   | "COOK_PACK"
@@ -260,16 +263,57 @@ export function parsePickNumber(text: string): number | undefined {
   return Number(m[1]);
 }
 
+function normalizeWaIntentText(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/[!.?,]+$/g, "")
+    .replace(/\s+/g, " ");
+}
+
 export function parseWhatsAppIntent(text: string): {
   intent: WhatsAppIntent;
   raw: string;
 } {
-  const t = text.trim().toLowerCase();
+  const t = normalizeWaIntentText(text);
   // Guided checkout: reply with a single digit
   if (parsePickNumber(text) != null) {
     return { intent: "PICK", raw: text };
   }
-  // First-time / casual openers → same as Menu
+  // Marketing opt-out / opt-in (Meta-style STOP / START)
+  if (
+    t === "stop" ||
+    t === "unsubscribe" ||
+    t === "opt out" ||
+    t === "opt-out" ||
+    t === "stop messages" ||
+    t === "நிறுத்து"
+  ) {
+    return { intent: "STOP", raw: text };
+  }
+  if (
+    t === "start alerts" ||
+    t === "resume" ||
+    t === "opt in" ||
+    t === "opt-in" ||
+    t === "subscribe" ||
+    t === "தொடங்கு"
+  ) {
+    return { intent: "START", raw: text };
+  }
+  // Repeat last kitchen (same as yesterday / again)
+  if (
+    t === "again" ||
+    t === "same" ||
+    t === "same as yesterday" ||
+    t === "reorder" ||
+    t === "same order" ||
+    t === "மீண்டும்" ||
+    t === "அதே"
+  ) {
+    return { intent: "REORDER", raw: text };
+  }
+  // First-time / casual openers → same as Menu (Tanglish + Tamil synonyms)
   if (
     t === "hi" ||
     t === "hello" ||
@@ -278,7 +322,14 @@ export function parseWhatsAppIntent(text: string): {
     t === "order food" ||
     t === "lunch" ||
     t === "hi!" ||
-    t === "வணக்கம்"
+    t === "வணக்கம்" ||
+    t === "saapadu" ||
+    t === "சாப்பாடு" ||
+    t === "menu kaatu" ||
+    t === "menukaatu" ||
+    t === "food" ||
+    t === "hungry" ||
+    t === "மெனு"
   ) {
     return { intent: "MENU", raw: text };
   }
@@ -395,8 +446,16 @@ export function parseWhatsAppIntent(text: string): {
   ) {
     return { intent: "LANGUAGE", raw: text };
   }
-  if (t === "help" || t.includes("help")) return { intent: "HELP", raw: text };
-  if (t === "menu" || t.startsWith("menu ") || /\bmenu\b/.test(t)) return { intent: "MENU", raw: text };
+  if (t === "help" || t.includes("help") || t === "உதவி") return { intent: "HELP", raw: text };
+  if (
+    t === "menu" ||
+    t.startsWith("menu ") ||
+    /\bmenu\b/.test(t) ||
+    t.includes("kaatu") ||
+    t === "list"
+  ) {
+    return { intent: "MENU", raw: text };
+  }
   // Bare kitchen slug from a button → open that kitchen’s menu
   if (/^[a-z0-9]+(?:-[a-z0-9]+)+$/.test(t)) return { intent: "MENU", raw: text };
   return { intent: "UNKNOWN", raw: text };
@@ -404,19 +463,19 @@ export function parseWhatsAppIntent(text: string): {
 
 /** Parse "Delivered LM-1234" or "deliver LM-1234". */
 export function parseDeliverCommand(text: string): { publicId?: string } {
-  const m = text.trim().match(/^deliver(?:ed)?\s+(LM-\d+)/i);
+  const m = text.trim().match(/^deliver(?:ed)?\s+(LM-[A-Z0-9]+)/i);
   return { publicId: m?.[1]?.toUpperCase() };
 }
 
 /** Parse "Accept LM-1234" / "Approve late LM-1234". */
 export function parseLateDecideCommand(text: string): { publicId?: string } {
-  const m = text.trim().match(/^(?:accept|approve|decline|reject)(?:\s+late)?\s+(LM-\d+)/i);
+  const m = text.trim().match(/^(?:accept|approve|decline|reject)(?:\s+late)?\s+(LM-[A-Z0-9]+)/i);
   return { publicId: m?.[1]?.toUpperCase() };
 }
 
 /** Parse "Pay", "Pay LM-1234", or "Pay CHK-1234". */
 export function parsePayCommand(text: string): { publicId?: string; checkoutId?: string } {
-  const m = text.trim().match(/^pay(?:\s+((?:LM|CHK)-\d+))?$/i);
+  const m = text.trim().match(/^pay(?:\s+((?:LM|CHK)-[A-Z0-9]+))?$/i);
   if (!m) return {};
   const id = m[1]?.toUpperCase();
   if (!id) return {};
@@ -541,7 +600,7 @@ export function stripWaCheckoutExtras(rest: string): {
 
 /** Parse "Cancel", "Cancel LM-1234", or "Cancel CHK-1234". */
 export function parseCancelCommand(text: string): { publicId?: string; checkoutId?: string } {
-  const m = text.trim().match(/^cancel(?:\s+((?:LM|CHK)-\d+))?$/i);
+  const m = text.trim().match(/^cancel(?:\s+((?:LM|CHK)-[A-Z0-9]+))?$/i);
   if (!m) return {};
   const id = m[1]?.toUpperCase();
   if (!id) return {};
@@ -615,7 +674,7 @@ export function parseReviewCommand(text: string): {
   rating?: number;
   comment?: string;
 } {
-  const m = text.trim().match(/^review\s+(LM-\d+)\s+([1-5])(?:\s+(.+))?$/i);
+  const m = text.trim().match(/^review\s+(LM-[A-Z0-9]+)\s+([1-5])(?:\s+(.+))?$/i);
   if (!m) return {};
   return {
     publicId: m[1].toUpperCase(),
@@ -687,6 +746,8 @@ export type WaInboundMessage = {
   image?: WaInboundImage;
   /** Simulator / client locale hint (`en` | `ta`). Meta webhooks omit this. */
   locale?: string;
+  /** Meta Cloud API message id (`wamid.…`) for inbound dedupe. */
+  messageId?: string;
 };
 
 /** Download Meta media by id → bytes (real WA only). */
@@ -730,6 +791,7 @@ export function extractInboundWhatsApp(body: unknown): WaInboundMessage {
       changes?: Array<{
         value?: {
           messages?: Array<{
+            id?: string;
             from: string;
             type?: string;
             text?: { body?: string };
@@ -773,9 +835,11 @@ export function extractInboundWhatsApp(body: unknown): WaInboundMessage {
   const msg = b.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
   if (!msg) return {};
   const from = normFrom(msg.from);
+  const messageId = typeof msg.id === "string" && msg.id.trim() ? msg.id.trim() : undefined;
   if (msg.type === "image" || msg.image?.id) {
     return {
       from,
+      ...(messageId ? { messageId } : {}),
       text: msg.image?.caption,
       image: {
         mediaId: msg.image?.id,
@@ -794,5 +858,5 @@ export function extractInboundWhatsApp(body: unknown): WaInboundMessage {
     fromButtonId ??
     msg.button?.text ??
     msg.button?.payload;
-  return { from, text };
+  return { from, text, ...(messageId ? { messageId } : {}) };
 }

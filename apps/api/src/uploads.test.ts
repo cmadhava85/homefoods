@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, it } from "node:test";
 import {
   gcsUploadsBucket,
+  publicMenuObjectUrl,
   saveConcernImage,
   saveMenuImage,
   saveMenuImageBuffer,
@@ -197,5 +198,21 @@ describe("saveUploadedImage local", () => {
     assert.equal(opened!.contentType, "image/jpeg");
     assert.equal(await openUpload("menu-missing.jpg"), null);
     await assert.rejects(() => openUpload("../secret.jpg"), /Invalid upload name/);
+  });
+});
+
+describe("public menu bucket", () => {
+  it("maps only menu photos to the public bucket, and only when configured", () => {
+    const prev = process.env.GCS_PUBLIC_MENU_BUCKET;
+    try {
+      delete process.env.GCS_PUBLIC_MENU_BUCKET;
+      assert.equal(publicMenuObjectUrl("menu-a.jpg"), null);
+      process.env.GCS_PUBLIC_MENU_BUCKET = "p-menu";
+      assert.equal(publicMenuObjectUrl("menu-a.jpg"), "https://storage.googleapis.com/p-menu/menu-a.jpg");
+      assert.equal(publicMenuObjectUrl("concern-a.jpg"), null, "concern photos stay private");
+    } finally {
+      if (prev === undefined) delete process.env.GCS_PUBLIC_MENU_BUCKET;
+      else process.env.GCS_PUBLIC_MENU_BUCKET = prev;
+    }
   });
 });

@@ -1,5 +1,7 @@
 "use client";
 
+import { lineTotalPaise } from "@localmeals/domain";
+
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { CancelOrderButton } from "@/components/CancelOrderButton";
@@ -102,9 +104,10 @@ function lineTotal(o: {
   platformFeePaise: number;
   qty: number;
   foodDiscountPaise?: number | null;
+  convenienceFeePaise?: number | null;
 }) {
-  const food = Math.max(0, o.foodPaise * o.qty - (o.foodDiscountPaise ?? 0));
-  return food + o.deliveryPaise + o.platformFeePaise;
+  // Includes the convenience fee when charged (same rule as the API).
+  return lineTotalPaise(o);
 }
 
 /** One status signal: progress track on kitchen path; banner only for exceptions. */
@@ -261,6 +264,7 @@ export function ConfirmedCheckoutClient({ checkout }: { checkout: ConfirmedCheck
           </Link>
           <CancelOrderButton
             checkoutId={checkout.checkoutId}
+            paid={checkout.orders.some((o) => o.status === "PAID")}
             cancellable={checkout.cancellable}
             cancelRequestable={checkout.cancelRequestable}
           />
@@ -451,6 +455,7 @@ export function ConfirmedOrderClient({ order }: { order: ConfirmedOrderView }) {
           </Link>
           <CancelOrderButton
             publicId={order.publicId}
+            paid={order.status === "PAID"}
             cancellable={order.cancellable}
             cancelRequestable={order.cancelRequestable}
           />

@@ -255,7 +255,10 @@ export function addDaysISO(iso: string, days: number): string {
 }
 
 export function dayOfWeekForServiceDate(iso: string): number {
-  return parseServiceDate(iso).getDay();
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) throw new Error("Invalid service date");
+  // Civil calendar weekday — independent of process TZ (unlike Date#getDay).
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
 }
 
 export const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;

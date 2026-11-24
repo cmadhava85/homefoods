@@ -1,5 +1,4 @@
 import type { FastifyInstance } from "fastify";
-import { z } from "zod";
 import type { Db } from "@localmeals/db";
 import type { AuthHelpers } from "../http/authContext.js";
 import { sendCaughtError } from "../httpErrors.js";
@@ -27,6 +26,7 @@ import {
   findCookById,
   pickupRevealForOrder,
   resolveCustomerPaymentUrl,
+  resolvePaymentQrUrl,
 } from "../services/orders.js";
 import {
   followKitchen,
@@ -49,8 +49,33 @@ import {
   orderAudience,
   redactOrderForAudience,
 } from "../http/orderViews.js";
-
-const mealTypeSchema = z.enum(["BREAKFAST", "LUNCH", "DINNER"]);
+import { MealType } from "../openapi/shared.js";
+import {
+  AddressCreateBody,
+  AddressPatchBody,
+  AdsQuery,
+  CheckoutIdParams,
+  ConcernBody,
+  CookApplyBody,
+  CreateOrderBatchBody,
+  CreateOrderBody,
+  DeclineReasonBody,
+  FamilyLinkBody,
+  FollowBody,
+  IdParams,
+  KitchenMealsQuery,
+  KitchenMenuQuery,
+  KitchensQuery,
+  KitchenWeekQuery,
+  CancelBody,
+  LateOrderBody,
+  MyOrdersQuery,
+  ProfilePatchBody,
+  PublicIdParams,
+  RefundBody,
+  ReviewBody,
+  SlugParams,
+} from "./customerRoutes.contract.js";
 
 export async function customerRoutes(
   app: FastifyInstance,
@@ -60,15 +85,13 @@ export async function customerRoutes(
   const { db, auth } = opts;
   const { currentUser, assertAuthed, assertKitchenStaff, assertOrderKitchenStaff, bindCustomerMobile } = auth;
 app.get("/kitchens", async (req) => {
-  const q = req.query as { pin?: string };
+  const q = KitchensQuery.parse(req.query ?? {});
   return listKitchens(db, q.pin);
 });
 
 /** Pin ads / kitchen boosts — empty when ads_enabled is off. */
 app.get("/ads", async (req, reply) => {
-  const q = z
-    .object({ pin: z.string().regex(/^\d{6}$/) })
-    .safeParse(req.query ?? {});
+  const q = AdsQuery.safeParse(req.query ?? {});
   if (!q.success) {
     return reply.code(400).send({ error: "pin must be 6 digits" });
   }
@@ -81,9 +104,9 @@ app.get("/ads", async (req, reply) => {
 });
 
 app.get("/kitchens/:slug/menu", async (req, reply) => {
-  const { slug } = req.params as { slug: string };
-  const q = req.query as { date?: string; meal?: string };
-  const meal = mealTypeSchema.safeParse((q.meal ?? "LUNCH").toUpperCase());
+  const { slug } = SlugParams.parse(req.params);
+  const q = KitchenMenuQuery.parse(req.query ?? {});
+  const meal = MealType.safeParse((q.meal ?? "LUNCH").toUpperCase());
   const data = await getKitchenMenu(
     db,
     slug,
@@ -95,8 +118,8 @@ app.get("/kitchens/:slug/menu", async (req, reply) => {
 });
 
 app.get("/kitchens/:slug/meals", async (req, reply) => {
-  const { slug } = req.params as { slug: string };
-  const q = req.query as { days?: string };
+  const { slug } = SlugParams.parse(req.params);
+  const q = KitchenMealsQuery.parse(req.query ?? {});
   const data = await getKitchenAdvanceMealOptions(db, slug, {
     days: q.days ? Number(q.days) : 7,
   });
@@ -105,9 +128,9 @@ app.get("/kitchens/:slug/meals", async (req, reply) => {
 });
 
 app.get("/kitchens/:slug/week", async (req, reply) => {
-  const { slug } = req.params as { slug: string };
-  const q = req.query as { from?: string; days?: string; meal?: string };
-  const meal = mealTypeSchema.safeParse((q.meal ?? "LUNCH").toUpperCase());
+  const { slug } = SlugParams.parse(req.params);
+  const q = KitchenWeekQuery.parse(req.query ?? {});
+  const meal = MealType.safeParse((q.meal ?? "LUNCH").toUpperCase());
   const data = await getKitchenWeekPlan(db, slug, {
     from: q.from,
     days: q.days ? Number(q.days) : undefined,
@@ -135,14 +158,7 @@ app.patch("/me/profile", async (req, reply) => {
   if (!user || user.role !== "CUSTOMER") {
     return reply.code(401).send({ error: "Sign in as customer" });
   }
-  const body = z
-    .object({
-      fullName: z.string().min(2).max(80).optional(),
-      pinCode: z.string().min(6).max(6).optional(),
-      preferredLanguage: z.enum(["en", "ta"]).optional(),
-      leanWaStatus: z.boolean().optional(),
-    })
-    .parse(req.body);
+  const body = ProfilePatchBody.parse(req.body);
   try {
     const { updateCustomerProfile } = await import("../services/profile.js");
     const profile = await updateCustomerProfile(db, { mobile: user.mobile, ...body });
@@ -166,17 +182,7 @@ app.post("/me/addresses", async (req, reply) => {
   if (!user || user.role !== "CUSTOMER") {
     return reply.code(401).send({ error: "Sign in as customer" });
   }
-  const body = z
-    .object({
-      label: z.enum(["HOME", "OFFICE", "OTHER"]),
-      line1: z.string().min(5),
-      line2: z.string().optional().nullable(),
-      pinCode: z.string().min(6).max(6),
-      lat: z.union([z.string(), z.number()]).optional().nullable(),
-      lng: z.union([z.string(), z.number()]).optional().nullable(),
-      isDefault: z.boolean().optional(),
-    })
-    .parse(req.body);
+  const body = AddressCreateBody.parse(req.body);
   try {
     const { createAddress } = await import("../services/addresses.js");
     return await createAddress(db, { mobile: user.mobile, ...body });
@@ -190,17 +196,8 @@ app.patch("/me/addresses/:id", async (req, reply) => {
   if (!user || user.role !== "CUSTOMER") {
     return reply.code(401).send({ error: "Sign in as customer" });
   }
-  const { id } = req.params as { id: string };
-  const body = z
-    .object({
-      line1: z.string().min(5).optional(),
-      line2: z.string().optional().nullable(),
-      pinCode: z.string().min(6).max(6).optional(),
-      lat: z.union([z.string(), z.number()]).optional().nullable(),
-      lng: z.union([z.string(), z.number()]).optional().nullable(),
-      isDefault: z.boolean().optional(),
-    })
-    .parse(req.body);
+  const { id } = IdParams.parse(req.params);
+  const body = AddressPatchBody.parse(req.body);
   try {
     const { updateAddress } = await import("../services/addresses.js");
     return await updateAddress(db, {
@@ -217,20 +214,7 @@ app.post(
   "/orders",
   { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } },
   async (req, reply) => {
-    const body = z
-      .object({
-        customerMobile: z.string(),
-        cookSlug: z.string(),
-        menuItemId: z.number().int(),
-        qty: z.number().int().min(1).default(1),
-        spice: z.enum(["NORMAL", "LESS"]).default("NORMAL"),
-        channel: z.enum(["WEB_STOREFRONT", "WHATSAPP_BOT"]).optional(),
-        serviceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-        fulfillmentMode: z.enum(["DELIVERY", "PICKUP", "CUSTOMER_ARRANGE"]).optional(),
-        payerMobile: z.string().optional().nullable(),
-        addressId: z.number().int().optional().nullable(),
-      })
-      .parse(req.body);
+    const body = CreateOrderBody.parse(req.body);
     try {
       const customerMobile = bindCustomerMobile(req, body.customerMobile);
       const rawKey = req.headers["idempotency-key"];
@@ -248,28 +232,7 @@ app.post(
   "/orders/batch",
   { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } },
   async (req, reply) => {
-    const body = z
-      .object({
-        customerMobile: z.string(),
-        cookSlug: z.string(),
-        channel: z.enum(["WEB_STOREFRONT", "WHATSAPP_BOT"]).optional(),
-        payerMobile: z.string().optional().nullable(),
-        fulfillmentMode: z.enum(["DELIVERY", "PICKUP", "CUSTOMER_ARRANGE"]).optional(),
-        addressId: z.number().int().optional().nullable(),
-        lines: z
-          .array(
-            z.object({
-              menuItemId: z.number().int(),
-              serviceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-              qty: z.number().int().min(1).default(1),
-              spice: z.enum(["NORMAL", "LESS"]).default("NORMAL"),
-            }),
-          )
-          .min(1)
-          // Up to 14 calendar days × breakfast/lunch/dinner (matches createOrderBatch).
-          .max(42),
-      })
-      .parse(req.body);
+    const body = CreateOrderBatchBody.parse(req.body);
     try {
       const customerMobile = bindCustomerMobile(req, body.customerMobile);
       const rawKey = req.headers["idempotency-key"];
@@ -297,7 +260,7 @@ app.post("/family/links", async (req, reply) => {
   if (!user || user.role !== "CUSTOMER") {
     return reply.code(401).send({ error: "Sign in as customer" });
   }
-  const body = z.object({ payerMobile: z.string().min(10) }).parse(req.body ?? {});
+  const body = FamilyLinkBody.parse(req.body ?? {});
   try {
     const { requestFamilyLink } = await import("../services/family.js");
     const link = await requestFamilyLink(db, {
@@ -315,7 +278,7 @@ app.post("/family/links/:id/accept", async (req, reply) => {
   if (!user || user.role !== "CUSTOMER") {
     return reply.code(401).send({ error: "Sign in as customer" });
   }
-  const { id } = req.params as { id: string };
+  const { id } = IdParams.parse(req.params);
   try {
     const { acceptFamilyLink } = await import("../services/family.js");
     return await acceptFamilyLink(db, { linkId: Number(id), payerMobile: user.mobile });
@@ -329,7 +292,7 @@ app.post("/family/links/:id/revoke", async (req, reply) => {
   if (!user || user.role !== "CUSTOMER") {
     return reply.code(401).send({ error: "Sign in as customer" });
   }
-  const { id } = req.params as { id: string };
+  const { id } = IdParams.parse(req.params);
   try {
     const { revokeFamilyLink } = await import("../services/family.js");
     return await revokeFamilyLink(db, { linkId: Number(id), mobile: user.mobile });
@@ -342,7 +305,7 @@ app.get(
   "/checkouts/:checkoutId",
   { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } },
   async (req, reply) => {
-  const { checkoutId } = req.params as { checkoutId: string };
+  const { checkoutId } = CheckoutIdParams.parse(req.params);
   const checkout = await getCheckoutById(db, checkoutId);
   if (!checkout) return reply.code(404).send({ error: "Checkout not found" });
   const seed = checkout.orders[0];
@@ -399,20 +362,7 @@ app.get(
 
 /** After cut-off: request lunch — cook must accept before pay. */
 app.post("/orders/late-request", async (req, reply) => {
-  const body = z
-    .object({
-      customerMobile: z.string(),
-      cookSlug: z.string(),
-      menuItemId: z.number().int(),
-      qty: z.number().int().min(1).default(1),
-      spice: z.enum(["NORMAL", "LESS"]).default("NORMAL"),
-      channel: z.enum(["WEB_STOREFRONT", "WHATSAPP_BOT"]).optional(),
-      serviceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-      addressId: z.number().int().optional().nullable(),
-      fulfillmentMode: z.enum(["DELIVERY", "PICKUP", "CUSTOMER_ARRANGE"]).optional(),
-      payerMobile: z.string().optional().nullable(),
-    })
-    .parse(req.body);
+  const body = LateOrderBody.parse(req.body);
   try {
     const customerMobile = bindCustomerMobile(req, body.customerMobile);
     return await requestLateOrder(db, { ...body, customerMobile });
@@ -422,7 +372,7 @@ app.post("/orders/late-request", async (req, reply) => {
 });
 
 app.post("/orders/:publicId/late-approve", async (req, reply) => {
-  const { publicId } = req.params as { publicId: string };
+  const { publicId } = PublicIdParams.parse(req.params);
   try {
     await assertOrderKitchenStaff(req, publicId);
     return await approveLateOrder(db, publicId);
@@ -432,8 +382,8 @@ app.post("/orders/:publicId/late-approve", async (req, reply) => {
 });
 
 app.post("/orders/:publicId/late-decline", async (req, reply) => {
-  const { publicId } = req.params as { publicId: string };
-  const body = z.object({ reason: z.string().optional() }).parse(req.body ?? {});
+  const { publicId } = PublicIdParams.parse(req.params);
+  const body = DeclineReasonBody.parse(req.body ?? {});
   try {
     await assertOrderKitchenStaff(req, publicId);
     return await declineLateOrder(db, publicId, body.reason);
@@ -443,7 +393,7 @@ app.post("/orders/:publicId/late-decline", async (req, reply) => {
 });
 
 app.post("/orders/:publicId/cancel-accept", async (req, reply) => {
-  const { publicId } = req.params as { publicId: string };
+  const { publicId } = PublicIdParams.parse(req.params);
   try {
     await assertOrderKitchenStaff(req, publicId);
     return await acceptCancelRequest(db, publicId);
@@ -453,8 +403,8 @@ app.post("/orders/:publicId/cancel-accept", async (req, reply) => {
 });
 
 app.post("/orders/:publicId/cancel-decline", async (req, reply) => {
-  const { publicId } = req.params as { publicId: string };
-  const body = z.object({ reason: z.string().optional() }).parse(req.body ?? {});
+  const { publicId } = PublicIdParams.parse(req.params);
+  const body = DeclineReasonBody.parse(req.body ?? {});
   try {
     await assertOrderKitchenStaff(req, publicId);
     return await declineCancelRequest(db, publicId, body.reason);
@@ -468,12 +418,7 @@ app.get("/me/orders", async (req, reply) => {
   if (!user || user.role !== "CUSTOMER") {
     return reply.code(401).send({ error: "Sign in as customer to view order history" });
   }
-  const q = z
-    .object({
-      limit: z.coerce.number().int().min(1).max(100).optional(),
-      offset: z.coerce.number().int().min(0).optional(),
-    })
-    .parse(req.query ?? {});
+  const q = MyOrdersQuery.parse(req.query ?? {});
   const page = await listOrdersForCustomer(db, user.mobile, {
     limit: q.limit ?? 50,
     offset: q.offset ?? 0,
@@ -495,10 +440,8 @@ app.post("/me/kitchens/:slug/follow", async (req, reply) => {
   if (!user || user.role !== "CUSTOMER") {
     return reply.code(401).send({ error: "Sign in as customer" });
   }
-  const { slug } = req.params as { slug: string };
-  const body = z
-    .object({ consent: z.boolean().optional() })
-    .parse(req.body ?? {});
+  const { slug } = SlugParams.parse(req.params);
+  const body = FollowBody.parse(req.body ?? {});
   try {
     return await followKitchen(db, user.mobile, slug, {
       consent: body.consent === true,
@@ -514,7 +457,7 @@ app.post("/me/kitchens/:slug/unfollow", async (req, reply) => {
   if (!user || user.role !== "CUSTOMER") {
     return reply.code(401).send({ error: "Sign in as customer" });
   }
-  const { slug } = req.params as { slug: string };
+  const { slug } = SlugParams.parse(req.params);
   try {
     return await unfollowKitchen(db, user.mobile, slug);
   } catch (e) {
@@ -526,7 +469,7 @@ app.get(
   "/orders/:publicId",
   { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } },
   async (req, reply) => {
-  const { publicId } = req.params as { publicId: string };
+  const { publicId } = PublicIdParams.parse(req.params);
   const order = await getOrderByPublicId(db, publicId);
   if (!order) return reply.code(404).send({ error: "Not found" });
   const cook = await findCookById(db, order.cookId);
@@ -595,6 +538,7 @@ app.get(
           checkoutId: order.checkoutId,
         })
       : undefined,
+    qrImageUrl: pendingPay ? await resolvePaymentQrUrl(db, order.gatewayTxnId) : null,
   };
   return redactOrderForAudience(
     order as unknown as Record<string, unknown>,
@@ -611,7 +555,7 @@ app.post("/orders/:publicId/concern/photo", {
   if (!user || user.role !== "CUSTOMER") {
     return reply.code(401).send({ error: "Sign in as customer" });
   }
-  const { publicId } = req.params as { publicId: string };
+  const { publicId } = PublicIdParams.parse(req.params);
   try {
     const order = await getOrderByPublicId(db, publicId);
     if (!order) throw new Error("Order not found");
@@ -633,23 +577,9 @@ app.post("/orders/:publicId/concern", {
   if (!user || user.role !== "CUSTOMER") {
     return reply.code(401).send({ error: "Sign in as customer to raise a concern" });
   }
-  const { publicId } = req.params as { publicId: string };
+  const { publicId } = PublicIdParams.parse(req.params);
   try {
-    const body = z
-      .object({
-        category: z.enum([
-          "QUALITY",
-          "FOODBORNE",
-          "WRONG_ITEM",
-          "MISSING_DELIVERY",
-          "DELAY",
-          "PAYMENT",
-          "OTHER",
-        ]),
-        summary: z.string().min(10).max(2000),
-        photoUrl: z.string().max(200).nullable().optional(),
-      })
-      .parse(req.body ?? {});
+    const body = ConcernBody.parse(req.body ?? {});
     return await createOrderConcern(db, {
       customerMobile: user.mobile,
       orderPublicId: publicId,
@@ -667,13 +597,8 @@ app.post("/orders/:publicId/review", async (req, reply) => {
   if (!user || user.role !== "CUSTOMER") {
     return reply.code(401).send({ error: "Sign in as customer to leave a review" });
   }
-  const { publicId } = req.params as { publicId: string };
-  const body = z
-    .object({
-      rating: z.number().int().min(1).max(5),
-      comment: z.string().max(500).optional().nullable(),
-    })
-    .parse(req.body ?? {});
+  const { publicId } = PublicIdParams.parse(req.params);
+  const body = ReviewBody.parse(req.body ?? {});
   try {
     const review = await createReviewForOrder(db, {
       publicId,
@@ -688,14 +613,14 @@ app.post("/orders/:publicId/review", async (req, reply) => {
 });
 
 app.get("/kitchens/:slug/reviews", async (req, reply) => {
-  const { slug } = req.params as { slug: string };
+  const { slug } = SlugParams.parse(req.params);
   const data = await listPublicKitchenReviews(db, slug);
   if (!data) return reply.code(404).send({ error: "Kitchen not found" });
   return data;
 });
 
 app.post("/orders/:publicId/cancel", async (req, reply) => {
-  const { publicId } = req.params as { publicId: string };
+  const { publicId } = PublicIdParams.parse(req.params);
   try {
     const user = requireRole(currentUser(req), ["CUSTOMER", "COOK", "ADMIN"]);
     const order = await getOrderByPublicId(db, publicId);
@@ -707,7 +632,8 @@ app.post("/orders/:publicId/cancel", async (req, reply) => {
       const cook = await findCookById(db, order.cookId);
       if (!cook || cook.slugHandle !== user.cookSlug) throw new Error("Not your kitchen");
     }
-    return await cancelOrder(db, publicId);
+    const { refundTo } = CancelBody.parse(req.body ?? {});
+    return await cancelOrder(db, publicId, { refundTo });
   } catch (e) {
     return sendCaughtError(reply, e);
   }
@@ -715,14 +641,8 @@ app.post("/orders/:publicId/cancel", async (req, reply) => {
 
 /** Admin: refund a day-line by public id (FULL = food after discount + delivery + platform on that line). */
 app.post("/orders/:publicId/refund", async (req, reply) => {
-  const { publicId } = req.params as { publicId: string };
-  const body = z
-    .object({
-      mode: z.enum(["FULL", "FOOD_ONLY"]).default("FULL"),
-      reason: z.string().min(3).max(300),
-      ticketId: z.number().int().positive().optional(),
-    })
-    .parse(req.body ?? {});
+  const { publicId } = PublicIdParams.parse(req.params);
+  const body = RefundBody.parse(req.body ?? {});
   try {
     requireRole(currentUser(req), ["ADMIN"]);
     const { refundOrderByPublicId } = await import("../services/admin.js");
@@ -733,7 +653,7 @@ app.post("/orders/:publicId/refund", async (req, reply) => {
 });
 
 app.post("/checkouts/:checkoutId/cancel", async (req, reply) => {
-  const { checkoutId } = req.params as { checkoutId: string };
+  const { checkoutId } = CheckoutIdParams.parse(req.params);
   try {
     const user = requireRole(currentUser(req), ["CUSTOMER", "COOK", "ADMIN"]);
     const checkout = await getCheckoutById(db, checkoutId);
@@ -745,7 +665,8 @@ app.post("/checkouts/:checkoutId/cancel", async (req, reply) => {
     } else if (user.role === "COOK") {
       if (checkout.cookSlug !== user.cookSlug) throw new Error("Not your kitchen");
     }
-    return await cancelCheckout(db, checkoutId);
+    const { refundTo } = CancelBody.parse(req.body ?? {});
+    return await cancelCheckout(db, checkoutId, { refundTo });
   } catch (e) {
     return sendCaughtError(reply, e);
   }
@@ -764,18 +685,7 @@ app.post(
           error: "Cook enrollment is paused while LocalMeals runs a single-kitchen launch.",
         });
       }
-      const body = z
-        .object({
-          mobile: z.string().min(10).max(20),
-          kitchenName: z.string().min(3).max(100),
-          pinCode: z.string().min(6).max(6),
-          fssaiNumber: z.string().max(32).nullable().optional(),
-          payoutUpiId: z.string().max(80).nullable().optional(),
-          payoutAccountNote: z.string().max(500).nullable().optional(),
-          pickupLandmark: z.string().max(300).nullable().optional(),
-          acceptedKitchenStandards: z.literal(true),
-        })
-        .parse(req.body ?? {});
+      const body = CookApplyBody.parse(req.body ?? {});
       return await applyAsCook(db, body);
     } catch (e) {
       return sendCaughtError(reply, e);

@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { CreditPanel } from "@/components/CreditPanel";
+import { DeleteAccountPanel } from "@/components/DeleteAccountPanel";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useAuth } from "@/components/AuthProvider";
 import { useLocale } from "@/components/LocaleProvider";
@@ -412,6 +414,10 @@ function AccountInner() {
           </div>
         )}
       </section>
+
+      <CreditPanel />
+
+      <DeleteAccountPanel />
 
       <div className="account-footer">
         <Link className="btn account-browse-cta" href={browseHref}>

@@ -6,7 +6,7 @@ type IncrCb = (
   result?: { current: number; ttl: number },
 ) => void;
 
-type StoreOptions = Record<string, unknown> & {
+type StoreOptions = {
   max?: number;
   timeWindow?: number | string;
   /** Optional label when Fastify passes route metadata. */
@@ -24,8 +24,9 @@ export function createPgRateLimitStore(db: Db) {
   return class PgRateLimitStore {
     options: StoreOptions;
 
-    constructor(options: StoreOptions = {}) {
-      this.options = options;
+    // The plugin passes its own option bag (and route options in child()); we only read StoreOptions keys.
+    constructor(options: object = {}) {
+      this.options = options as StoreOptions;
     }
 
     private bucketKey(clientKey: string): string {
@@ -73,8 +74,8 @@ export function createPgRateLimitStore(db: Db) {
       })().catch((err: Error) => callback(err));
     }
 
-    child(routeOptions: StoreOptions): PgRateLimitStore {
-      return new PgRateLimitStore({ ...this.options, ...routeOptions });
+    child(routeOptions: object): PgRateLimitStore {
+      return new PgRateLimitStore({ ...this.options, ...(routeOptions as StoreOptions) });
     }
   };
 }
@@ -86,4 +87,45 @@ export async function purgeExpiredRateLimitBuckets(db: Db) {
   `);
   const deleted = Number((res as { count?: number }).count ?? 0);
   return { deleted };
+}
+
+/**
+ * Global limit in memory, route-specific limits in Postgres.
+ *
+ * The global per-IP cap (hundreds/min) is a coarse flood guard, so per-instance counting is fine
+ * (effective cap = max × instances). Routes that set their own `config.rateLimit` (OTP, login, orders,
+ * uploads, deletion) are created via `child()` and stay Postgres-backed so they hold across instances.
+ * Without this, every request — including cached menu reads — cost one DB upsert.
+ */
+export function createHybridRateLimitStore(db: Db, maxKeys = 10_000) {
+  const PgStore = createPgRateLimitStore(db);
+  return class HybridRateLimitStore {
+    private readonly options: object;
+    private readonly buckets = new Map<string, { hits: number; resetAt: number }>();
+
+    constructor(options: object = {}) {
+      this.options = options;
+    }
+
+    incr(key: string, callback: IncrCb, timeWindow: number): void {
+      const now = Date.now();
+      let b = this.buckets.get(key);
+      if (!b || b.resetAt <= now) {
+        if (!b && this.buckets.size >= maxKeys) {
+          // Drop the oldest entry (Map keeps insertion order).
+          const oldest = this.buckets.keys().next().value;
+          if (oldest !== undefined) this.buckets.delete(oldest);
+        }
+        b = { hits: 0, resetAt: now + timeWindow };
+        this.buckets.delete(key);
+        this.buckets.set(key, b);
+      }
+      b.hits += 1;
+      callback(null, { current: b.hits, ttl: Math.max(0, b.resetAt - now) });
+    }
+
+    child(routeOptions: object) {
+      return new PgStore({ ...this.options, ...routeOptions });
+    }
+  };
 }

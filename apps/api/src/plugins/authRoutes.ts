@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { z } from "zod";
+import { OtpRequestBody, OtpVerifyBody } from "./authRoutes.contract.js";
 import type { Db } from "@localmeals/db";
 import type { AuthHelpers } from "../http/authContext.js";
 import { sendCaughtError } from "../httpErrors.js";
@@ -31,12 +31,7 @@ app.post(
     },
   },
   async (req, reply) => {
-    const body = z
-      .object({
-        mobile: z.string().min(8),
-        role: z.enum(["CUSTOMER", "COOK", "ADMIN"]),
-      })
-      .parse(req.body);
+    const body = OtpRequestBody.parse(req.body);
     try {
       return await requestOtp(db, body);
     } catch (e) {
@@ -53,16 +48,16 @@ app.post(
     },
   },
   async (req, reply) => {
-    const body = z
-      .object({
-        mobile: z.string().min(8),
-        role: z.enum(["CUSTOMER", "COOK", "ADMIN"]),
-        code: z.string().min(4).max(8),
-      })
-      .parse(req.body);
+    const body = OtpVerifyBody.parse(req.body);
     try {
       const result = await verifyOtp(db, body);
       reply.header("Set-Cookie", sessionCookieHeader(result.token, result.expiresInSec));
+      // Production clients use the HttpOnly cookie only — don't hand the session token to page JS.
+      // Dev/tests keep it in the body for Bearer-based tooling.
+      if (process.env.NODE_ENV === "production") {
+        const { token: _token, ...withoutToken } = result;
+        return withoutToken;
+      }
       return result;
     } catch (e) {
       return sendCaughtError(reply, e);

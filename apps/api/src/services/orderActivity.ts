@@ -5,6 +5,7 @@ import {
   ORDER_STATES,
   serviceDateISO,
   type OrderState,
+  lineTotalPaise,
 } from "@localmeals/domain";
 
 type LedgerChannel = "VOICE_IVR" | "WHATSAPP_BOT" | "WEB_STOREFRONT" | "SYSTEM_CRON" | "ADMIN";
@@ -30,20 +31,6 @@ export async function recordOrderActivity(
     eventName: input.eventName.slice(0, 100),
     rawPayload: input.payload ?? {},
   });
-}
-
-function lineTotalPaise(o: {
-  foodPaise: number;
-  qty: number;
-  foodDiscountPaise?: number | null;
-  deliveryPaise: number;
-  platformFeePaise: number;
-}) {
-  return (
-    Math.max(0, o.foodPaise * o.qty - (o.foodDiscountPaise ?? 0)) +
-    o.deliveryPaise +
-    o.platformFeePaise
-  );
 }
 
 /**

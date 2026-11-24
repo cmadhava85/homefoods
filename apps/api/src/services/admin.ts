@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import {
   adminActionLog,
   cookLedger,
@@ -10,9 +10,10 @@ import {
   type Db,
 } from "@localmeals/db";
 import { enqueueOutbox } from "./outboxEnqueue.js";
-import { assertTransition, type OrderState } from "@localmeals/domain";
+import { assertTransition, lineFoodNetPaise, lineTotalPaise, type OrderState } from "@localmeals/domain";
 import { getPaymentProvider, getWhatsAppProvider, isMockPayments } from "@localmeals/adapters";
 import { pauseCook } from "./cookOps.js";
+import { currentRequestActor } from "../http/requestActor.js";
 
 const OPEN_SETTLEMENT_STATUSES = [
   "AWAITING_MANUAL_PAY",
@@ -61,9 +62,11 @@ async function logAdmin(
   entityId: string,
   reason?: string,
   payload?: object,
+  actor?: string,
 ) {
+  const who = (actor ?? currentRequestActor() ?? "owner").slice(0, 40);
   await db.insert(adminActionLog).values({
-    actor: "owner",
+    actor: who,
     action,
     entityType,
     entityId,
@@ -128,6 +131,14 @@ export async function refundOrderByPublicId(
   return refundOrder(db, { orderId: order.id, ...input });
 }
 
+/** A PENDING refund claim older than this is assumed orphaned (crash mid-refund) and re-claimable.
+ * Keep in sync with `REFUND_CLAIM_STALE_MS` in orders.ts (paid-after-terminal auto-refund). */
+const REFUND_CLAIM_STALE_MS = 10 * 60 * 1000;
+
+function isAlreadyRefundedGatewayError(message: string) {
+  return /fully refunded|already been refunded|refunded already/i.test(message);
+}
+
 export async function refundOrder(
   db: Db,
   input: {
@@ -135,25 +146,92 @@ export async function refundOrder(
     mode: "FULL" | "FOOD_ONLY";
     reason: string;
     ticketId?: number;
+    /**
+     * Customer-initiated cancel of one week-cart day: move the ₹7 fee to a remaining day and
+     * claw back the week discount if the cart drops below minDays. Runs inside the claim txn,
+     * only on the first claim, so retries can't apply it twice. Not used for admin/quality refunds.
+     */
+    rebalanceCheckout?: boolean;
+    /** CREDIT = instant LocalMeals credit (no gateway call/fee). Credit-paid parts always return as credit. */
+    refundTo?: "SOURCE" | "CREDIT";
   },
 ) {
-  const order = await db.query.orders.findFirst({
-    where: (t, { eq: e }) => e(t.id, input.orderId),
+  const pay = getPaymentProvider();
+  const receipt = `lm_${input.orderId}_${input.mode}`;
+
+  // Lock + claim first so concurrent admin/webhook refunds cannot double-refund.
+  const claimed = await db.transaction(async (tx) => {
+    await tx.execute(sql`select id from orders where id = ${input.orderId} for update`);
+    let order = await tx.query.orders.findFirst({
+      where: (t, { eq: e }) => e(t.id, input.orderId),
+    });
+    if (!order) throw new Error("Order not found");
+    if (order.status === "REFUNDED") {
+      return { kind: "already" as const, order };
+    }
+    assertTransition(order.status as OrderState, "REFUNDED");
+
+    const existingRefund = await tx.query.payments.findFirst({
+      where: (t, { eq: e, and: a }) =>
+        a(e(t.orderId, order!.id), e(t.kind, "REFUND"), e(t.idempotencyKey, receipt)),
+    });
+
+    if (!existingRefund && input.rebalanceCheckout) {
+      const { rebalanceCheckoutForLineCancel } = await import("./orders.js");
+      await rebalanceCheckoutForLineCancel(tx, order.id);
+      order = (await tx.query.orders.findFirst({
+        where: (t, { eq: e }) => e(t.id, input.orderId),
+      }))!;
+    }
+
+    const amountPaise =
+      input.mode === "FULL"
+        ? lineTotalPaise(order)
+        : lineFoodNetPaise(order);
+    const toCredit =
+      input.refundTo === "CREDIT"
+        ? amountPaise
+        : Math.min(amountPaise, order.creditAppliedPaise ?? 0);
+
+    if (existingRefund) {
+      const stalePending =
+        existingRefund.status === "PENDING" &&
+        Date.now() - new Date(existingRefund.createdAt).getTime() > REFUND_CLAIM_STALE_MS;
+      if (existingRefund.status === "FAILED" || stalePending) {
+        await tx
+          .update(payments)
+          .set({
+            status: "PENDING",
+            amountPaise,
+            createdAt: new Date(),
+            rawPayload: { mode: input.mode, reason: input.reason, retry: true },
+          })
+          .where(eq(payments.id, existingRefund.id));
+        return { kind: "claimed" as const, order, amountPaise, toCredit };
+      }
+      // REFUNDED (finalize pending) or a fresh in-flight claim — don't call the gateway again.
+      return { kind: "already" as const, order };
+    }
+
+    await tx.insert(payments).values({
+      orderId: order.id,
+      kind: "REFUND",
+      amountPaise,
+      status: "PENDING",
+      gatewayTxnId: `pending_refund_${order.id}_${input.mode}`,
+      rawPayload: { mode: input.mode, reason: input.reason, toCreditPaise: toCredit },
+      idempotencyKey: receipt,
+    });
+
+    return { kind: "claimed" as const, order, amountPaise, toCredit };
   });
-  if (!order) throw new Error("Order not found");
-  if (order.status === "REFUNDED") return order;
-  assertTransition(order.status as OrderState, "REFUNDED");
 
-  const amountPaise =
-    input.mode === "FULL"
-      ? Math.max(0, order.foodPaise * order.qty - (order.foodDiscountPaise ?? 0)) +
-        order.deliveryPaise +
-        order.platformFeePaise
-      : Math.max(0, order.foodPaise * order.qty - (order.foodDiscountPaise ?? 0));
+  if (claimed.kind === "already") return claimed.order;
 
+  const { order, amountPaise, toCredit } = claimed;
+  const gatewayPaise = amountPaise - toCredit;
   const charge = await resolveChargePayment(db, order);
   const chargePayload = (charge?.rawPayload ?? {}) as { razorpayPaymentId?: string };
-  const pay = getPaymentProvider();
   const paymentRef =
     chargePayload.razorpayPaymentId ||
     charge?.gatewayTxnId ||
@@ -161,11 +239,12 @@ export async function refundOrder(
     order.publicId;
 
   let gatewayRefund: Awaited<ReturnType<typeof pay.refundPayment>> | null = null;
+  let alreadyRefundedAtGateway = false;
   try {
-    gatewayRefund = await pay.refundPayment({
+    if (gatewayPaise > 0) gatewayRefund = await pay.refundPayment({
       paymentId: paymentRef,
-      amountPaise,
-      receipt: `lm_${order.publicId}_${input.mode}`,
+      amountPaise: gatewayPaise,
+      receipt,
       notes: {
         orderPublicId: order.publicId,
         mode: input.mode,
@@ -174,61 +253,105 @@ export async function refundOrder(
       },
     });
   } catch (e) {
-    // Still allow ops to mark refunded in mock/dev; surface gateway error in payload
-    if (!isMockPayments()) {
-      throw new Error(`Razorpay refund failed: ${(e as Error).message}`);
+    const message = (e as Error).message;
+    // A re-claimed (stale) refund whose first gateway call actually succeeded — finalize, don't fail.
+    if (isAlreadyRefundedGatewayError(message)) {
+      alreadyRefundedAtGateway = true;
+    } else if (!isMockPayments()) {
+      await db
+        .update(payments)
+        .set({
+          status: "FAILED",
+          rawPayload: {
+            mode: input.mode,
+            reason: input.reason,
+            paymentRef,
+            error: message,
+          },
+        })
+        .where(and(eq(payments.orderId, order.id), eq(payments.idempotencyKey, receipt)));
+      throw new Error(`Razorpay refund failed: ${message}`);
     }
   }
 
-  const [updated] = await db
-    .update(orders)
-    .set({
-      status: "REFUNDED",
-      settlementHold: true,
-      updatedAt: new Date(),
-    })
-    .where(eq(orders.id, order.id))
-    .returning();
+  const gatewayStatus = alreadyRefundedAtGateway || gatewayPaise === 0
+    ? "processed"
+    : (gatewayRefund?.status ?? (gatewayRefund ? "unknown" : "PENDING"));
+  const paymentStatus =
+    gatewayStatus === "processed" || gatewayStatus === "completed"
+      ? "REFUNDED"
+      : gatewayRefund
+        ? "PENDING"
+        : "PENDING";
 
-  await db.insert(payments).values({
-    orderId: order.id,
-    kind: "REFUND",
-    amountPaise,
-    status: gatewayRefund?.status === "processed" || gatewayRefund ? "REFUNDED" : "PENDING",
-    gatewayTxnId: gatewayRefund?.refundId ?? `refund_${order.gatewayTxnId ?? order.publicId}`,
-    rawPayload: {
-      mode: input.mode,
-      reason: input.reason,
-      gateway: gatewayRefund,
-      paymentRef,
-    },
-    idempotencyKey: gatewayRefund
-      ? `rzp_refund_${gatewayRefund.refundId}`
-      : `refund_${order.id}_${input.mode}`,
-  });
-
-  await logAdmin(db, `REFUND_${input.mode}`, "order", String(order.id), input.reason, {
-    ticketId: input.ticketId,
-  });
-
-  if (input.ticketId) {
-    await db
-      .update(supportTickets)
+  const updated = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(orders)
       .set({
-        status: "RESOLVED",
-        decision: input.mode === "FULL" ? "FULL_REFUND" : "PARTIAL_REFUND",
-        resolvedAt: new Date(),
+        status: "REFUNDED",
+        settlementHold: true,
+        updatedAt: new Date(),
       })
-      .where(eq(supportTickets.id, input.ticketId));
-  }
+      .where(and(eq(orders.id, order.id), sql`${orders.status} <> 'REFUNDED'`))
+      .returning();
 
-  await enqueueOutbox(db, "OrderRefunded", {
+    await tx
+      .update(payments)
+      .set({
+        status: paymentStatus,
+        gatewayTxnId: gatewayRefund?.refundId ?? `refund_${order.gatewayTxnId ?? order.publicId}`,
+        rawPayload: {
+          mode: input.mode,
+          reason: input.reason,
+          gateway: gatewayRefund,
+          paymentRef,
+          gatewayStatus,
+          toCreditPaise: toCredit,
+          gatewayPaise,
+        },
+      })
+      .where(and(eq(payments.orderId, order.id), eq(payments.idempotencyKey, receipt)));
+
+    if (toCredit > 0) {
+      const { addCredit } = await import("./credits.js");
+      await addCredit(tx, {
+        mobile: order.customerMobile,
+        amountPaise: toCredit,
+        reason: input.refundTo === "CREDIT" ? "REFUND_TO_CREDIT" : "REFUND_CREDIT_PART",
+        orderId: order.id,
+        key: `refund_${receipt}`,
+      });
+    }
+
+    if (input.ticketId) {
+      await tx
+        .update(supportTickets)
+        .set({
+          status: "RESOLVED",
+          decision: input.mode === "FULL" ? "FULL_REFUND" : "PARTIAL_REFUND",
+          resolvedAt: new Date(),
+        })
+        .where(eq(supportTickets.id, input.ticketId));
+    }
+
+    await enqueueOutbox(tx, "OrderRefunded", {
       orderId: order.id,
       publicId: order.publicId,
       customerMobile: order.customerMobile,
       mode: input.mode,
       refundId: gatewayRefund?.refundId ?? null,
+      source: "admin",
+      reason: input.reason,
+      amountPaise,
+      creditPaise: toCredit,
     });
+
+    return row ?? order;
+  });
+
+  await logAdmin(db, `REFUND_${input.mode}`, "order", String(order.id), input.reason, {
+    ticketId: input.ticketId,
+  });
 
   const { recordOrderActivity } = await import("./orderActivity.js");
   await recordOrderActivity(db, {
@@ -245,21 +368,15 @@ export async function refundOrder(
       paymentRef,
       ticketId: input.ticketId ?? null,
       fromStatus: order.status,
+      gatewayStatus,
     },
   });
 
-  // If cook already received this plate in an EOD batch, queue food for next-EOD netting.
   const { enqueueCookClawback } = await import("./cookClawback.js");
   const clawback = await enqueueCookClawback(db, {
     order: updated,
     reason: input.reason,
     ticketId: input.ticketId,
-  });
-
-  const wa = getWhatsAppProvider();
-  await wa.send({
-    to: order.customerMobile,
-    body: `Refund processed for ${order.publicId} (${input.mode}). Reason: ${input.reason}`,
   });
 
   return { ...updated, clawback };

@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomInt, timingSafeEqual } from "node:crypto";
-import { and, eq, lt } from "drizzle-orm";
+import { and, eq, lt, sql } from "drizzle-orm";
 import { authOtps, authRevocations, cookProfiles, users, type Db } from "@localmeals/db";
 
 export type AuthRole = "CUSTOMER" | "COOK" | "ADMIN";
@@ -21,9 +21,6 @@ const OTP_MAX_ATTEMPTS = 5;
 const OTP_REQUEST_WINDOW_MS = 15 * 60 * 1000;
 const OTP_REQUEST_MAX = 5;
 
-/** In-process request throttle (best-effort across instances). */
-const otpRequestBuckets = new Map<string, { count: number; resetAt: number }>();
-
 function normalizeMobile(mobile: string) {
   const trimmed = mobile.trim().replace(/[\s-]/g, "");
   if (trimmed.startsWith("+")) return trimmed;
@@ -33,7 +30,13 @@ function normalizeMobile(mobile: string) {
 }
 
 function adminMobiles(): Set<string> {
-  const raw = process.env.ADMIN_MOBILES ?? "+919900000001";
+  const raw = process.env.ADMIN_MOBILES?.trim();
+  if (!raw) {
+    // Local dev/tests only. A NODE_ENV=production service (incl. public staging) never falls back to a
+    // well-known admin number from the public repo.
+    if (mockOtpEnabled() && process.env.NODE_ENV !== "production") return new Set(["+919900000001"]);
+    throw new Error("ADMIN_MOBILES must be set");
+  }
   return new Set(
     raw
       .split(",")
@@ -44,6 +47,14 @@ function adminMobiles(): Set<string> {
 
 function mockOtpEnabled() {
   return process.env.MOCK_AUTH !== "false";
+}
+
+/**
+ * Demo OTP (123456, echoed as mockCode, no throttle) for this role. A NODE_ENV=production service
+ * (public staging) never uses it for ADMIN: admins always get a random, undisclosed code.
+ */
+function mockOtpFor(role: AuthRole) {
+  return mockOtpEnabled() && !(process.env.NODE_ENV === "production" && role === "ADMIN");
 }
 
 function authSecret() {
@@ -126,23 +137,35 @@ function parseToken(token: string): SessionUser | null {
   return parseTokenRaw(token)?.user ?? null;
 }
 
-function assertOtpRequestAllowed(key: string) {
-  // Mock auth (local/tests) skips in-process OTP spam throttle — Postgres route limits still apply.
-  if (mockOtpEnabled()) return;
-  const now = Date.now();
-  const bucket = otpRequestBuckets.get(key);
-  if (!bucket || bucket.resetAt <= now) {
-    otpRequestBuckets.set(key, { count: 1, resetAt: now + OTP_REQUEST_WINDOW_MS });
-    return;
-  }
-  if (bucket.count >= OTP_REQUEST_MAX) {
+/** Postgres-backed OTP request throttle (shared across Cloud Run instances). */
+async function assertOtpRequestAllowed(db: Db, key: string, role: AuthRole) {
+  // Mock auth (local/tests) skips OTP spam throttle — Fastify route limits still apply.
+  if (mockOtpFor(role)) return;
+  const bucketKey = `otp_req:${key}`.slice(0, 255);
+  const resetAtIso = new Date(Date.now() + OTP_REQUEST_WINDOW_MS).toISOString();
+  const result = await db.execute(sql`
+    INSERT INTO rate_limit_buckets (bucket_key, hits, reset_at)
+    VALUES (${bucketKey}, 1, ${resetAtIso}::timestamptz)
+    ON CONFLICT (bucket_key) DO UPDATE SET
+      hits = CASE
+        WHEN rate_limit_buckets.reset_at <= NOW() THEN 1
+        ELSE rate_limit_buckets.hits + 1
+      END,
+      reset_at = CASE
+        WHEN rate_limit_buckets.reset_at <= NOW() THEN EXCLUDED.reset_at
+        ELSE rate_limit_buckets.reset_at
+      END
+    RETURNING hits
+  `);
+  const rows = result as unknown as Array<{ hits: number }>;
+  const hits = Number(Array.isArray(rows) ? rows[0]?.hits : 0) || 1;
+  if (hits > OTP_REQUEST_MAX) {
     throw new Error("Too many OTP requests — wait a few minutes and try again");
   }
-  bucket.count += 1;
 }
 
 async function deliverOtp(mobile: string, code: string, role: AuthRole) {
-  if (mockOtpEnabled()) {
+  if (mockOtpFor(role)) {
     console.log(`[mock-auth] OTP for ${role} ${mobile}: ${code}`);
     return;
   }
@@ -184,42 +207,33 @@ export async function requestOtp(
     throw new Error("Enter a valid mobile with country code (e.g. +9198…)");
   }
 
-  if (input.role === "ADMIN" && !adminMobiles().has(mobile)) {
-    throw new Error("This mobile is not an admin account");
-  }
-
+  // Same response whether or not the number may sign in for this role — otherwise this endpoint
+  // reveals which mobiles are admins / registered cooks (OWASP account enumeration). Ineligible
+  // numbers are throttled like real ones but get no stored or sent code.
+  let eligible = true;
+  if (input.role === "ADMIN" && !adminMobiles().has(mobile)) eligible = false;
   if (input.role === "COOK") {
     const cook = await db.query.cookProfiles.findFirst({
       where: (t, { eq: e }) => e(t.mobileNumber, mobile),
     });
-    if (!cook) throw new Error("No kitchen registered for this mobile");
     // Applicants cannot desk-login until ops Approves LIVE (platform-issued access).
-    if (cook.onboardingStatus !== "LIVE" || !cook.isActive) {
-      throw new Error(
-        "Kitchen not LIVE yet — LocalMeals will message you on WhatsApp when desk access is ready",
-      );
-    }
-  }
-
-  if (input.role === "CUSTOMER") {
-    const existing = await db.query.users.findFirst({
-      where: (t, { eq: e }) => e(t.mobileNumber, mobile),
-    });
-    if (!existing) {
-      await db.insert(users).values({
-        mobileNumber: mobile,
-        fullName: "Guest",
-        primaryAddress: "Address on file",
-        pinCode: "600119",
-        segment: "BACHELOR",
-      });
-    }
+    if (!cook || cook.onboardingStatus !== "LIVE" || !cook.isActive) eligible = false;
   }
 
   const rateKey = `${input.role}:${mobile}`;
-  assertOtpRequestAllowed(rateKey);
+  await assertOtpRequestAllowed(db, rateKey, input.role);
 
-  const code = mockOtpEnabled() ? "123456" : String(randomInt(100000, 999999));
+  if (!eligible) {
+    return {
+      ok: true,
+      mobile,
+      role: input.role,
+      expiresInSec: OTP_TTL_MS / 1000,
+      mockCode: undefined,
+    };
+  }
+
+  const code = mockOtpFor(input.role) ? "123456" : String(randomInt(100000, 999999));
   const expiresAt = new Date(Date.now() + OTP_TTL_MS);
 
   await db
@@ -251,7 +265,7 @@ export async function requestOtp(
     mobile,
     role: input.role,
     expiresInSec: OTP_TTL_MS / 1000,
-    mockCode: mockOtpEnabled() ? code : undefined,
+    mockCode: mockOtpFor(input.role) ? code : undefined,
   };
 }
 
@@ -315,7 +329,8 @@ export async function verifyOtp(
 
   // Local/dev: UI pre-fills 123456 and copy says demo OTP is always that —
   // allow sign-in without a prior Send OTP when MOCK_AUTH is on.
-  if (mockOtpEnabled() && code === "123456") {
+  // Never mint ADMIN sessions from the demo code on a NODE_ENV=production service (public staging).
+  if (mockOtpFor(input.role) && code === "123456") {
     await db
       .delete(authOtps)
       .where(and(eq(authOtps.mobileNumber, mobile), eq(authOtps.role, input.role)))
@@ -329,15 +344,32 @@ export async function verifyOtp(
     };
   }
 
-  const rec = await db.query.authOtps.findFirst({
-    where: (t, { eq: e, and: a }) => a(e(t.mobileNumber, mobile), e(t.role, input.role)),
-  });
+  // Reserve an attempt atomically BEFORE comparing: N parallel guesses can only ever get
+  // OTP_MAX_ATTEMPTS comparisons, no matter how they interleave.
+  const [reserved] = await db
+    .update(authOtps)
+    .set({ attempts: sql`${authOtps.attempts} + 1` })
+    .where(
+      and(
+        eq(authOtps.mobileNumber, mobile),
+        eq(authOtps.role, input.role),
+        sql`${authOtps.attempts} < ${OTP_MAX_ATTEMPTS}`,
+        sql`${authOtps.expiresAt} > now()`,
+      ),
+    )
+    .returning({ attempts: authOtps.attempts, codeHash: authOtps.codeHash });
 
-  if (!rec || rec.expiresAt.getTime() < Date.now()) {
+  if (!reserved) {
+    const rec = await db.query.authOtps.findFirst({
+      where: (t, { eq: e, and: a }) => a(e(t.mobileNumber, mobile), e(t.role, input.role)),
+    });
     if (rec) {
       await db
         .delete(authOtps)
         .where(and(eq(authOtps.mobileNumber, mobile), eq(authOtps.role, input.role)));
+    }
+    if (rec && rec.expiresAt.getTime() >= Date.now()) {
+      throw new Error("Too many invalid OTP attempts — request a new code");
     }
     throw new Error(
       mockOtpEnabled()
@@ -346,27 +378,32 @@ export async function verifyOtp(
     );
   }
 
-  if (rec.attempts >= OTP_MAX_ATTEMPTS) {
-    await db
-      .delete(authOtps)
-      .where(and(eq(authOtps.mobileNumber, mobile), eq(authOtps.role, input.role)));
-    throw new Error("Too many invalid OTP attempts — request a new code");
-  }
-
-  const expectedHash = hashOtp(code);
-  const ok = codesEqual(rec.codeHash, expectedHash);
+  const ok = codesEqual(reserved.codeHash, hashOtp(code));
 
   if (!ok) {
-    await db
-      .update(authOtps)
-      .set({ attempts: rec.attempts + 1 })
-      .where(and(eq(authOtps.mobileNumber, mobile), eq(authOtps.role, input.role)));
+    if (reserved.attempts >= OTP_MAX_ATTEMPTS) {
+      await db
+        .delete(authOtps)
+        .where(and(eq(authOtps.mobileNumber, mobile), eq(authOtps.role, input.role)));
+      throw new Error("Too many invalid OTP attempts — request a new code");
+    }
     throw new Error("Invalid OTP");
   }
 
-  await db
+  // Single use: only the request that actually deletes this code gets a session.
+  const consumed = await db
     .delete(authOtps)
-    .where(and(eq(authOtps.mobileNumber, mobile), eq(authOtps.role, input.role)));
+    .where(
+      and(
+        eq(authOtps.mobileNumber, mobile),
+        eq(authOtps.role, input.role),
+        eq(authOtps.codeHash, reserved.codeHash),
+      ),
+    )
+    .returning({ mobile: authOtps.mobileNumber });
+  if (!consumed.length) {
+    throw new Error("OTP already used — tap Send OTP again");
+  }
 
   const user = await resolveUser(db, input.role, mobile);
   const token = issueToken(user);
@@ -451,6 +488,15 @@ export async function getSessionUserFromRequestAsync(
       cookId: cook.id,
       fullName: cook.kitchenName,
     };
+  }
+
+  // Admin: re-check allowlist so removed mobiles cannot keep using old tokens.
+  if (parsed.user.role === "ADMIN") {
+    try {
+      if (!adminMobiles().has(parsed.user.mobile)) return null;
+    } catch {
+      return null;
+    }
   }
 
   return parsed.user;

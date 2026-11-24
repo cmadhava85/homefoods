@@ -19,6 +19,17 @@ export function weekDiscountApplies(dayCount: number, rule: WeekDiscountRule): b
   return rule.percent > 0 && dayCount >= rule.minDays;
 }
 
+/**
+ * After cancelling part of a week cart, does the discount still hold for what remains?
+ * Counts distinct calendar days (B+L+D on one day = 1), same as at checkout.
+ */
+export function weekDiscountSurvivesCancel(
+  remainingServiceDates: string[],
+  rule: WeekDiscountRule,
+): boolean {
+  return weekDiscountApplies(new Set(remainingServiceDates).size, rule);
+}
+
 /** Food-only discount for one cart line (delivery + platform fee never discounted). */
 export function lineFoodDiscountPaise(input: {
   foodPaise: number;

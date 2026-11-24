@@ -317,6 +317,12 @@ export const orders = pgTable(
     weekDiscountPercent: integer("week_discount_percent"),
     deliveryPaise: integer("delivery_paise").default(0).notNull(),
     platformFeePaise: integer("platform_fee_paise").default(700).notNull(),
+    /** Gateway cost passed to the customer for this line (0 when the fee flag is off). */
+    convenienceFeePaise: integer("convenience_fee_paise").default(0).notNull(),
+    /** Wallet credit used for this line; the gateway charges lineTotal − credit. */
+    creditAppliedPaise: integer("credit_applied_paise").default(0).notNull(),
+    /** LINK (Razorpay payment link) | UPI_QR (pickup QR) | CREDIT (fully credit-paid). */
+    paymentMethod: varchar("payment_method", { length: 16 }).default("LINK").notNull(),
     status: orderStateEnum("status").default("DRAFT").notNull(),
     settlementHold: boolean("settlement_hold").default(false).notNull(),
     settlementId: integer("settlement_id").references(() => settlements.id),
@@ -386,6 +392,21 @@ export const cookLedger = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [index("cook_ledger_cook_idx").on(t.cookId)],
+);
+
+/** Wallet credit ledger: +refund-to-credit, −spent at payment. Balance also nets out unpaid holds. */
+export const customerCredits = pgTable(
+  "customer_credits",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    customerMobile: varchar("customer_mobile", { length: 15 }).notNull(),
+    amountPaise: integer("amount_paise").notNull(),
+    reason: varchar("reason", { length: 40 }).notNull(),
+    orderId: integer("order_id").references(() => orders.id),
+    idempotencyKey: varchar("idempotency_key", { length: 120 }).notNull().unique(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("customer_credits_mobile_idx").on(t.customerMobile)],
 );
 
 export const ratingsReviews = pgTable(
@@ -489,6 +510,8 @@ export const outbox = pgTable(
     attempts: integer("attempts").default(0).notNull(),
     lastError: text("last_error"),
     processedAt: timestamp("processed_at", { withTimezone: true }),
+    /** Claim lease — a drain owns the row until this time; expired leases are re-claimable. */
+    lockedUntil: timestamp("locked_until", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [index("outbox_unprocessed_idx").on(t.processedAt)],
@@ -519,6 +542,20 @@ export const rateLimitBuckets = pgTable(
     resetAt: timestamp("reset_at", { withTimezone: true }).notNull(),
   },
   (t) => [index("rate_limit_buckets_reset_idx").on(t.resetAt)],
+);
+
+/** Meta WhatsApp inbound message ids — dedupe redeliveries. */
+export const waInboundDedupe = pgTable(
+  "wa_inbound_dedupe",
+  {
+    wamid: varchar("wamid", { length: 128 }).primaryKey(),
+    fromMobile: varchar("from_mobile", { length: 15 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index("wa_inbound_dedupe_created_idx").on(t.createdAt),
+    index("wa_inbound_dedupe_from_created_idx").on(t.fromMobile, t.createdAt),
+  ],
 );
 
 /** Logout / force-expire: tokens with iat <= revoked_before are rejected. */

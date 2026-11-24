@@ -12,9 +12,7 @@ terraform {
     }
   }
 
-  # Optional: set create_tf_state_bucket=true (or gsutil mb), then uncomment:
-  # backend "gcs" {
-  #   bucket = "home-food-513806-tfstate"
-  #   prefix = "localmeals/mvp1"
-  # }
+  # Remote state (versioned GCS bucket from state_bucket.tf). Bucket/prefix live in backend.hcl.
+  # One-time migration from local state: see README.md "Remote state".
+  backend "gcs" {}
 }

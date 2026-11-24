@@ -1,0 +1,5 @@
+# Reviewed Trivy exceptions — each MUST carry an expiry (exp:YYYY-MM-DD); expired entries fail CI again.
+
+# Cloud SQL public IPv4: no authorized_networks, IAM-gated connector only, TLS enforced (ssl_mode).
+# Planned fix: private IP via private service access, then ipv4_enabled = false (infra/terraform/sql.tf).
+GCP-0017 exp:2027-01-31

@@ -1,6 +1,7 @@
 {
   "name": "@localmeals/api",
   "version": "0.1.0",
+  "license": "UNLICENSED",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,7 +12,9 @@
     "test": "node scripts/run-all-tests.mjs",
     "test:unit": "node scripts/run-unit-tests.mjs",
     "test:mutation": "stryker run",
-    "test:mutation:full": "stryker run stryker.full.config.json"
+    "test:mutation:full": "stryker run stryker.full.config.json",
+    "test:coverage": "node ../../scripts/node-test-coverage.mjs --lines 75 --branches 63 --functions 73 --serial",
+    "openapi": "node --import tsx src/openapi/generate.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.2",
@@ -33,6 +36,7 @@
   "devDependencies": {
     "@stryker-mutator/core": "^10.1.1",
     "@types/node": "^22.10.5",
-    "tsx": "^4.19.2"
+    "tsx": "^4.19.2",
+    "zod-to-json-schema": "^3.25.2"
   }
 }

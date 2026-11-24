@@ -1,10 +1,10 @@
 import "dotenv/config";
-import { after, before, describe, it } from "node:test";
+import { after, before, describe, it, mock } from "node:test";
 import assert from "node:assert/strict";
 import { buildApp } from "./app.js";
 import { closeDb, createDb, cookProfiles } from "@localmeals/db";
 import { eq } from "drizzle-orm";
-import { assertCanAcceptPaidOrders } from "@localmeals/domain";
+import { appZoneDateTime, assertCanAcceptPaidOrders, serviceDateISO } from "@localmeals/domain";
 import { customerWithAddress, loginAdmin, loginCook, testMobile } from "./testHelpers.js";
 
 process.env.LUNCH_CUTOFF_HOUR = "23";
@@ -185,7 +185,9 @@ describe("MVP-1 integration", () => {
   });
 
   it("late request + late-approve creates payable order; FSSAI gate blocks unpaid kitchen", async () => {
-    // Past cut-off; delivery 23:00 → late closes 19:00 IST (works for daytime CI).
+    // Freeze "now" at 10:00 IST today (Date only — timers/DB keep running): cut-off 00:00 has passed
+    // and late orders (closing 19:00 for a 23:00 drop) are open, whatever time CI runs.
+    mock.timers.enable({ apis: ["Date"], now: appZoneDateTime(serviceDateISO(), 10, 0) });
     const openLate = await app.inject({
       method: "PATCH",
       url: "/cooks/csk-homemade-delights/meal-settings/LUNCH",
@@ -239,6 +241,7 @@ describe("MVP-1 integration", () => {
         assertCanAcceptPaidOrders({ ...millet, onboardingStatus: "LIVE", fssaiNumber: null }),
       );
     } finally {
+      mock.timers.reset();
       await app.inject({
         method: "PATCH",
         url: "/cooks/csk-homemade-delights/meal-settings/LUNCH",

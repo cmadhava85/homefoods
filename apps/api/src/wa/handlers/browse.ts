@@ -17,6 +17,39 @@ export async function handleBrowse(s: WaSession): Promise<object> {
   let { waLocale } = { waLocale: s.waLocale };
   const setLocale = (v: Locale) => { s.waLocale = v; waLocale = v; };
 
+  if (intent === "REORDER") {
+    return await waSafe("REORDER", async () => {
+      const rows = await db.query.orders.findMany({
+        where: (t, { eq: e }) => e(t.customerMobile, mobile),
+        orderBy: (t, { desc: d }) => [d(t.createdAt)],
+        limit: 20,
+      });
+      const last = rows.find((o) =>
+        ["DELIVERED", "PAID", "COOKING", "PACKED", "DISPATCHED"].includes(o.status),
+      );
+      if (!last) {
+        await wa.send({
+          to: from,
+          body: wt("wa.startWithMenu"),
+          buttons: ["Menu", "Orders"],
+        });
+        return { ok: true, intent, empty: true, replies: replies() };
+      }
+      const cook = await db.query.cookProfiles.findFirst({
+        where: (t, { eq: e }) => e(t.id, last.cookId),
+      });
+      if (!cook) {
+        await wa.send({
+          to: from,
+          body: wt("wa.startWithMenu"),
+          buttons: ["Menu"],
+        });
+        return { ok: true, intent, error: "no_kitchen", replies: replies() };
+      }
+      return sendKitchenMenuWa(cook.slugHandle);
+    });
+  }
+
   if (intent === "PICK") {
     return await waSafe("PICK", async () => {
       const n = parsePickNumber(text);

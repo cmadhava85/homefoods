@@ -1,6 +1,7 @@
 {
   "name": "@localmeals/domain",
   "version": "0.1.0",
+  "license": "UNLICENSED",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -16,7 +17,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "tsc -p tsconfig.json --watch",
     "test": "node --import tsx --test src/**/*.test.ts",
-    "test:mutation": "stryker run"
+    "test:mutation": "stryker run",
+    "test:coverage": "node ../../scripts/node-test-coverage.mjs --lines 95 --branches 90 --functions 90"
   },
   "devDependencies": {
     "@stryker-mutator/core": "^10.1.1",

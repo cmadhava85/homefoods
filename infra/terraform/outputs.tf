@@ -11,7 +11,7 @@ output "artifact_registry" {
 }
 
 output "vpc_connector" {
-  value = google_vpc_access_connector.connector.id
+  value = var.vpc_connector_enabled ? google_vpc_access_connector.connector[0].id : null
 }
 
 output "sql_connection_name" {

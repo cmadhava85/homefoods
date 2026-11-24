@@ -5,6 +5,7 @@ import {
   lineFoodDiscountPaise,
   normalizeWeekDiscountRule,
   weekDiscountApplies,
+  weekDiscountSurvivesCancel,
   WEEK_DISCOUNT_PERCENT_MAX,
 } from "./weekDiscount.js";
 
@@ -38,5 +39,16 @@ describe("week discount", () => {
   it("describes rule for UI", () => {
     assert.equal(describeWeekDiscount({ percent: 0, minDays: 3 }), null);
     assert.match(describeWeekDiscount({ percent: 10, minDays: 3 })!, /10%.*≥ 3/);
+  });
+
+  it("after a cancel, counts remaining calendar days, not meal lines", () => {
+    const rule = { percent: 10, minDays: 3 };
+    // 2 days × (lunch + dinner) = 4 lines but only 2 days → discount no longer holds.
+    assert.equal(
+      weekDiscountSurvivesCancel(["2026-11-24", "2026-11-24", "2026-11-25", "2026-11-25"], rule),
+      false,
+    );
+    assert.equal(weekDiscountSurvivesCancel(["2026-11-24", "2026-11-25", "2026-11-26"], rule), true);
+    assert.equal(weekDiscountSurvivesCancel([], rule), false);
   });
 });

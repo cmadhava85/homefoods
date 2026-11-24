@@ -1,0 +1,40 @@
+{
+  "$comment": "Reviewed high/critical npm advisories (production deps) that are not exploitable here. Each entry MUST expire; CI fails on any unlisted high/critical advisory and on expired entries. Prefer upgrading over extending.",
+  "entries": [
+    {
+      "package": "drizzle-orm",
+      "expires": "2027-01-31",
+      "reason": "SQL injection via improperly escaped identifiers needs sql.identifier()/sql.raw() with dynamic input; none exist (git grep). Fix: upgrade to >=0.45.2 (0.x breaking)."
+    },
+    {
+      "package": "zod",
+      "expires": "2027-01-31",
+      "reason": "Memory exhaustion on oversized constrained collections; Fastify bodyLimit (1 MiB) caps input and cart arrays are .max(42). Fix: migrate to zod 4."
+    },
+    {
+      "package": "postcss",
+      "expires": "2027-01-31",
+      "reason": "Pulled in by next for build-time CSS; never processes user-supplied CSS at runtime. Fix: Next 16 upgrade."
+    },
+    {
+      "package": "@opentelemetry/auto-instrumentations-node",
+      "expires": "2027-01-31",
+      "reason": "OTel is off unless OTEL_ENABLED=true (Terraform default false). Fix: upgrade OTel packages together."
+    },
+    {
+      "package": "@opentelemetry/exporter-prometheus",
+      "expires": "2027-01-31",
+      "reason": "Transitive via @opentelemetry/sdk-node; OTel disabled by default. Fix: upgrade OTel packages together."
+    },
+    {
+      "package": "@opentelemetry/propagator-jaeger",
+      "expires": "2027-01-31",
+      "reason": "DoS on malformed Jaeger header; Jaeger propagator not configured and OTel disabled by default. Fix: upgrade OTel packages together."
+    },
+    {
+      "package": "@opentelemetry/sdk-node",
+      "expires": "2027-01-31",
+      "reason": "OTel disabled by default (OTEL_ENABLED). Fix: upgrade OTel packages together."
+    }
+  ]
+}

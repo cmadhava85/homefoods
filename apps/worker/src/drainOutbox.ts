@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { Db } from "@localmeals/db";
 import { outbox } from "@localmeals/db";
 import { getWhatsAppProvider, isNonRetryableWhatsAppError } from "@localmeals/adapters";
@@ -62,7 +62,12 @@ async function sendWa(
   message: Parameters<ReturnType<typeof getWhatsAppProvider>["send"]>[0],
 ) {
   try {
-    await wa.send(message);
+    // Meta template messages cannot carry free-form body or reply buttons. Drop buttons so mock
+    // / logs match what customers actually receive (templateOutsideWindow picks free-form inside 24h).
+    const outbound = message.template
+      ? { ...message, buttons: undefined }
+      : message;
+    await wa.send(outbound);
   } catch (err) {
     logger.error(
       { err, event: LogEvent.WA_SEND_FAILED, to: maskMobile(message.to) },
@@ -70,6 +75,59 @@ async function sendWa(
     );
     throw err;
   }
+}
+
+/**
+ * Prefer approved Meta utility templates when configured (outside 24h window).
+ * Env: WHATSAPP_TMPL_ORDER_PAID / ORDER_STATUS / REFUND / MENU_ALERT (+ optional _LANG).
+ */
+function templateFromEnv(
+  kind: "ORDER_PAID" | "ORDER_STATUS" | "REFUND" | "MENU_ALERT",
+  bodyParams: string[],
+): { name: string; language: string; bodyParams: string[] } | undefined {
+  const name = (process.env[`WHATSAPP_TMPL_${kind}`] ?? "").trim();
+  if (!name) return undefined;
+  const language =
+    (process.env[`WHATSAPP_TMPL_${kind}_LANG`] ?? process.env.WHATSAPP_OTP_TEMPLATE_LANG ?? "en")
+      .trim() || "en";
+  return { name, language, bodyParams: bodyParams.map((p) => String(p).slice(0, 1024)) };
+}
+
+/** Refund message: credit part is instant; the rest goes back to the original UPI/bank. */
+export function refundCopy(publicId: string, amountPaise: number, creditPaise: number): string {
+  const rupees = (p: number) => (p / 100).toFixed(2);
+  const bankPaise = Math.max(0, amountPaise - creditPaise);
+  if (creditPaise > 0 && bankPaise === 0) {
+    return `Refund done · ${publicId}. ₹${rupees(creditPaise)} added to your LocalMeals credit — used automatically on your next order.`;
+  }
+  if (creditPaise > 0) {
+    return `Refund initiated · ${publicId}. ₹${rupees(creditPaise)} added to your LocalMeals credit; ₹${rupees(bankPaise)} returns to the same UPI/bank (usually within a few hours, up to 1–2 working days).`;
+  }
+  return `Refund initiated · ${publicId}. Returns to the same UPI/bank — usually within a few hours (up to 1–2 working days).`;
+}
+
+/** Meta's customer-service window is 24 h from the user's last message; keep a safety margin. */
+const CUSTOMER_WINDOW_MS = 23.5 * 60 * 60 * 1000;
+
+/**
+ * Inside the 24 h window a free-form message is free and needs no template; marketing templates
+ * (e.g. MENU_ALERT) are charged even there. So use the template only when the window is closed.
+ */
+async function templateOutsideWindow<T>(db: Db, to: string, tmpl: T | undefined): Promise<{ template?: T }> {
+  if (!tmpl) return {};
+  const since = new Date(Date.now() - CUSTOMER_WINDOW_MS).toISOString();
+  // Inbound stores +E.164; normalize so +91… / 91… still match the open window.
+  const digits = to.replace(/\D/g, "");
+  const variants = [...new Set([to, digits ? `+${digits}` : "", digits].filter(Boolean))];
+  const rows = (await db.execute(sql`
+    SELECT 1 FROM wa_inbound_dedupe
+    WHERE from_mobile IN (${sql.join(
+      variants.map((v) => sql`${v}`),
+      sql`, `,
+    )}) AND created_at > ${since}::timestamptz
+    LIMIT 1
+  `)) as unknown as unknown[];
+  return rows.length > 0 ? {} : { template: tmpl };
 }
 
 /** Cache WA kill-switch so an idle worker does not hammer GET /meta/features every poll. */
@@ -102,7 +160,7 @@ async function defaultWhatsappOutboundAllowed(apiBase: string): Promise<boolean>
 export async function drainOutboxOnce(
   db: Db,
   opts: DrainOutboxOptions = {},
-) {
+): Promise<{ claimed: number }> {
   const log = opts.logger ?? defaultLog;
   const apiBase =
     opts.apiBase ??
@@ -114,11 +172,35 @@ export async function drainOutboxOnce(
     opts.whatsappOutboundAllowed ??
     (() => defaultWhatsappOutboundAllowed(apiBase));
 
-  const rows = await db.query.outbox.findMany({
-    where: (t, { isNull: n }) => n(t.processedAt),
-    limit: 20,
-  });
-  if (!rows.length) return;
+  // Claim a batch with a lease so overlapping drains (2 worker instances, or a slow tick overlapping
+  // the next) never pick the same rows. Row locks alone end when this statement commits.
+  const leaseSec = Math.max(30, Number(process.env.OUTBOX_LEASE_SEC ?? 120));
+  const claimed = await db.execute(sql`
+    update outbox
+    set locked_until = now() + make_interval(secs => ${leaseSec})
+    where id in (
+      select id from outbox
+      where processed_at is null
+        and (locked_until is null or locked_until < now())
+      order by id
+      for update skip locked
+      limit 20
+    )
+    returning id, event_name, payload, attempts, last_error, processed_at, created_at
+  `);
+  const rawRows = (
+    Array.isArray(claimed) ? claimed : ((claimed as { rows?: unknown[] }).rows ?? [])
+  ) as Array<Record<string, unknown>>;
+  const rows = rawRows.map((r) => ({
+    id: Number(r.id),
+    eventName: String(r.event_name ?? r.eventName),
+    payload: (r.payload ?? {}) as Record<string, unknown>,
+    attempts: Number(r.attempts ?? 0),
+    lastError: (r.last_error ?? r.lastError ?? null) as string | null,
+    processedAt: (r.processed_at ?? r.processedAt ?? null) as Date | null,
+    createdAt: (r.created_at ?? r.createdAt) as Date,
+  }));
+  if (!rows.length) return { claimed: 0 };
 
   const wa = getWhatsAppProvider();
   const waOut = await whatsappOutboundAllowed();
@@ -183,7 +265,7 @@ export async function drainOutboxOnce(
 
         let body: string;
         const holdNote =
-          "Your plate is reserved for 15 minutes. Pay now to confirm — if payment isn’t completed, this hold cancels automatically (no charge).";
+          "Your plate is reserved for 20 minutes. Pay now to confirm — if payment isn’t completed, this hold cancels automatically (no charge).";
         if (childPays) {
           body = [
             `⏳ Waiting for payment · ${kitchen}`,
@@ -193,7 +275,7 @@ export async function drainOutboxOnce(
               ? `Family ${payerMobile} needs to complete UPI.`
               : "A family member needs to complete UPI.",
             "",
-            "Reserved for 15 minutes. If they don’t pay in time, this hold cancels automatically (no charge).",
+            "Reserved for 20 minutes. If they don’t pay in time, this hold cancels automatically (no charge).",
           ]
             .filter(Boolean)
             .join("\n");
@@ -265,7 +347,7 @@ export async function drainOutboxOnce(
               amountLabel ? `Amount ${amountLabel}` : null,
               payUrl ? `Pay here: ${payUrl}` : "Open My orders → Pay now.",
               "",
-              "Their plate is reserved for 15 minutes. Pay now to confirm — if payment isn’t completed, this hold cancels automatically (no charge).",
+              "Their plate is reserved for 20 minutes. Pay now to confirm — if payment isn’t completed, this hold cancels automatically (no charge).",
             ]
               .filter(Boolean)
               .join("\n"),
@@ -296,10 +378,15 @@ export async function drainOutboxOnce(
 
         // Customer confirmation for every paid order line (date + week day N of M)
         if (customerMobile.length > 5) {
+          const tmpl = templateFromEnv("ORDER_PAID", [
+            str(payload.publicId) || "order",
+            str(payload.itemName) || "plate",
+          ]);
           await sendWa(logger, wa, {
             to: customerMobile,
             body: customerBody,
             buttons: ["Orders", "Menu"],
+            ...(await templateOutsideWindow(db, customerMobile, tmpl)),
           });
           logger.info({ event: LogEvent.OUTBOX_PROCESSED, channel: "whatsapp", toRole: "customer" }, "OrderPaid customer notified");
         }
@@ -381,13 +468,16 @@ export async function drainOutboxOnce(
         const fulfillment = str(payload.fulfillmentMode) || "DELIVERY";
 
         if (customerMobile.length > 5 && to === "DISPATCHED") {
+          const tmpl = templateFromEnv("ORDER_STATUS", [publicId || "order", "on the way"]);
           await sendWa(logger, wa, {
             to: customerMobile,
             body: [`🛵 On the way · ${publicId}`, itemLine].join("\n"),
             buttons: ["Orders"],
+            ...(await templateOutsideWindow(db, customerMobile, tmpl)),
           });
         }
         if (customerMobile.length > 5 && to === "DELIVERED") {
+          const tmpl = templateFromEnv("ORDER_STATUS", [publicId || "order", "delivered"]);
           await sendWa(logger, wa, {
             to: customerMobile,
             body: [
@@ -396,6 +486,7 @@ export async function drainOutboxOnce(
               "How was it? Open My orders and leave a quick star rating — it helps neighbours choose a kitchen.",
             ].join("\n"),
             buttons: ["Orders", "Menu"],
+            ...(await templateOutsideWindow(db, customerMobile, tmpl)),
           });
         }
         if (customerMobile.length > 5 && to === "CANCEL_REQUESTED") {
@@ -445,10 +536,10 @@ export async function drainOutboxOnce(
             body: [
               "👨‍👩‍👧 Family pay invite",
               seniorMobile
-                ? `${seniorMobile} wants you to settle their LocalMeals UPI.`
-                : "A family member wants you to settle their LocalMeals UPI.",
+                ? `${seniorMobile} asked you to pay for their LocalMeals order.`
+                : "A family member asked you to pay for their LocalMeals order.",
               "",
-              "Open the app → Family → Accept. Then you can pay when they order.",
+              "Reply Accept family — we’ll send you the pay link when they order.",
             ].join("\n"),
             buttons: ["Orders", "Menu"],
           });
@@ -542,21 +633,32 @@ export async function drainOutboxOnce(
               where: (t, { eq: e }) => e(t.cookId, cookId),
             })
           : [];
+        const optedOut = async (mobile: string) => {
+          try {
+            const row = await db.query.users.findFirst({
+              where: (t, { eq: e }) => e(t.mobileNumber, mobile),
+            });
+            const consents = (row?.consents ?? {}) as Record<string, unknown>;
+            return consents.waMarketingOptOut === true;
+          } catch {
+            return false;
+          }
+        };
         const body = [
           `📣 ${kitchenName} posted a new plate`,
           `${itemName}${pricePaise ? ` — ₹${(pricePaise / 100).toFixed(0)}` : ""} · ${when}`,
           "",
-          cookSlug
-            ? `Menu ${cookSlug} · Order ${cookSlug} · Week ${cookSlug} all`
-            : "Reply Menu to browse.",
+          cookSlug ? `Reply Menu to see ${kitchenName}, or Week for multi-day.` : "Reply Menu to browse.",
+          "Reply STOP to pause menu alerts.",
         ].join("\n");
+        const tmpl = templateFromEnv("MENU_ALERT", [kitchenName, itemName]);
         for (const f of followers) {
+          if (await optedOut(f.customerMobile)) continue;
           await sendWa(logger, wa, {
             to: f.customerMobile,
             body,
-            buttons: cookSlug
-              ? [`Menu ${cookSlug}`, `Week ${cookSlug} all`, "Orders"].slice(0, 3)
-              : ["Menu", "Orders"],
+            buttons: cookSlug ? ["Menu", "Week", "Orders"] : ["Menu", "Orders"],
+            ...(await templateOutsideWindow(db, f.customerMobile, tmpl)),
           });
         }
         logger.info(
@@ -587,11 +689,18 @@ export async function drainOutboxOnce(
 
       if (row.eventName === "OrderRefunded") {
         const customerMobile = str(payload.customerMobile);
-        if (customerMobile.length > 5 && payload.source === "gateway_webhook") {
+        const notifySources = new Set(["gateway_webhook", "admin", "paid_after_terminal"]);
+        if (customerMobile.length > 5 && notifySources.has(str(payload.source))) {
+          const reason =
+            payload.source === "paid_after_terminal"
+              ? `Refund for ${str(payload.publicId)} — payment arrived after the order was cancelled. Returns to the same UPI/bank (usually a few hours).`
+              : refundCopy(str(payload.publicId), Number(payload.amountPaise ?? 0), Number(payload.creditPaise ?? 0));
+          const tmpl = templateFromEnv("REFUND", [str(payload.publicId) || "order"]);
           await sendWa(logger, wa, {
             to: customerMobile,
-            body: `Refund initiated · ${str(payload.publicId)}. Returns to the same UPI/bank — usually within a few hours (up to 1–2 working days).`,
+            body: reason,
             buttons: ["Orders", "Menu"],
+            ...(await templateOutsideWindow(db, customerMobile, tmpl)),
           });
         }
         logger.info({ event: LogEvent.OUTBOX_PROCESSED, source: payload.source }, "OrderRefunded");
@@ -678,5 +787,6 @@ export async function drainOutboxOnce(
       .set({ processedAt: new Date() })
       .where(eq(outbox.id, row.id));
   }
+  return { claimed: rows.length };
 }
 

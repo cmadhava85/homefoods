@@ -95,19 +95,34 @@ terraform output api_url
 terraform output next_steps
 ```
 
-## Remote state (recommended)
+## Remote state (required)
+
+`versions.tf` declares `backend "gcs" {}`; bucket/prefix are in `backend.hcl`. Local state on one laptop
+is a single point of failure and holds the DB password in plain text — migrate once:
 
 ```bash
-# Option A — Terraform creates the bucket
-# create_tf_state_bucket = true
-# terraform apply
+# 1. Create the versioned, private bucket (once). Either:
+gcloud storage buckets create gs://home-food-513806-tfstate --location=asia-south1 \
+  --uniform-bucket-level-access --public-access-prevention
+gcloud storage buckets update gs://home-food-513806-tfstate --versioning
+#    …or set create_tf_state_bucket = true and apply with the OLD local backend first.
 
-# Option B — manual
-gsutil mb -l asia-south1 gs://home-food-513806-tfstate
+# 2. Move local state into the bucket (answers "yes" to copy existing state):
+terraform init -backend-config=backend.hcl -migrate-state
 
-# Then uncomment backend "gcs" in versions.tf and:
-terraform init -migrate-state
+# 3. Verify, then delete the local copies (they contain secrets):
+terraform state list | head
+rm terraform.tfstate terraform.tfstate.backup
 ```
+
+Grant only the ops group / deploy SA `roles/storage.objectAdmin` on that bucket.
+
+## Database resilience
+
+- `db_pitr_enabled` (default **true**) + `db_log_retention_days` (7) → point-in-time restore to any second in the last 7 days.
+- `db_backup_retained_count` (14) daily backups at 23:30 IST.
+- `db_availability_type = "REGIONAL"` for HA failover (≈2× DB cost); `db_tier` ≥ `db-g1-small` recommended for launch (f1-micro is shared-core, no SLA, ~25 connections).
+- Restore drill: [docs/RUNBOOK.md §13](../../docs/RUNBOOK.md).
 
 ## Destroy
 

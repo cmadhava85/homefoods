@@ -9,9 +9,10 @@ resource "google_sql_database_instance" "postgres" {
   region           = var.region
 
   settings {
-    tier              = var.db_tier
-    edition           = "ENTERPRISE"
-    availability_type = "ZONAL"
+    tier    = var.db_tier
+    edition = "ENTERPRISE"
+    # REGIONAL = synchronous standby in a second zone with automatic failover (~2× cost).
+    availability_type = var.db_availability_type
     disk_size         = var.db_disk_size_gb
     disk_autoresize   = true
     # Solo launch: stop unbounded disk growth on f1-micro.
@@ -19,12 +20,30 @@ resource "google_sql_database_instance" "postgres" {
 
     backup_configuration {
       enabled    = true
-      start_time = "18:00"
+      start_time = "18:00" # UTC = 23:30 IST, after EOD settlement
+      # Point-in-time recovery: restore to any second inside the log retention window.
+      point_in_time_recovery_enabled = var.db_pitr_enabled
+      transaction_log_retention_days = var.db_log_retention_days
+      backup_retention_settings {
+        retained_backups = var.db_backup_retained_count
+        retention_unit   = "COUNT"
+      }
+    }
+
+    insights_config {
+      query_insights_enabled  = true
+      query_string_length     = 1024
+      record_application_tags = false
+      record_client_address   = false
     }
 
     ip_configuration {
+      # Public IPv4 but no authorized_networks: only the IAM-gated Cloud SQL connector (/cloudsql socket
+      # on Cloud Run) can reach it, and every connection must be TLS.
+      # Next hardening step (needs a planned cut-over): private IP via private service access, then
+      # ipv4_enabled = false.
       ipv4_enabled = true
-      # Prefer private IP + Cloud SQL connector from Cloud Run in a later harden pass
+      ssl_mode     = "ENCRYPTED_ONLY"
     }
 
     maintenance_window {

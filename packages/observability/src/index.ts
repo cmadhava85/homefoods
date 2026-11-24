@@ -19,3 +19,8 @@ export {
   type ServiceLogger,
 } from "./logger.js";
 export { startTelemetry } from "./telemetry.js";
+export {
+  installProcessLifecycle,
+  type LifecycleOptions,
+  type ShutdownStep,
+} from "./lifecycle.js";

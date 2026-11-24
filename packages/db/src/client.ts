@@ -4,6 +4,9 @@ import * as schema from "./schema.js";
 
 export type Db = ReturnType<typeof createDb>;
 
+/** A pooled client or an open `db.transaction` handle — for helpers that run in either. */
+export type DbOrTx = Db | Parameters<Parameters<Db["transaction"]>[0]>[0];
+
 export type CreateDbOptions = {
   /** Max connections in the pool (worker should stay small on Cloud SQL). */
   max?: number;

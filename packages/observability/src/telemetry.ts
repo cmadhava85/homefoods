@@ -2,8 +2,9 @@
  * Optional OpenTelemetry bootstrap (traces).
  * Enable with OTEL_ENABLED=true (+ OTEL_EXPORTER_OTLP_ENDPOINT for non-default collector).
  */
-export async function startTelemetry(serviceName: string): Promise<void> {
-  if (process.env.OTEL_ENABLED !== "true") return;
+export async function startTelemetry(serviceName: string): Promise<() => Promise<void>> {
+  const noop = async () => {};
+  if (process.env.OTEL_ENABLED !== "true") return noop;
 
   try {
     const [{ NodeSDK }, { getNodeAutoInstrumentations }, { OTLPTraceExporter }] =
@@ -35,13 +36,14 @@ export async function startTelemetry(serviceName: string): Promise<void> {
         console.error("[otel] shutdown failed", err);
       }
     };
-    process.once("SIGTERM", () => void shutdown());
-    process.once("SIGINT", () => void shutdown());
     console.info(`[otel] tracing enabled for ${serviceName}`);
+    // Flushed by installProcessLifecycle on SIGTERM so spans are not lost on scale-down.
+    return shutdown;
   } catch (err) {
     console.error(
       "[otel] failed to start — install OTEL packages or unset OTEL_ENABLED",
       err instanceof Error ? err.message : err,
     );
+    return noop;
   }
 }

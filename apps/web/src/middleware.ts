@@ -62,6 +62,15 @@ export function middleware(req: NextRequest) {
     return withSecurityHeaders(new NextResponse("Not Found", { status: 404 }), nonce);
   }
 
+  // Dev-only WhatsApp simulator (hard-coded test personas) — hidden on deployed builds.
+  if (
+    (pathname === "/wa" || pathname.startsWith("/wa/")) &&
+    process.env.NODE_ENV === "production" &&
+    process.env.ENABLE_WA_SIMULATOR !== "true"
+  ) {
+    return withSecurityHeaders(NextResponse.rewrite(new URL("/__not-found", req.url)), nonce);
+  }
+
   // Temporary solo-kitchen launch: marketplace entry → that kitchen only.
   // Prefer SOLO_KITCHEN_SLUG (runtime Cloud Run) then NEXT_PUBLIC_ (build-time).
   const soloSlug = (

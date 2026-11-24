@@ -1,6 +1,7 @@
 {
   "name": "@localmeals/i18n",
   "version": "0.1.0",
+  "license": "UNLICENSED",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -14,7 +15,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test src/**/*.test.ts"
+    "test": "node --import tsx --test src/**/*.test.ts",
+    "test:coverage": "node ../../scripts/node-test-coverage.mjs --lines 95 --branches 70 --functions 68"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",

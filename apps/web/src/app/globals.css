@@ -42,6 +42,34 @@ body {
 
 a { color: var(--brand); }
 
+/* Keyboard focus — visible ring for all interactive controls (UX-U2) */
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.checkout-address-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.checkout-address-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+button:focus:not(:focus-visible),
+a:focus:not(:focus-visible),
+input:focus:not(:focus-visible),
+select:focus:not(:focus-visible),
+textarea:focus:not(:focus-visible) {
+  outline: none;
+}
+
 .shell {
   --shell-pad: 1rem;
   max-width: 980px;
@@ -190,7 +218,7 @@ a { color: var(--brand); }
 .site-footer-grid {
   display: grid;
   gap: 1.15rem 1.35rem;
-  grid-template-columns: 1.4fr 1fr 1fr;
+  grid-template-columns: 1.4fr 1fr 1fr 1fr;
   margin-bottom: 1.1rem;
 }
 
@@ -5227,3 +5255,198 @@ select {
     transition: none !important;
   }
 }
+
+/* —— Account deletion (DPDP) —— */
+.account-danger {
+  border-color: #e8b4a8;
+}
+.btn.danger {
+  background: #a3321b;
+  color: #fff;
+}
+.btn.danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* —— 404 / error pages —— */
+.status-page {
+  display: grid;
+  place-items: center;
+  min-height: 55vh;
+  padding: 1.5rem 1rem;
+}
+.status-page .empty-card {
+  max-width: 440px;
+}
+.status-page-code {
+  font-family: var(--font-fraunces), Georgia, serif;
+  font-size: 2.6rem;
+  margin: 0;
+  color: var(--brand);
+}
+.status-page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+}
+.status-page-ref {
+  margin-top: 0.9rem;
+  font-size: 0.78rem;
+}
+
+/* —— Legal pages —— */
+.legal-page {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 1.25rem 1rem 2.5rem;
+  line-height: 1.6;
+}
+.legal-page h1 {
+  margin-bottom: 0.25rem;
+}
+.legal-page h2 {
+  margin-top: 1.6rem;
+  font-size: 1.15rem;
+}
+.legal-page li {
+  margin-bottom: 0.35rem;
+}
+.legal-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  margin: 0.5rem 0 1.2rem;
+  font-size: 0.92rem;
+}
+.legal-draft {
+  border: 1px dashed #c98a1b;
+  background: #fff7e6;
+  border-radius: 10px;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.9rem;
+}
+.legal-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+.legal-table th,
+.legal-table td {
+  text-align: left;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  padding: 0.4rem 0.3rem;
+  vertical-align: top;
+}
+
+/* —— Pickup UPI QR —— */
+.pay-qr {
+  display: grid;
+  justify-items: center;
+  gap: 0.5rem;
+  text-align: center;
+}
+.pay-qr img {
+  width: min(240px, 70vw);
+  height: auto;
+  border-radius: 12px;
+  background: #fff;
+  padding: 0.5rem;
+}
+
+/* —— Confirm before pay —— */
+.confirm-pay-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: end center;
+  background: rgba(12, 26, 20, 0.45);
+  padding: 0.75rem;
+}
+@media (min-width: 640px) {
+  .confirm-pay-backdrop {
+    place-items: center;
+  }
+}
+.confirm-pay {
+  width: min(460px, 100%);
+  max-height: 90vh;
+  overflow: auto;
+}
+.confirm-pay-rows,
+.confirm-pay-sum {
+  list-style: none;
+  margin: 0.5rem 0;
+  padding: 0;
+}
+.confirm-pay-rows li,
+.confirm-pay-sum > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.25rem 0;
+}
+.confirm-pay-sum dt small {
+  display: block;
+  font-size: 0.75rem;
+}
+.confirm-pay-sum dd {
+  margin: 0;
+  white-space: nowrap;
+}
+.confirm-pay-total {
+  border-top: 1px solid rgba(0, 0, 0, 0.1);
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+.confirm-pay-check,
+.confirm-pay-method label {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0.35rem 0;
+}
+.confirm-pay-method {
+  border: none;
+  padding: 0;
+  margin: 0.5rem 0;
+}
+.confirm-pay-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 0.75rem;
+}
+.cancel-refund-choice {
+  border: none;
+  padding: 0;
+  margin: 0.4rem 0;
+  font-size: 0.9rem;
+}
+.cancel-refund-choice label {
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+  margin: 0.25rem 0;
+}
+.credit-balance {
+  font-family: var(--font-fraunces), Georgia, serif;
+  font-size: 1.8rem;
+  margin: 0.25rem 0 0.5rem;
+  color: var(--brand);
+}
+.credit-entries {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.credit-entries li {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.3rem 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+.credit-debit { color: #a3321b; }
+.credit-credit { color: var(--brand); }

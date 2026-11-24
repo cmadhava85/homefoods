@@ -65,6 +65,38 @@ export async function getCustomerPreferredLocale(db: Db, mobile: string): Promis
   return null;
 }
 
+/** Marketing WA (menu alerts) — STOP sets true; START clears. Transactional order WA still allowed. */
+export async function isWaMarketingOptedOut(db: Db, mobile: string): Promise<boolean> {
+  try {
+    const userMobile = normalizeMobile(mobile);
+    const row = await db.query.users.findFirst({
+      where: (t, { eq: e }) => e(t.mobileNumber, userMobile),
+    });
+    const consents = (row?.consents ?? {}) as Record<string, unknown>;
+    return consents.waMarketingOptOut === true;
+  } catch {
+    return false;
+  }
+}
+
+export async function setWaMarketingOptOut(db: Db, mobile: string, optedOut: boolean) {
+  await ensureCustomerUser(db, mobile);
+  const userMobile = normalizeMobile(mobile);
+  const row = await db.query.users.findFirst({
+    where: (t, { eq: e }) => e(t.mobileNumber, userMobile),
+  });
+  if (!row) return;
+  const consents = {
+    ...((row.consents ?? {}) as Record<string, unknown>),
+    waMarketingOptOut: optedOut,
+    waMarketingOptOutAt: new Date().toISOString(),
+  };
+  await db
+    .update(users)
+    .set({ consents })
+    .where(eq(users.mobileNumber, userMobile));
+}
+
 export async function getCustomerProfile(db: Db, mobile: string) {
   const userMobile = normalizeMobile(mobile);
   const row = await db.query.users.findFirst({

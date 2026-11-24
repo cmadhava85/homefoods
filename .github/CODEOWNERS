@@ -1,0 +1,22 @@
+# Code owners — reviews are requested automatically; with branch protection
+# ("Require review from Code Owners") these paths cannot merge without an owner.
+
+*                                   @cmadhava85
+
+# Money, auth and access control
+/apps/api/src/services/orders.ts    @cmadhava85
+/apps/api/src/services/admin.ts     @cmadhava85
+/apps/api/src/services/settlement.ts @cmadhava85
+/apps/api/src/services/paymentWebhooks.ts @cmadhava85
+/apps/api/src/services/auth.ts      @cmadhava85
+/apps/api/src/http/                 @cmadhava85
+/apps/api/src/prodConfig.ts         @cmadhava85
+/packages/adapters/src/payments.ts  @cmadhava85
+
+# Infra, CI and supply chain
+/infra/                             @cmadhava85
+/.github/                           @cmadhava85
+/security/                          @cmadhava85
+/**/Dockerfile                      @cmadhava85
+/.dockerignore                      @cmadhava85
+/package-lock.json                  @cmadhava85

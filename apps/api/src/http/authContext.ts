@@ -1,4 +1,6 @@
+import type { FastifyInstance } from "fastify";
 import type { Db } from "@localmeals/db";
+import { runWithRequestActorStore, setRequestActor } from "./requestActor.js";
 import {
   getSessionUserFromRequestAsync,
   requireKitchenStaff,
@@ -14,14 +16,16 @@ export type AuthedReq = {
 };
 
 /** Attach session user on every request (cookie / Bearer). */
-export function registerSessionHook(app: {
-  addHook: (
-    name: "preHandler",
-    fn: (req: AuthedReq) => Promise<void>,
-  ) => void;
-}, db: Db) {
+export function registerSessionHook(app: FastifyInstance, db: Db) {
+  app.addHook("onRequest", (_req, _reply, done) => {
+    runWithRequestActorStore(done);
+  });
   app.addHook("preHandler", async (req) => {
-    req.sessionUser = await getSessionUserFromRequestAsync(db, req.headers);
+    const authed = req as unknown as AuthedReq;
+    authed.sessionUser = await getSessionUserFromRequestAsync(db, req.headers);
+    if (authed.sessionUser?.role === "ADMIN" && authed.sessionUser.mobile) {
+      setRequestActor(authed.sessionUser.mobile);
+    }
   });
 }
 

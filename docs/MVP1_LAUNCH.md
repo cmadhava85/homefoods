@@ -11,7 +11,7 @@ Code paths for production channels are in place (`getPaymentProvider` / `getWhat
 | Worker | internal (`localmeals-worker`, min instances 1) |
 
 Env on API/worker: `MOCK_PAYMENTS=false`, `MOCK_WHATSAPP=false`, `MOCK_AUTH=false`, `AUTH_ENFORCE=true`.  
-Scheduler: `localmeals-lunch-cutoff` (08:00 IST) · `localmeals-eod` (18:00 IST).
+Scheduler: meal cut-offs every 15m (`BREAKFAST`/`LUNCH`/`DINNER`) · `localmeals-eod` (21:00 IST).
 
 **Webhook URLs to paste (if not already):**
 - Razorpay → `https://localmeals-api-o2ryh2iw2a-el.a.run.app/webhooks/payments`
@@ -51,7 +51,7 @@ Scheduler: `localmeals-lunch-cutoff` (08:00 IST) · `localmeals-eod` (18:00 IST)
    - Submit utility templates: pay link, cook manifest, refund (for outside 24h window)
 5. **Cloud Scheduler** (Asia/Kolkata)
    - `POST /internal/cutoffs/LUNCH` with header `X-Internal-Token: …`
-   - `POST /internal/settlements/eod` at 18:00 IST with same header
+   - `POST /internal/settlements/eod` at 21:00 IST with same header
    - Optional: `POST /internal/ops/retention` daily (worker also runs purge at 03:00 when `ENABLE_AUTO_RETENTION` ≠ false)
 6. **First LIVE cook**
    - FSSAI number + payout UPI (or bank note); Route `acc_…` optional while RBI-blocked

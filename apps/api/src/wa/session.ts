@@ -417,6 +417,16 @@ export async function createWaSession(input: WhatsAppInboundInput) {
         payerMobile,
       });
       await clearWaSession(db, mobile);
+      const foodPaise = Math.max(0, (item.pricePaise ?? 0) * 1);
+      const deliveryPaise = Number(order.deliveryPaise ?? 0);
+      const platformPaise = Number(order.platformFeePaise ?? 0);
+      const totalPaise = foodPaise + deliveryPaise + platformPaise;
+      const feePaise = Number(order.convenienceFeePaise ?? 0);
+      const creditPaise = Number(order.creditAppliedPaise ?? 0);
+      const paidByCredit = order.paymentMethod === "CREDIT";
+      const allergenList = Array.isArray(item.allergens)
+        ? (item.allergens as string[]).filter(Boolean)
+        : [];
       await wa.send({
         to: from,
         body: [
@@ -426,24 +436,42 @@ export async function createWaSession(input: WhatsAppInboundInput) {
             meal: menu.mealLabel ?? "Lunch",
             dish: localizedDishName(waLocale, item),
           }),
+          allergenList.length
+            ? wt("wa.allergens", { list: allergenList.join(", ") })
+            : null,
+          wt("wa.priceBreakdown", {
+            food: (foodPaise / 100).toFixed(0),
+            delivery: (deliveryPaise / 100).toFixed(0),
+            platform: (platformPaise / 100).toFixed(0),
+            total: (totalPaise / 100).toFixed(0),
+          }),
           fulfillmentMode === "PICKUP"
             ? wt("wa.pickupAfterPay")
             : fulfillmentMode === "CUSTOMER_ARRANGE"
               ? `You arrange auto/porter · ${addressLabelResolved}`
               : wt("wa.deliverTo", { label: addressLabelResolved ?? "" }),
+          feePaise || creditPaise
+            ? wt("wa.feeCreditLine", {
+                fee: (feePaise / 100).toFixed(2),
+                credit: (creditPaise / 100).toFixed(2),
+                pay: ((totalPaise + feePaise - creditPaise) / 100).toFixed(2),
+              })
+            : null,
           payerMobile ? wt("wa.familyPays", { mobile: payerMobile }) : null,
           wt("wa.orderWindow", {
             cutoff: menu.cutoff ?? menu.lunchCutoff ?? "08:00",
             window: menu.deliveryWindow ?? "12:00–13:00",
           }),
-          payerMobile
-            ? wt("wa.payFamily", { id: order.publicId })
-            : wt("wa.payTap", { id: order.publicId }),
-          order.paymentUrl ? wt("wa.payLink", { url: order.paymentUrl }) : null,
+          paidByCredit
+            ? wt("wa.paidWithCredit")
+            : payerMobile
+              ? wt("wa.payFamily", { id: order.publicId })
+              : wt("wa.payTap", { id: order.publicId }),
+          order.paymentUrl && !paidByCredit ? wt("wa.payLink", { url: order.paymentUrl }) : null,
         ]
           .filter(Boolean)
           .join("\n"),
-        buttons: [`Pay ${order.publicId}`, "Menu"],
+        buttons: ["Pay", "Menu", "Orders"],
       });
       return {
         ok: true,

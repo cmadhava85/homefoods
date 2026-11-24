@@ -86,8 +86,13 @@ export function localizeError(locale: Locale, raw: string): string {
   const msg = (raw ?? "").trim();
   if (!msg) return t(locale, "error.generic");
 
+  // Idempotent-create races (HTTP 409): tell the user it already went through, without DB text.
+  if (/duplicate key|unique constraint/i.test(msg)) {
+    return t(locale, "error.conflict");
+  }
+
   if (
-    /violates foreign key|duplicate key|unique constraint|ECONNREFUSED|ECONNRESET|connection refused|postgres|drizzle|SQLITE|syntax error at/i.test(
+    /violates foreign key|ECONNREFUSED|ECONNRESET|connection refused|postgres|drizzle|SQLITE|syntax error at/i.test(
       msg,
     )
   ) {

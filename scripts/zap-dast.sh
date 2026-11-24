@@ -69,10 +69,10 @@ run_baseline() {
 }
 
 run_api() {
-  echo "==> ZAP API scan (OpenAPI) → .zap/openapi.yaml"
+  echo "==> ZAP API scan (OpenAPI) → apps/api/openapi.json"
   # -O needs a full URL with scheme (newer ZAP). Soften WARNs with -I.
   docker run "${DOCKER_EXTRA[@]}" -w /zap/wrk "$ZAP_IMAGE" zap-api-scan.py \
-    -t .zap/openapi.yaml \
+    -t apps/api/openapi.json \
     -f openapi \
     -O "$TARGET" \
     -c .zap/rules.tsv \

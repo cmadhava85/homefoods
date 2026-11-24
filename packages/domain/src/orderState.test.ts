@@ -91,9 +91,10 @@ describe("order state machine", () => {
 
   it("allows post–cut-off cancel request ↔ cook decide", () => {
     assert.equal(canTransition("PAID", "CANCEL_REQUESTED"), true);
+    assert.equal(canTransition("COOKING", "CANCEL_REQUESTED"), true);
     assert.equal(canTransition("CANCEL_REQUESTED", "PAID"), true);
+    assert.equal(canTransition("CANCEL_REQUESTED", "COOKING"), true);
     assert.equal(canTransition("CANCEL_REQUESTED", "REFUNDED"), true);
     assert.equal(canTransition("CANCEL_REQUESTED", "CANCELLED"), true);
-    assert.equal(canTransition("COOKING", "CANCEL_REQUESTED"), false);
   });
 });

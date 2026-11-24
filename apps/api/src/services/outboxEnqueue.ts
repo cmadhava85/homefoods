@@ -1,5 +1,6 @@
 import { outbox, type Db } from "@localmeals/db";
 import { withCorr } from "@localmeals/observability";
+import { outboxWaker } from "./outboxWake.js";
 
 /** Drizzle db or transaction — anything with `.insert(outbox)`. */
 type OutboxExecutor = Pick<Db, "insert">;
@@ -16,4 +17,5 @@ export async function enqueueOutbox(
     eventName,
     payload: withCorr(payload),
   });
+  outboxWaker().markDirty();
 }

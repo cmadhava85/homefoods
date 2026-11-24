@@ -5,9 +5,10 @@ import rateLimit from "@fastify/rate-limit";
 import fastifyStatic from "@fastify/static";
 import { createDb, type Db } from "@localmeals/db";
 import { fastifyLoggerOptions } from "@localmeals/observability";
-import { createPgRateLimitStore } from "./services/pgRateLimitStore.js";
+import { createHybridRateLimitStore, createPgRateLimitStore } from "./services/pgRateLimitStore.js";
 import { registerApiErrorHandler } from "./httpErrors.js";
 import { createAuthHelpers, registerSessionHook } from "./http/authContext.js";
+import { rateLimitKey, trustProxySetting } from "./http/rateLimitKey.js";
 import { genRequestId, registerObservability } from "./observabilityPlugin.js";
 import { uploadsDir, usesGcsUploads } from "./uploads.js";
 import { authRoutes } from "./plugins/authRoutes.js";
@@ -17,6 +18,8 @@ import { adminRoutes } from "./plugins/adminRoutes.js";
 import { paymentRoutes } from "./plugins/paymentRoutes.js";
 import { internalRoutes } from "./plugins/internalRoutes.js";
 import { metaRoutes } from "./plugins/metaRoutes.js";
+import { accountRoutes } from "./plugins/accountRoutes.js";
+import { outboxWaker } from "./services/outboxWake.js";
 import { whatsappWebhook } from "./plugins/whatsappWebhook.js";
 import { logisticsWebhook } from "./plugins/logisticsWebhook.js";
 import { uploadsRoutes } from "./plugins/uploadsRoutes.js";
@@ -24,6 +27,8 @@ import { uploadsRoutes } from "./plugins/uploadsRoutes.js";
 export type BuildAppOptions = {
   /** Existing Pino/Fastify logger instance (e.g. capture stream in e2e). */
   loggerInstance?: FastifyBaseLogger;
+  /** Observe every registered route (used by the OpenAPI drift test). */
+  onRoute?: (route: { method: string | string[]; url: string }) => void;
 };
 
 export function buildApp(db: Db = createDb(), opts: BuildAppOptions = {}): FastifyInstance {
@@ -36,7 +41,12 @@ export function buildApp(db: Db = createDb(), opts: BuildAppOptions = {}): Fasti
     requestIdHeader: "x-request-id",
     requestIdLogLabel: "requestId",
     genReqId: genRequestId,
+    trustProxy: trustProxySetting(),
   });
+  if (opts.onRoute) {
+    const onRoute = opts.onRoute;
+    app.addHook("onRoute", (route) => onRoute({ method: route.method, url: route.url }));
+  }
   registerObservability(app);
   registerApiErrorHandler(app);
 
@@ -91,7 +101,11 @@ export function buildApp(db: Db = createDb(), opts: BuildAppOptions = {}): Fasti
     global: true,
     max: Number(process.env.RATE_LIMIT_MAX ?? defaultMax),
     timeWindow: process.env.RATE_LIMIT_WINDOW ?? "1 minute",
-    store: createPgRateLimitStore(db),
+    store:
+      process.env.RATE_LIMIT_GLOBAL_STORE === "postgres"
+        ? createPgRateLimitStore(db)
+        : createHybridRateLimitStore(db),
+    keyGenerator: rateLimitKey,
     // Prod: fail closed if the store errors so limits are not silently skipped.
     skipOnError: rateLimitFailOpen,
     allowList: (req) => {
@@ -101,6 +115,10 @@ export function buildApp(db: Db = createDb(), opts: BuildAppOptions = {}): Fasti
   });
 
   registerSessionHook(app, db);
+  // Scale-to-zero worker: after the response (transaction committed), wake it if rows were queued.
+  app.addHook("onResponse", async () => {
+    void outboxWaker().flush();
+  });
   const auth = createAuthHelpers(db);
 
   app.register(multipart, {
@@ -126,6 +144,7 @@ export function buildApp(db: Db = createDb(), opts: BuildAppOptions = {}): Fasti
   void app.register(metaRoutes, deps);
   void app.register(authRoutes, deps);
   void app.register(customerRoutes, deps);
+  void app.register(accountRoutes, deps);
   void app.register(paymentRoutes, deps);
   void app.register(cookRoutes, deps);
   void app.register(internalRoutes, deps);

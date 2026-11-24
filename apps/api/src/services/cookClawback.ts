@@ -1,3 +1,4 @@
+import { lineFoodNetPaise } from "@localmeals/domain";
 import { and, asc, eq } from "drizzle-orm";
 import { cookLedger, type Db } from "@localmeals/db";
 import { getWhatsAppProvider } from "@localmeals/adapters";
@@ -11,7 +12,7 @@ function foodNetPaise(order: {
   qty: number;
   foodDiscountPaise?: number | null;
 }) {
-  return Math.max(0, order.foodPaise * order.qty - (order.foodDiscountPaise ?? 0));
+  return lineFoodNetPaise(order);
 }
 
 /** Pending recoveries still waiting for a future EOD with volume. */

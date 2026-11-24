@@ -1,11 +1,14 @@
 import type { Metadata, Viewport } from "next";
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { Figtree, Fraunces, Noto_Sans_Tamil } from "next/font/google";
+import { isLocale } from "@localmeals/i18n";
 import "./globals.css";
 import { AuthProvider } from "@/components/AuthProvider";
 import { LocaleProvider } from "@/components/LocaleProvider";
 import { SiteFooter } from "@/components/SiteFooter";
 import { SiteHeader } from "@/components/SiteHeader";
+import { LOCALE_COOKIE } from "@/lib/locale";
+import { siteUrl } from "@/lib/site";
 
 const fraunces = Fraunces({
   subsets: ["latin"],
@@ -30,9 +33,21 @@ const notoTamil = Noto_Sans_Tamil({
   adjustFontFallback: false,
 });
 
+const description = "Home-cooked lunch from kitchens near you";
+
 export const metadata: Metadata = {
-  title: "LocalMeals",
-  description: "Home-cooked lunch from kitchens near you",
+  metadataBase: new URL(siteUrl()),
+  title: { default: "LocalMeals", template: "%s · LocalMeals" },
+  description,
+  applicationName: "LocalMeals",
+  openGraph: {
+    type: "website",
+    siteName: "LocalMeals",
+    title: "LocalMeals",
+    description,
+    locale: "en_IN",
+  },
+  twitter: { card: "summary", title: "LocalMeals", description },
 };
 
 export const viewport: Viewport = {
@@ -40,15 +55,19 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 5,
   viewportFit: "cover",
+  themeColor: "#0d5840",
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   // Read nonce so this layout is request-dynamic; Next attaches it to its scripts via CSP.
   await headers();
+  const jar = await cookies();
+  const cookieLocale = jar.get(LOCALE_COOKIE)?.value;
+  const lang = isLocale(cookieLocale) ? cookieLocale : "en";
 
   return (
     <html
-      lang="en"
+      lang={lang}
       className={`${fraunces.variable} ${figtree.variable} ${notoTamil.variable}`}
     >
       <body>

@@ -9,12 +9,17 @@
  * Does not mutate data or require credentials — checks health, public browse,
  * and that protected routes reject anonymous callers.
  */
-import { config } from "dotenv";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-config({ path: resolve(root, ".env"), override: false });
+// dotenv is optional so the deploy job can run this without `npm ci`.
+try {
+  const { config } = await import("dotenv");
+  config({ path: resolve(root, ".env"), override: false });
+} catch {
+  /* no dotenv installed */
+}
 
 const base = (process.env.SMOKE_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:4000").replace(
   /\/$/,

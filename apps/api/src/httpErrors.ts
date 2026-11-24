@@ -66,11 +66,11 @@ export function httpStatusForError(err: unknown): number {
   if (/\bnot found\b|error\.(notFound|kitchenNotFound|orderNotFound|customerNotFound)/i.test(msg)) {
     return 404;
   }
-  if (
-    /violates foreign key|duplicate key|ECONNREFUSED|connection refused|postgres|drizzle/i.test(
-      msg,
-    )
-  ) {
+  // Idempotent create races — caller should treat as conflict / replay, not 500.
+  if (/duplicate key|unique constraint/i.test(msg)) {
+    return 409;
+  }
+  if (/violates foreign key|ECONNREFUSED|connection refused|postgres|drizzle/i.test(msg)) {
     return 500;
   }
   return 400;

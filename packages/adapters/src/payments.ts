@@ -1,4 +1,18 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+
+/** Razorpay rejects payment links whose `expire_by` is < 15 min in the future. */
+export const RAZORPAY_MIN_LINK_TTL_SEC = 15 * 60;
+/** Payment link lifetime. Stays above Razorpay's minimum even with clock skew / latency. */
+export const PAYMENT_LINK_TTL_SEC = 20 * 60;
+/** Unpaid soft hold outlives the link so a hold never expires while its link is still payable. */
+export const UNPAID_HOLD_TTL_SEC = PAYMENT_LINK_TTL_SEC + 5 * 60;
+
+/** Unix `expire_by` for a new link, clamped to Razorpay's minimum (+1 min safety). */
+export function paymentLinkExpireBy(nowMs = Date.now(), requestedUnix?: number): number {
+  const nowSec = Math.floor(nowMs / 1000);
+  const minUnix = nowSec + RAZORPAY_MIN_LINK_TTL_SEC + 60;
+  return Math.max(requestedUnix ?? nowSec + PAYMENT_LINK_TTL_SEC, minUnix);
+}
 
 export type CreatePaymentInput = {
   orderPublicId: string;
@@ -8,12 +22,16 @@ export type CreatePaymentInput = {
   /** Durable journey id — echoed in Razorpay notes for webhook correlation. */
   traceId?: string;
   notes?: Record<string, string>;
+  /** Unix seconds; defaults to now + PAYMENT_LINK_TTL_SEC, never below Razorpay's 15-min minimum. */
+  expireAtUnix?: number;
 };
 
 export type CreatePaymentResult = {
   gatewayTxnId: string;
   paymentUrl: string;
   provider: "mock" | "razorpay";
+  /** UPI QR only: image to show the customer (scan with any UPI app). */
+  qrImageUrl?: string;
 };
 
 /** Normalized gateway webhook kinds LocalMeals acts on. */
@@ -90,6 +108,8 @@ export type TransferToAccountResult = {
 
 export type PaymentProvider = {
   createPayment(input: CreatePaymentInput): Promise<CreatePaymentResult>;
+  /** Single-use, fixed-amount Razorpay UPI QR (0.99% vs 2% for links). gatewayTxnId = qr_… */
+  createUpiQr(input: CreatePaymentInput): Promise<CreatePaymentResult & { qrImageUrl: string }>;
   verifyWebhookSignature(headers: Record<string, string | undefined>, rawBody: string): boolean;
   parseWebhook?(body: unknown): GatewayWebhookEvent | null;
   /** Create a refund against a captured Razorpay payment. */
@@ -100,6 +120,8 @@ export type PaymentProvider = {
   getPaymentLinkStatus?(
     paymentLinkId: string,
   ): Promise<{ status: string; paymentId: string | null; amountPaise?: number }>;
+  /** Cancel an open payment link (plink_…) so it cannot be paid after hold expiry. */
+  cancelPaymentLink?(paymentLinkId: string): Promise<void>;
   /** Route direct transfer to a cook linked account (EOD). */
   transferToLinkedAccount(input: TransferToAccountInput): Promise<TransferToAccountResult>;
 };
@@ -113,6 +135,14 @@ function razorpayBasicAuth(): string {
   return Buffer.from(`${keyId}:${keySecret}`).toString("base64");
 }
 
+/**
+ * Razorpay caps Idempotency-Key at 64 chars. Truncating would make keys that differ only in their
+ * tail (e.g. a re-order's `|addl|<id>` suffix) collide and replay the old link, so hash long keys.
+ */
+export function gatewayIdempotencyHeader(key: string): string {
+  return key.length <= 64 ? key : createHash("sha256").update(key).digest("hex");
+}
+
 async function razorpayFetch<T>(
   path: string,
   init: RequestInit & { idempotencyKey?: string } = {},
@@ -123,7 +153,7 @@ async function razorpayFetch<T>(
     "Content-Type": "application/json",
     ...(extra as Record<string, string> | undefined),
   };
-  if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey.slice(0, 64);
+  if (idempotencyKey) headers["Idempotency-Key"] = gatewayIdempotencyHeader(idempotencyKey);
   const res = await fetch(`https://api.razorpay.com/v1${path}`, {
     ...rest,
     headers,
@@ -209,6 +239,22 @@ export function classifyPaymentWebhook(body: unknown): GatewayWebhookEvent {
         paymentId: pay.id ? String(pay.id) : undefined,
         orderPublicId: notes.orderPublicId ?? (link.reference_id ? String(link.reference_id) : undefined),
         amountPaise: typeof link.amount_paid === "number" ? link.amount_paid : undefined,
+        notes,
+        status: "captured",
+        raw: body,
+      };
+    }
+    case "qr_code.credited": {
+      const qr = entityOf(payload, "qr_code");
+      const pay = entityOf(payload, "payment");
+      const notes = { ...notesOf(qr), ...notesOf(pay) };
+      return {
+        kind: "PAYMENT_CAPTURED",
+        event,
+        gatewayTxnId: qr.id ? String(qr.id) : undefined,
+        paymentId: pay.id ? String(pay.id) : undefined,
+        orderPublicId: notes.orderPublicId,
+        amountPaise: typeof pay.amount === "number" ? pay.amount : undefined,
         notes,
         status: "captured",
         raw: body,
@@ -443,6 +489,20 @@ export class MockPaymentProvider implements PaymentProvider {
     };
   }
 
+  async createUpiQr(input: CreatePaymentInput) {
+    const gatewayTxnId = `mock_qr_${input.orderPublicId}`;
+    const base = process.env.WEB_ORIGIN ?? "http://localhost:3000";
+    return {
+      gatewayTxnId,
+      paymentUrl: `${base}/pay/${input.orderPublicId}?txn=${gatewayTxnId}`,
+      // Placeholder image for local/staging mocks (no real UPI payload).
+      qrImageUrl: `data:image/svg+xml,${encodeURIComponent(
+        `<svg xmlns="http://www.w3.org/2000/svg" width="220" height="220"><rect width="220" height="220" fill="#fff" stroke="#0d5840" stroke-width="8"/><text x="110" y="105" font-size="18" text-anchor="middle" font-family="sans-serif">MOCK UPI QR</text><text x="110" y="130" font-size="11" text-anchor="middle" font-family="sans-serif">${input.orderPublicId}</text></svg>`,
+      )}`,
+      provider: "mock" as const,
+    };
+  }
+
   verifyWebhookSignature(
     _headers: Record<string, string | undefined>,
     _rawBody: string,
@@ -471,6 +531,9 @@ export class MockPaymentProvider implements PaymentProvider {
     if (paymentLinkOrPayId.startsWith("mock_txn_")) {
       return `mock_pay_${paymentLinkOrPayId.replace(/^mock_txn_/, "")}`;
     }
+    if (paymentLinkOrPayId.startsWith("mock_qr_")) {
+      return `mock_pay_${paymentLinkOrPayId.replace(/^mock_qr_/, "")}`;
+    }
     return `mock_pay_${paymentLinkOrPayId}`;
   }
 
@@ -480,6 +543,10 @@ export class MockPaymentProvider implements PaymentProvider {
       paymentId: await this.resolvePaymentId(paymentLinkId),
       amountPaise: undefined as number | undefined,
     };
+  }
+
+  async cancelPaymentLink(_paymentLinkId: string): Promise<void> {
+    /* mock — no-op */
   }
 
   async transferToLinkedAccount(
@@ -498,6 +565,7 @@ export class MockPaymentProvider implements PaymentProvider {
 export class RazorpayPaymentProvider implements PaymentProvider {
   async createPayment(input: CreatePaymentInput): Promise<CreatePaymentResult> {
     const webOrigin = process.env.WEB_ORIGIN ?? "http://localhost:3000";
+    const expireAtUnix = paymentLinkExpireBy(Date.now(), input.expireAtUnix);
     const payload = {
       amount: input.amountPaise,
       currency: "INR",
@@ -509,6 +577,8 @@ export class RazorpayPaymentProvider implements PaymentProvider {
       },
       notify: { sms: false, email: false },
       reminder_enable: false,
+      /** Matches unpaid soft-hold so links cannot be paid after order cancel/expiry. */
+      expire_by: expireAtUnix,
       callback_url: `${webOrigin}/pay/${input.orderPublicId}`,
       callback_method: "get",
       notes: {
@@ -539,6 +609,36 @@ export class RazorpayPaymentProvider implements PaymentProvider {
     };
   }
 
+  async createUpiQr(input: CreatePaymentInput) {
+    const webOrigin = process.env.WEB_ORIGIN ?? "http://localhost:3000";
+    const json = await razorpayFetch<{ id?: string; image_url?: string }>("/payments/qr_codes", {
+      method: "POST",
+      body: JSON.stringify({
+        type: "upi_qr",
+        name: "LocalMeals",
+        usage: "single_use",
+        fixed_amount: true,
+        payment_amount: input.amountPaise,
+        description: `LocalMeals ${input.orderPublicId}`.slice(0, 100),
+        close_by: paymentLinkExpireBy(Date.now(), input.expireAtUnix),
+        notes: {
+          orderPublicId: input.orderPublicId,
+          idempotencyKey: input.idempotencyKey.slice(0, 100),
+          ...(input.traceId ? { traceId: input.traceId.slice(0, 40) } : {}),
+          ...input.notes,
+        },
+      }),
+      idempotencyKey: `qr|${input.idempotencyKey}`,
+    });
+    if (!json.id || !json.image_url) throw new Error("Razorpay QR missing id/image_url");
+    return {
+      gatewayTxnId: json.id,
+      paymentUrl: `${webOrigin}/pay/${input.orderPublicId}`,
+      qrImageUrl: json.image_url,
+      provider: "razorpay" as const,
+    };
+  }
+
   verifyWebhookSignature(
     headers: Record<string, string | undefined>,
     rawBody: string,
@@ -558,6 +658,13 @@ export class RazorpayPaymentProvider implements PaymentProvider {
 
   async resolvePaymentId(paymentLinkOrPayId: string): Promise<string | null> {
     if (paymentLinkOrPayId.startsWith("pay_")) return paymentLinkOrPayId;
+    if (paymentLinkOrPayId.startsWith("qr_")) {
+      const list = await razorpayFetch<{ items?: Array<{ id?: string; status?: string }> }>(
+        `/payments/qr_codes/${paymentLinkOrPayId}/payments`,
+      );
+      const captured = list.items?.find((p) => p.status === "captured") ?? list.items?.[0];
+      return captured?.id ?? null;
+    }
     if (!paymentLinkOrPayId.startsWith("plink_")) return null;
     const link = await this.fetchPaymentLink(paymentLinkOrPayId);
     const first = link.payments?.[0];
@@ -591,6 +698,26 @@ export class RazorpayPaymentProvider implements PaymentProvider {
     }>(`/payment_links/${paymentLinkId}`);
   }
 
+  async cancelPaymentLink(paymentLinkId: string): Promise<void> {
+    const path = paymentLinkId.startsWith("plink_")
+      ? `/payment_links/${paymentLinkId}/cancel`
+      : paymentLinkId.startsWith("qr_")
+        ? `/payments/qr_codes/${paymentLinkId}/close`
+        : null;
+    if (!path) return;
+    try {
+      await razorpayFetch(path, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+    } catch (err) {
+      // Already paid/expired/cancelled — expire/cancel paths must stay best-effort.
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/already|expired|cancelled|canceled|closed|paid/i.test(msg)) return;
+      throw err;
+    }
+  }
+
   async refundPayment(input: RefundPaymentInput): Promise<RefundPaymentResult> {
     const paymentId =
       (await this.resolvePaymentId(input.paymentId)) ??
@@ -607,6 +734,8 @@ export class RazorpayPaymentProvider implements PaymentProvider {
       method: "POST",
       body: JSON.stringify({
         amount: input.amountPaise,
+        // "optimum" (Instant Refund) costs ₹7.99+ per refund; normal is free (5–7 days, UPI ~1–3).
+        speed: "normal",
         notes: input.notes ?? {},
         receipt: input.receipt?.slice(0, 40),
       }),
@@ -670,6 +799,7 @@ export const RAZORPAY_WEBHOOK_EVENTS = [
   "payment_link.paid",
   "payment_link.expired",
   "payment_link.cancelled",
+  "qr_code.credited",
   "payment.authorized",
   "payment.captured",
   "payment.failed",

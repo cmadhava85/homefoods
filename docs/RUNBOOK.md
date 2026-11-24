@@ -46,7 +46,7 @@ Staging URLs (current): see [MVP1_LAUNCH.md](./MVP1_LAUNCH.md).
 | Job | When (IST) | Endpoint | Header |
 |-----|------------|----------|--------|
 | Lunch cut-off | ~08:00 (align to pin) | `POST /internal/cutoffs/LUNCH` | `X-Internal-Token: $INTERNAL_JOB_TOKEN` |
-| EOD settlement | 18:00 | `POST /internal/settlements/eod` | same |
+| EOD settlement | 21:00 | `POST /internal/settlements/eod` | same |
 | Retention (optional) | daily / worker 03:00 | `POST /internal/ops/retention` | same |
 
 **Manual EOD (Admin):** Admin → Payouts → **Run EOD**, or `POST /admin/settlements/run-eod` as admin session.
@@ -68,26 +68,41 @@ If EOD flag is off: Admin → Features → `eod_settlement_enabled`.
 
 ### Pre-deploy
 
-- [ ] Migrations applied to **target** DB (through `0020_cancel_requested` as needed) — see [PENDING.md](./PENDING.md)  
+- [ ] New migrations are **backward compatible** with the revision still serving (expand → deploy → contract: add nullable columns/tables first, drop or rename only in a later release)  
 - [ ] Secrets present in Secret Manager; Cloud Run mounts them  
 - [ ] `GCS_UPLOADS_BUCKET` on API if multi-instance  
 - [ ] CI green (`.github/workflows/ci.yml`)  
 
 Checklist: [DEPLOY.md](./DEPLOY.md) · infra: [INFRASTRUCTURE.md](./INFRASTRUCTURE.md).
 
-### Deploy
+### Deploy (GitHub **Deploy Cloud Run**, `ENABLE_GCP_DEPLOY=true`)
 
-1. Build/push images (Artifact Registry) or GitHub **Deploy Cloud Run** (`ENABLE_GCP_DEPLOY=true`).  
-2. Roll API → Worker → Web (or pipeline order).  
-3. Smoke: `SMOKE_API_URL=$API_URL node scripts/smoke-staging.mjs`  
-4. Spot-check: `/health`, login OTP/mock, one kitchen browse.
+The pipeline does, in order (a failed step stops the deploy; earlier revisions keep serving):
+
+1. Build/push `api`, `worker`, `web` images tagged with the commit SHA.  
+2. **Migrate:** Cloud Run Job `localmeals-migrate` (API image, `node /app/packages/db/dist/migrate.js`, `--wait`). Failure → deploy stops before any service changes.  
+3. **API:** deployed with `--no-traffic --tag=candidate`; `scripts/smoke-staging.mjs` runs against the candidate URL; only on success is traffic moved (`--to-latest`) and the tag removed.  
+4. **Worker:** deployed after the API is promoted (it calls the API's internal routes).  
+5. **Web:** same candidate → smoke (`/`, `/legal/terms`, 404 page) → promote flow.
+
+Manual migration (if ever needed): `gcloud run jobs execute localmeals-migrate --region=$REGION --wait`.
 
 ### Rollback
 
 1. **Soft:** flip `ordering_enabled` off (stop new pain).  
-2. Redeploy previous Cloud Run revision (API/web/worker).  
-3. Do **not** reverse migrations casually — prefer forward fix.  
-4. If payments broken: keep `MOCK_PAYMENTS=false` but pause ordering; do not leave prod on mocks.
+2. **Traffic rollback (seconds):**  
+   ```bash
+   gcloud run revisions list --service=localmeals-api --region=$REGION --limit=5
+   gcloud run services update-traffic localmeals-api --region=$REGION --to-revisions=<PREVIOUS_REVISION>=100
+   ```  
+   Same for `localmeals-web`. Worker has no traffic split: `gcloud run deploy localmeals-worker --image=<REGISTRY>/worker:<PREVIOUS_SHA>`.  
+3. Do **not** reverse migrations casually — prefer forward fix (old revisions keep working because migrations are expand-only).  
+4. If payments broken: keep `MOCK_PAYMENTS=false` but pause ordering; do not leave prod on mocks.  
+5. Data loss / bad migration: see **§13 Database restore (PITR)**.
+
+### Graceful shutdown
+
+API and worker handle `SIGTERM` (Cloud Run scale-down / new revision): the API stops accepting connections and finishes in-flight requests; the worker stops polling, lets the current outbox batch finish (unfinished rows are re-claimed after `OUTBOX_LEASE_SEC`), then both close the DB pool and flush traces — bounded to 8 s. An `uncaughtException` now **exits 1** after the same cleanup so Cloud Run replaces the instance (previously it was logged and the process kept running in an unknown state).
 
 ---
 
@@ -185,8 +200,8 @@ Multi-instance without GCS loses local disk files. Set `GCS_UPLOADS_BUCKET` (Ter
 ### I. High 5xx / rate-limit / DB
 
 - Cloud Logging on API: Postgres / drizzle / ECONNREFUSED → 500.  
-- Rate limit store is Postgres (`rate_limit_buckets`); prod fail-closed if store errors.  
-- Scale Cloud Run / fix SQL connectivity / VPC connector.  
+- Route rate limits (OTP, login, orders) use Postgres (`rate_limit_buckets`), fail-closed in prod; the global per-IP limit is in memory per instance.  
+- Scale Cloud Run / fix SQL connectivity (Cloud SQL connector: service account needs `roles/cloudsql.client`; no VPC connector is used).  
 - Worker `CONNECT_TIMEOUT` /cloudsql: keep `DB_POOL_MAX` small (default 2 on worker); recycle via `idle_timeout`.  
 - WA `#131030` (not in allowlist): outbox marks processed (non-retryable) — add test numbers in Meta or keep `MOCK_WHATSAPP=true` for non-pilot.  
 - Razorpay `Order not found for txn`: API returns **200 ignored** so dashboard retries stop; investigate orphan plinks separately.
@@ -265,3 +280,25 @@ After URL or secret change: update dashboard **and** Secret Manager **and** Clou
 5. Code fix + forward migration  
 
 Open product/eng backlog: [PENDING.md](./PENDING.md).
+
+---
+
+## 13. Database restore (PITR)
+
+Cloud SQL keeps 14 daily backups and 7 days of transaction logs (`infra/terraform/sql.tf`). **Always restore into a new instance** — never overwrite production in place — then switch over.
+
+1. Pause ordering: Admin → Features → `ordering_enabled` off.
+2. Pick the timestamp just **before** the bad event (UTC, from logs/audit):
+   ```bash
+   gcloud sql instances clone localmeals-pg localmeals-pg-restore \
+     --point-in-time='2026-11-23T05:59:00Z'
+   # or from a daily backup:
+   gcloud sql backups list --instance=localmeals-pg
+   gcloud sql backups restore <BACKUP_ID> --restore-instance=localmeals-pg-restore --backup-instance=localmeals-pg
+   ```
+3. Verify via `cloud-sql-proxy` on the restore instance: row counts in `orders`, `payments`, `refunds`, latest `created_at`.
+4. Switch over: update the `DATABASE_URL` secret's host to `/cloudsql/<project>:asia-south1:localmeals-pg-restore`, add that instance to API/worker/migrate (`--add-cloudsql-instances`), redeploy, smoke, re-enable ordering.
+5. Reconcile payments captured **after** the restore point from the Razorpay dashboard (webhook redelivery or Admin → Mark paid) — they are not in the restored DB.
+6. Import the new instance into Terraform (`terraform import`) or rename back during a maintenance window.
+
+**Drill:** run steps 2–3 against a clone once per quarter and record the time taken (target RTO < 1 h, RPO < 5 min with PITR).

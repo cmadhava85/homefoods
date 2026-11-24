@@ -168,34 +168,50 @@ export function CheckoutAddressPicker({
               <option value="OFFICE">{t("address.office")}</option>
               <option value="OTHER">{t("address.other")}</option>
             </select>
-            <input
-              type="text"
-              value={pinCode}
-              onChange={(e) => setPinCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-              placeholder={t("address.pin")}
-              inputMode="numeric"
-              aria-label={t("address.pin")}
-              aria-invalid={Boolean(fieldErr.pin)}
-            />
+            <label className="checkout-address-field">
+              <span className="checkout-address-label">{t("address.pin")}</span>
+              <input
+                id="checkout-pin"
+                type="text"
+                value={pinCode}
+                onChange={(e) => setPinCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                inputMode="numeric"
+                aria-invalid={Boolean(fieldErr.pin)}
+                aria-describedby={fieldErr.pin ? "checkout-pin-err" : undefined}
+              />
+            </label>
           </div>
-          {fieldErr.pin ? <p className="err">{fieldErr.pin}</p> : null}
-          <input
-            type="text"
-            value={line1}
-            onChange={(e) => setLine1(e.target.value)}
-            placeholder={t("address.line")}
-            aria-label={t("address.line")}
-            aria-invalid={Boolean(fieldErr.line)}
-          />
-          {fieldErr.line ? <p className="err">{fieldErr.line}</p> : null}
-          <input
-            type="text"
-            value={line2}
-            onChange={(e) => setLine2(e.target.value)}
-            placeholder={t("address.line2Placeholder")}
-            aria-label={t("address.line2")}
-            style={{ marginTop: "0.35rem" }}
-          />
+          {fieldErr.pin ? (
+            <p className="err" id="checkout-pin-err">
+              {fieldErr.pin}
+            </p>
+          ) : null}
+          <label className="checkout-address-field">
+            <span className="checkout-address-label">{t("address.line")}</span>
+            <input
+              id="checkout-line1"
+              type="text"
+              value={line1}
+              onChange={(e) => setLine1(e.target.value)}
+              aria-invalid={Boolean(fieldErr.line)}
+              aria-describedby={fieldErr.line ? "checkout-line-err" : undefined}
+            />
+          </label>
+          {fieldErr.line ? (
+            <p className="err" id="checkout-line-err">
+              {fieldErr.line}
+            </p>
+          ) : null}
+          <label className="checkout-address-field" style={{ marginTop: "0.35rem" }}>
+            <span className="checkout-address-label">{t("address.line2")}</span>
+            <input
+              id="checkout-line2"
+              type="text"
+              value={line2}
+              onChange={(e) => setLine2(e.target.value)}
+              placeholder={t("address.line2Placeholder")}
+            />
+          </label>
           <p className="muted" style={{ margin: "0.35rem 0 0", fontSize: "0.85rem" }}>
             {t("address.locationHint")}
             {coords ? ` · ✓ ${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)}` : ""}

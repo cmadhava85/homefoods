@@ -28,8 +28,10 @@ const TRANSITIONS: Record<OrderState, OrderState[]> = {
   AWAITING_PAYMENT: ["CONFIRMING_PAYMENT", "PAID", "FAILED", "CANCELLED"],
   CONFIRMING_PAYMENT: ["PAID", "FAILED"],
   PAID: ["COOKING", "CANCEL_REQUESTED", "CANCELLED", "REFUNDED"],
-  CANCEL_REQUESTED: ["PAID", "CANCELLED", "REFUNDED"],
-  COOKING: ["PACKED", "REFUNDED"],
+  /** Decline restores PAID or COOKING depending on whether cut-off already locked. */
+  CANCEL_REQUESTED: ["PAID", "COOKING", "CANCELLED", "REFUNDED"],
+  /** Post–cut-off lock moves PAID→COOKING; customer cancel-ask must still be reachable. */
+  COOKING: ["PACKED", "REFUNDED", "CANCEL_REQUESTED"],
   /** DISPATCHED = out for delivery; DELIVERED from PACKED = pickup collected. */
   PACKED: ["ASSIGNING_RIDER", "DISPATCHED", "DELIVERED", "REFUNDED"],
   ASSIGNING_RIDER: ["DISPATCHED", "LOGISTICS_EXCEPTION", "REFUNDED"],

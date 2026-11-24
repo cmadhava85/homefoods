@@ -25,7 +25,19 @@ export const waFlowMessages = {
     "wa.lateSuffix": " · closed — ask Late",
     "wa.deliveryLine": "Delivery {window}",
     "wa.todayOrderHint": "Today: reply 1 / 2 / 3 or tap Order. Later days: Week {slug} {mealCmd}.",
-    "wa.lateOrderHint": "Cut-off passed. Reply 1 / 2 or tap Late (cook must accept, then pay).",
+    "wa.lateOrderHint":
+      "Cut-off passed. Reply 1 / 2 or tap Late — kitchen confirms within ~15–30 min; you pay only after they accept.",
+    "wa.familyHelp":
+      "Ask a family member to pay — we’ll send them the link.\nReply: Family 9876543210\nThey accept with: Accept family\nThen on the kitchen cart, choose who pays.",
+    "wa.familyInviteSent":
+      "Invite sent to {mobile}.\nThey should reply: Accept family\nAfter they accept, pick them as who pays on the cart.",
+    "wa.familyNoPending":
+      "No pending family invite on this number. Ask them to send: Family <your mobile>",
+    "wa.familyLinked": "You’re linked — we’ll send you the pay link when they order.",
+    "wa.reviewHelp":
+      "Rate a delivered order:\nReview LM-1234 5 tasty thali\n(1–5 stars; comment optional)",
+    "wa.reviewThanks": "Thanks — ★{rating} saved for {id}.",
+    "wa.familyOrReviewHelp": "Try Family, Accept family, or Review LM-… 5 …",
     "wa.howToOrder": "How to order:",
     "wa.howOneDay": "• One day → Week {slug} {mealCmd} {day}",
     "wa.howFewDays": "• Few days → Week {slug} {mealCmd} {days}",
@@ -41,10 +53,21 @@ export const waFlowMessages = {
     "wa.helpBody":
       "Ticket #{id} created. Our ops team will review.\n\nQuick order: Menu → pick kitchen # → dish # → Pay (saved address).\nAlso: Week · Addresses · Save HOME … · Orders · Pay · Cancel · Follow · Language",
     "wa.unknownCustomer":
-      "LocalMeals WhatsApp\nMenu / Order <kitchen> — today’s lunch\nWeek <kitchen> all — multi-day, one Pay\nOrders — list · Pay / Cancel\nFollow <kitchen> — new menu alerts\nHelp — support ticket\nLanguage Tamil — தமிழ்",
+      "LocalMeals WhatsApp\nMenu / Order <kitchen> — today’s lunch\nWeek <kitchen> all — multi-day, one Pay\nAgain — same kitchen as last order\nOrders — list · Pay / Cancel\nFollow <kitchen> — new menu alerts\nSTOP — pause menu alerts\nHelp · Language Tamil",
     "wa.payWeekTitle": "💳 Pay week {id}",
     "wa.payTitle": "💳 Pay {id}",
     "wa.payTotal": "Total ₹{amount}",
+    "wa.feeCreditLine": "Convenience fee ₹{fee} · Credit used −₹{credit} · To pay ₹{pay}",
+    "wa.paidWithCredit": "✅ Paid with LocalMeals credit — nothing more to pay.",
+    "wa.priceBreakdown": "Food ₹{food} · Delivery ₹{delivery} · Platform ₹{platform} · Total ₹{total}",
+    "wa.priceBreakdownDiscount": "Food ₹{food} · Week off −₹{discount} · Delivery ₹{delivery} · Platform ₹{platform} · Total ₹{total}",
+    "wa.optOutDone":
+      "Got it — we won’t send kitchen menu alerts to this number.\nOrder updates (paid / on the way / refund) still arrive.\nReply START ALERTS anytime to resume menu alerts.",
+    "wa.optInDone": "Welcome back — kitchen menu alerts are on again. Reply Menu to order.",
+    "wa.sessionInProgress":
+      "You have an order in progress.\nReply Continue to keep going, or Cancel order to start over.",
+    "wa.checkoutCleared": "Okay — that cart is cleared. Nothing was charged. Reply Menu to start again.",
+    "wa.allergens": "Allergens: {list}",
     "wa.simConfirmPay": "Simulator: tap Confirm mock pay below the chat after this.",
     "wa.simConfirmPayShort": "Simulator: Confirm mock pay below the chat.",
     "wa.noUnpaidCheckout": "No unpaid week cart {id}. Try Orders or Week <kitchen> all.",
@@ -60,11 +83,11 @@ export const waFlowMessages = {
     "wa.payTap": "Amount ready — tap Pay {id}",
     "wa.payLink": "Link: {url}",
     "wa.ordersEmpty":
-      "No active orders right now.\nUnpaid holds cancel after 15 minutes — reply Menu to order again.",
+      "No active orders right now.\nUnpaid holds cancel after 20 minutes — reply Menu to order again.",
     "wa.ordersTitle": "📦 Your orders",
     "wa.ordersClosedTitle": "Recently closed",
     "wa.ordersClosedHint":
-      "Unpaid holds cancel after 15 minutes. Reply Menu to place a new order.",
+      "Unpaid holds cancel after 20 minutes. Reply Menu to place a new order.",
     "wa.ordersHint": "Pay LM-/CHK-… · Cancel LM-/CHK-… (before that day’s cut-off)",
     "wa.whichKitchen": "Which kitchen? Reply with a number or tap:",
     "wa.meal.breakfast": "Breakfast",
@@ -109,7 +132,19 @@ export const waFlowMessages = {
     "wa.lateSuffix": " · Closed — Late கேளுங்கள்",
     "wa.deliveryLine": "Delivery {window}",
     "wa.todayOrderHint": "Today: 1 / 2 / 3 இல்லையென்றால் Order. Other days: Week {slug} {mealCmd}.",
-    "wa.lateOrderHint": "Cut-off முடிந்துவிட்டது. 1 / 2 இல்லையென்றால் Late (cook accept பிறகு Pay).",
+    "wa.lateOrderHint":
+      "Cut-off முடிந்துவிட்டது. 1 / 2 இல்லையென்றால் Late — kitchen ~15–30 min-ல confirm; accept பிறகு நீங்க Pay.",
+    "wa.familyHelp":
+      "Family member-ஐ pay கேளுங்கள் — link அனுப்புவோம்.\nReply: Family 9876543210\nஅவர்கள்: Accept family\nபிறகு cart-ல who pays choose செய்யுங்கள்.",
+    "wa.familyInviteSent":
+      "{mobile}-க்கு invite அனுப்பினோம்.\nஅவர்கள்: Accept family\nAccept பிறகு cart-ல அவர்களை who pays-ஆ choose செய்யுங்கள்.",
+    "wa.familyNoPending":
+      "இந்த number-ல pending family invite இல்ல. அவர்களிடம்: Family <your mobile> அனுப்பச் சொல்லுங்கள்.",
+    "wa.familyLinked": "Link ஆயிற்று — அவர்கள் order பண்ணும்போது Pay link உங்களுக்கு வரும்.",
+    "wa.reviewHelp":
+      "Delivered order rate பண்ணுங்கள்:\nReview LM-1234 5 tasty thali\n(1–5 stars; comment optional)",
+    "wa.reviewThanks": "Thanks — ★{rating} {id}-க்கு save ஆயிற்று.",
+    "wa.familyOrReviewHelp": "Family, Accept family, அல்லது Review LM-… 5 … try செய்யுங்கள்.",
     "wa.howToOrder": "எப்படி order செய்வது (day codes English-ல: Mon Tue Wed…):",
     "wa.howOneDay": "• One day → Week {slug} {mealCmd} {day}",
     "wa.howFewDays": "• Few days → Week {slug} {mealCmd} {days}",
@@ -125,10 +160,21 @@ export const waFlowMessages = {
     "wa.helpBody":
       "Ticket #{id} create ஆகிவிட்டது. Our team பார்க்கும்.\n\nQuick order: Menu → kitchen # → food # → Pay.\nMore: Week · Addresses · Save HOME … · Orders · Pay · Cancel · Follow · Language",
     "wa.unknownCustomer":
-      "LocalMeals WhatsApp\nMenu / Order <kitchen> — today lunch\nWeek <kitchen> all — multi-day, one Pay\nOrders — list · Pay / Cancel\nFollow <kitchen> — new menu alerts\nHelp — support ticket\nLanguage Tamil — தமிழ்",
+      "LocalMeals WhatsApp\nMenu / Order <kitchen> — today lunch\nWeek <kitchen> all — multi-day, one Pay\nAgain — last kitchen\nOrders — Pay / Cancel\nFollow — menu alerts\nSTOP — alerts நிறுத்த\nHelp · Language Tamil",
     "wa.payWeekTitle": "💳 Week Pay {id}",
     "wa.payTitle": "💳 Pay {id}",
     "wa.payTotal": "Total ₹{amount}",
+    "wa.feeCreditLine": "Convenience fee ₹{fee} · Credit −₹{credit} · கட்ட வேண்டியது ₹{pay}",
+    "wa.paidWithCredit": "✅ LocalMeals credit-ல் pay ஆகிவிட்டது — இனி கட்ட வேண்டியதில்லை.",
+    "wa.priceBreakdown": "Food ₹{food} · Delivery ₹{delivery} · Platform ₹{platform} · Total ₹{total}",
+    "wa.priceBreakdownDiscount": "Food ₹{food} · Week off −₹{discount} · Delivery ₹{delivery} · Platform ₹{platform} · Total ₹{total}",
+    "wa.optOutDone":
+      "சரி — இந்த number-க்கு kitchen menu alerts அனுப்ப மாட்டோம்.\nOrder updates (paid / on the way / refund) வரும்.\nமீண்டும் alerts-க்கு START ALERTS அனுப்புங்கள்.",
+    "wa.optInDone": "மீண்டும் welcome — kitchen menu alerts on. Order-க்கு Menu அனுப்புங்கள்.",
+    "wa.sessionInProgress":
+      "Order நடுவில் இருக்கிறது.\nContinue — தொடர · Cancel order — மீண்டும் தொடங்க.",
+    "wa.checkoutCleared": "சரி — cart நீக்கப்பட்டது. பணம் எடுக்கப்படவில்லை. மீண்டும் தொடங்க Menu அனுப்புங்கள்.",
+    "wa.allergens": "Allergens: {list}",
     "wa.simConfirmPay": "Simulator: இந்த chat-க்கு கீழே Confirm mock pay tap செய்யுங்கள்.",
     "wa.simConfirmPayShort": "Simulator: Confirm mock pay tap செய்யுங்கள்.",
     "wa.noUnpaidCheckout": "Unpaid week {id} இல்ல. Orders இல்லையென்றால் Week <kitchen> all try செய்யுங்கள்.",
@@ -144,11 +190,11 @@ export const waFlowMessages = {
     "wa.payTap": "Amount ready — Pay {id} tap செய்யுங்கள்",
     "wa.payLink": "Link: {url}",
     "wa.ordersEmpty":
-      "இப்போ active orders இல்ல.\nUnpaid hold 15 min-ல cancel ஆகும் — மீண்டும் order-க்கு Menu அனுப்புங்கள்.",
+      "இப்போ active orders இல்ல.\nUnpaid hold 20 min-ல cancel ஆகும் — மீண்டும் order-க்கு Menu அனுப்புங்கள்.",
     "wa.ordersTitle": "📦 உங்க orders",
     "wa.ordersClosedTitle": "Recently closed",
     "wa.ordersClosedHint":
-      "Unpaid hold 15 min-ல cancel ஆகும். புதிய order-க்கு Menu அனுப்புங்கள்.",
+      "Unpaid hold 20 min-ல cancel ஆகும். புதிய order-க்கு Menu அனுப்புங்கள்.",
     "wa.ordersHint": "Pay LM-/CHK-… · Cancel LM-/CHK-… (அந்த day cut-off-க்கு முன்னாடி)",
     "wa.whichKitchen": "எந்த kitchen? Number அனுப்புங்கள் இல்லையென்றால் tap செய்யுங்கள்:",
     "wa.meal.breakfast": "Breakfast",

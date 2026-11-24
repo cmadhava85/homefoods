@@ -7,7 +7,9 @@ import { useLocale } from "@/components/LocaleProvider";
 import { API_BASE } from "@/lib/api";
 import { isExternalPaymentUrl } from "@/lib/payments";
 import { isSoloKitchenMode } from "@/lib/soloKitchen";
+import { formatInrAmount } from "@/lib/money";
 import { localizedDishName, type MsgKey } from "@localmeals/i18n";
+import { lineGatewayPaise } from "@localmeals/domain";
 
 type PayLine = {
   publicId: string;
@@ -17,6 +19,8 @@ type PayLine = {
   foodDiscountPaise?: number;
   deliveryPaise: number;
   platformFeePaise: number;
+  convenienceFeePaise?: number;
+  creditAppliedPaise?: number;
   qty: number;
   serviceDate?: string;
   mealType?: string;
@@ -67,6 +71,7 @@ export default function PayPage() {
   const [kitchenName, setKitchenName] = useState<string | null>(null);
   const [cookSlug, setCookSlug] = useState<string | null>(null);
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
+  const [qrImageUrl, setQrImageUrl] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -96,6 +101,7 @@ export default function PayPage() {
       const nextStatus = json.status as string;
       setStatus(nextStatus);
       setPaymentUrl(typeof json.paymentUrl === "string" ? json.paymentUrl : null);
+      setQrImageUrl(typeof json.qrImageUrl === "string" ? json.qrImageUrl : null);
       setKitchenName(typeof json.kitchenName === "string" ? json.kitchenName : null);
       setCookSlug(typeof json.cookSlug === "string" ? json.cookSlug : null);
 
@@ -125,6 +131,23 @@ export default function PayPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- load once per order id
   }, [publicId, isCheckout]);
+
+  // UPI QR: payment arrives by webhook — poll the order until it is paid.
+  useEffect(() => {
+    if (!qrImageUrl || status !== "AWAITING_PAYMENT") return;
+    const path = isCheckout ? `/checkouts/${publicId}` : `/orders/${publicId}`;
+    const timer = setInterval(() => {
+      fetch(`${API_BASE}${path}`, { credentials: "include" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((json) => {
+          if (json && PAID_LIKE.has(json.status)) goConfirmed(json.checkoutId ?? publicId);
+          else if (json?.status) setStatus(json.status);
+        })
+        .catch(() => undefined);
+    }, 4000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- poll while the QR is shown
+  }, [qrImageUrl, status, publicId, isCheckout]);
 
   // After Razorpay return: confirm once via API, then short poll (do not restart on status).
   useEffect(() => {
@@ -256,33 +279,53 @@ export default function PayPage() {
   }
 
   if (!lines.length) {
+    if (error) {
+      return (
+        <main className="pay-stage">
+          <section className="card pay-panel" role="alert">
+            <h1>{t("pay.title")}</h1>
+            <p className="err">{error}</p>
+            <div className="actions pay-actions">
+              <button
+                className="btn"
+                type="button"
+                onClick={() => {
+                  setError(null);
+                  window.location.reload();
+                }}
+              >
+                {t("pay.retry")}
+              </button>
+              <Link className="btn secondary" href="/orders">
+                {t("nav.orders")}
+              </Link>
+            </div>
+          </section>
+        </main>
+      );
+    }
     return (
       <main className="pay-stage">
         <section className="card pay-panel pay-panel-loading" aria-busy="true">
-          {error ? <p className="err">{error}</p> : <p className="muted">{t("common.loading")}</p>}
+          <p className="muted">{t("common.loading")}</p>
         </section>
       </main>
     );
   }
 
-  const total = lines.reduce(
-    (s, o) =>
-      s +
-      Math.max(0, o.foodPaise * o.qty - (o.foodDiscountPaise ?? 0)) +
-      o.deliveryPaise +
-      o.platformFeePaise,
-    0,
-  );
+  // Amount the gateway charges: line totals (incl. convenience fee) minus LocalMeals credit.
+  const total = lines.reduce((s, o) => s + lineGatewayPaise(o), 0);
+  const feeSub = lines.reduce((s, o) => s + (o.convenienceFeePaise ?? 0), 0);
+  const creditSub = lines.reduce((s, o) => s + (o.creditAppliedPaise ?? 0), 0);
+  const showQr = Boolean(qrImageUrl) && status === "AWAITING_PAYMENT" && !mockMode;
 
   const unpaidTerminal = status != null && TERMINAL_UNPAID.has(status);
   const deliverySub = lines.reduce((s, o) => s + o.deliveryPaise, 0);
   const platformSub = lines.reduce((s, o) => s + o.platformFeePaise, 0);
   const discountSub = lines.reduce((s, o) => s + (o.foodDiscountPaise ?? 0), 0);
   const solo = isSoloKitchenMode();
-  const showFeeBreakdown =
-    discountSub > 0 || deliverySub > 0 || (!solo && platformSub > 0);
   const orderRef = checkoutId ?? publicId;
-  const amountLabel = (total / 100).toFixed(0);
+  const amountLabel = formatInrAmount(total);
   const plateHeading = lines.length > 1 ? t("pay.yourPlates") : t("pay.yourPlate");
 
   return (
@@ -339,34 +382,42 @@ export default function PayPage() {
                       {o.qty}× {localizedDishName(locale, o)}
                     </span>
                   </div>
-                  <span className="pay-line-price">₹{(foodGross / 100).toFixed(0)}</span>
+                  <span className="pay-line-price">₹{formatInrAmount(foodGross)}</span>
                 </li>
               );
             })}
           </ul>
 
-          {showFeeBreakdown ? (
-            <div className="pay-summary">
-              {discountSub > 0 ? (
-                <div className="pay-summary-row">
-                  <span>{t("cart.weekOff", { amount: (discountSub / 100).toFixed(0) })}</span>
-                  <span>−₹{(discountSub / 100).toFixed(0)}</span>
-                </div>
-              ) : null}
-              {deliverySub > 0 ? (
-                <div className="pay-summary-row">
-                  <span>{t("pay.delivery")}</span>
-                  <span>₹{(deliverySub / 100).toFixed(0)}</span>
-                </div>
-              ) : null}
-              {!solo && platformSub > 0 ? (
-                <div className="pay-summary-row">
-                  <span>{t("pay.platform")}</span>
-                  <span>₹{(platformSub / 100).toFixed(0)}</span>
-                </div>
-              ) : null}
+          <div className="pay-summary">
+            {discountSub > 0 ? (
+              <div className="pay-summary-row">
+                <span>{t("cart.weekOff", { amount: formatInrAmount(discountSub) })}</span>
+                <span>−₹{formatInrAmount(discountSub)}</span>
+              </div>
+            ) : null}
+            <div className="pay-summary-row">
+              <span>{t("pay.delivery")}</span>
+              <span>₹{formatInrAmount(deliverySub)}</span>
             </div>
-          ) : null}
+            {!solo ? (
+              <div className="pay-summary-row">
+                <span>{t("pay.platform")}</span>
+                <span>₹{formatInrAmount(platformSub)}</span>
+              </div>
+            ) : null}
+            {feeSub > 0 ? (
+              <div className="pay-summary-row">
+                <span>{t("pay.convenienceFee")}</span>
+                <span>₹{formatInrAmount(feeSub)}</span>
+              </div>
+            ) : null}
+            {creditSub > 0 ? (
+              <div className="pay-summary-row">
+                <span>{t("pay.creditUsed")}</span>
+                <span>−₹{formatInrAmount(creditSub)}</span>
+              </div>
+            ) : null}
+          </div>
         </div>
 
         {!solo && platformSub > 0 ? (
@@ -376,6 +427,16 @@ export default function PayPage() {
         <div className="actions pay-actions">
           {waitingGateway ? (
             <p className="muted pay-confirming">{t("pay.confirming")}</p>
+          ) : showQr ? (
+            <div className="pay-qr">
+              <h2 className="pay-receipt-title">{t("pay.qrTitle")}</h2>
+              {/* eslint-disable-next-line @next/next/no-img-element -- Razorpay-hosted QR image */}
+              <img src={qrImageUrl!} alt={t("pay.qrTitle")} width={240} height={240} />
+              <p className="muted">{t("pay.qrHelp")}</p>
+              <p className="muted pay-confirming" aria-live="polite">
+                {t("pay.qrWaiting")}
+              </p>
+            </div>
           ) : unpaidTerminal && external && paymentUrl ? (
             <>
               <p className="err">{t("pay.notConfirmed")}</p>

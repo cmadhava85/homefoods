@@ -6,6 +6,7 @@ resource "google_storage_bucket" "tfstate" {
   name                        = var.tf_state_bucket_name
   location                    = var.region
   uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
   versioning {
     enabled = true
   }

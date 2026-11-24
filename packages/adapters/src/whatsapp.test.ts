@@ -7,13 +7,39 @@ import {
   isWhatsAppConfigured,
   MetaWhatsAppProvider,
   MockWhatsAppProvider,
+  parseCancelCommand,
   parseCookMenuAdd,
+  parseDeliverCommand,
+  parseLateDecideCommand,
   parseMenuCommand,
   parseOrderCommand,
+  parsePayCommand,
+  parseReviewCommand,
   parseSaveAddressCommand,
   parseWeekCommand,
   parseWhatsAppIntent,
 } from "./whatsapp.js";
+
+describe("order-id commands accept real (hex) public ids", () => {
+  // publicId() / checkoutPublicId() generate LM-/CHK- + 10 hex chars, e.g. LM-72A1417C34.
+  it("Cancel / Pay with LM- and CHK- hex ids (any case)", () => {
+    assert.deepEqual(parseCancelCommand("Cancel LM-72A1417C34"), { publicId: "LM-72A1417C34" });
+    assert.deepEqual(parseCancelCommand("cancel chk-0f3a9b2c1d"), { checkoutId: "CHK-0F3A9B2C1D" });
+    assert.deepEqual(parseCancelCommand("Cancel order"), {});
+    assert.deepEqual(parsePayCommand("Pay LM-72A1417C34"), { publicId: "LM-72A1417C34" });
+    assert.deepEqual(parsePayCommand("pay CHK-0F3A9B2C1D"), { checkoutId: "CHK-0F3A9B2C1D" });
+  });
+
+  it("Delivered / Accept late / Review with hex ids", () => {
+    assert.equal(parseDeliverCommand("Delivered LM-AB12CD34EF").publicId, "LM-AB12CD34EF");
+    assert.equal(parseLateDecideCommand("Accept late lm-ab12cd34ef").publicId, "LM-AB12CD34EF");
+    assert.deepEqual(parseReviewCommand("Review LM-AB12CD34EF 5 lovely"), {
+      publicId: "LM-AB12CD34EF",
+      rating: 5,
+      comment: "lovely",
+    });
+  });
+});
 
 describe("parseWhatsAppIntent", () => {
   it("maps Menu Order Pay Help", () => {
@@ -229,6 +255,7 @@ describe("extractInboundWhatsApp", () => {
               value: {
                 messages: [
                   {
+                    id: "wamid.TEST_ORDERS",
                     from: "919840111111",
                     type: "interactive",
                     interactive: {
@@ -244,6 +271,7 @@ describe("extractInboundWhatsApp", () => {
     });
     assert.equal(meta.from, "+919840111111");
     assert.equal(meta.text, "Orders");
+    assert.equal(meta.messageId, "wamid.TEST_ORDERS");
     assert.equal(meta.locale, undefined);
 
     const idOnly = extractInboundWhatsApp({

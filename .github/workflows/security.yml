@@ -1,0 +1,109 @@
+name: Security
+
+# Secret scanning (full history), SBOM, and container image scanning.
+# npm advisories are gated in ci.yml (scripts/audit-gate.mjs); tracked secret-bearing files are
+# blocked by scripts/security-check.mjs (gitleaks cannot see inside binary plans/archives).
+
+on:
+  push:
+    branches: [main, staging]
+  pull_request:
+  schedule:
+    - cron: "30 1 * * 1" # Mondays 07:00 IST — catch newly published CVEs in unchanged code
+
+permissions:
+  contents: read
+
+env:
+  GITLEAKS_IMAGE: zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+  TRIVY_IMAGE: aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb
+
+jobs:
+  secrets:
+    name: Secret scan (gitleaks, full history)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        run: |
+          docker run --rm -v "$PWD:/repo" "$GITLEAKS_IMAGE" \
+            git /repo --redact --no-banner --exit-code 1
+
+  sbom:
+    name: SBOM (CycloneDX)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Generate SBOM (production dependencies)
+        run: npm sbom --sbom-format cyclonedx --omit dev > sbom.cdx.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sbom-cyclonedx
+          path: sbom.cdx.json
+          retention-days: 90
+
+  images:
+    name: Image scan (${{ matrix.app }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [api, worker, web]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Build image
+        run: docker build -f apps/${{ matrix.app }}/Dockerfile -t localmeals-${{ matrix.app }}:scan .
+      # OS packages only (npm deps are gated by audit-gate); fail on fixable HIGH/CRITICAL,
+      # and on any secret baked into a layer.
+      - name: Trivy (OS vulnerabilities + secrets)
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "$TRIVY_IMAGE" image \
+            --quiet --scanners vuln,secret --pkg-types os \
+            --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
+            localmeals-${{ matrix.app }}:scan
+      - name: Trivy (Dockerfile + Terraform misconfiguration)
+        if: matrix.app == 'api'
+        run: |
+          docker run --rm -v "$PWD:/src" "$TRIVY_IMAGE" config \
+            --quiet --severity HIGH,CRITICAL --exit-code 1 --ignorefile /src/.trivyignore \
+            --skip-dirs /src/apps/api/.stryker-tmp --skip-dirs /src/apps/web/.stryker-tmp \
+            /src
+
+  api-audit:
+    name: 42Crunch API audit (Ford ≥80 / security 30)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Check 42Crunch token
+        id: token
+        env:
+          TOKEN: ${{ secrets.API_TOKEN_42C }}
+        run: echo "present=$([ -n "$TOKEN" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      - name: Offline contract audit (always)
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Spec is fresh and passes the offline 42Crunch-style rules
+        run: |
+          npm run build -w @localmeals/domain -w @localmeals/observability -w @localmeals/adapters -w @localmeals/i18n -w @localmeals/db
+          node --import tsx --test apps/api/src/openapi/openapi.test.ts
+      - name: 42Crunch REST API Static Security Testing
+        if: steps.token.outputs.present == 'true'
+        uses: 42Crunch/api-security-audit-action@c675c3d41a7932c89d166717572e5c243afaa54d # v4.4.0
+        with:
+          api-token: ${{ secrets.API_TOKEN_42C }}
+          platform-url: https://us.42crunch.cloud
+          min-score: 80
+          default-collection-name: localmeals
+          log-level: INFO
+          sarif-report: 42c-audit.sarif
+
