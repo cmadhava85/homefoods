@@ -1,5 +1,5 @@
 # --- build: full deps + compile ---
-FROM node:22-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/worker/package.json apps/worker/
@@ -22,7 +22,7 @@ RUN npm run build -w @localmeals/domain \
  && npm run build -w @localmeals/worker
 
 # --- prod-deps: production dependencies only ---
-FROM node:22-alpine AS prod-deps
+FROM node:26-alpine AS prod-deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/worker/package.json apps/worker/
@@ -37,7 +37,7 @@ RUN OMIT_OPT=$([ "$WITH_OTEL" = "true" ] || echo "--omit=optional") \
   -w @localmeals/observability -w @localmeals/adapters -w @localmeals/db \
  && npm cache clean --force
 
-FROM node:22-alpine
+FROM node:26-alpine
 RUN apk add --no-cache tzdata
 WORKDIR /app
 ENV NODE_ENV=production
