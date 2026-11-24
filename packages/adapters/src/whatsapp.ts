@@ -138,26 +138,37 @@ export class MetaWhatsAppProvider implements WhatsAppProvider {
             };
     }
 
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
-
-    const json = (await res.json()) as {
-      messages?: Array<{ id?: string }>;
-      error?: { message?: string; code?: number; error_subcode?: number };
-    };
-    if (!res.ok) {
-      const code = json.error?.code;
-      const detail = json.error?.message ?? `Meta WhatsApp send failed (${res.status})`;
-      // Include (#code) so workers can classify non-retryable Meta errors.
-      throw new Error(typeof code === "number" ? `(#${code}) ${detail}` : detail);
+    const { fetchWithTimeout, UpstreamHttpError } = await import("./fetchWithTimeout.js");
+    const timeoutMs = Number(process.env.WHATSAPP_TIMEOUT_MS ?? 8_000);
+    try {
+      const { json } = await fetchWithTimeout(
+        url,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        },
+        { timeoutMs, retries: 0, provider: "whatsapp", path: `/messages` },
+      );
+      const body = (json ?? {}) as {
+        messages?: Array<{ id?: string }>;
+        error?: { message?: string; code?: number; error_subcode?: number };
+      };
+      if (body.error?.message) {
+        const code = body.error.code;
+        const detail = body.error.message;
+        throw new Error(typeof code === "number" ? `(#${code}) ${detail}` : detail);
+      }
+      return { messageId: body.messages?.[0]?.id ?? `wa_meta_${Date.now()}` };
+    } catch (err) {
+      if (err instanceof UpstreamHttpError) {
+        throw Object.assign(new Error(err.message), { statusCode: err.statusCode, name: "UpstreamError" });
+      }
+      throw err;
     }
-    return { messageId: json.messages?.[0]?.id ?? `wa_meta_${Date.now()}` };
   }
 
   verifyWebhook(query: Record<string, string | undefined>): boolean {

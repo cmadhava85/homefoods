@@ -116,15 +116,63 @@ Do **not** rename these without updating `infra/terraform/monitoring.tf`.
 
 ## Alerts (Terraform)
 
-Set `alert_email` in tfvars. Policies:
+Set `alert_email` in tfvars (and optionally `alert_channels_extra` for SMS/PagerDuty/Slack channel IDs). Monitoring no longer requires `create_cloud_run=true` — set service names + public URLs instead:
+
+| Variable | Default / example | Used for |
+|----------|-------------------|----------|
+| `api_service_name` | `localmeals-api` | 5xx + p95 latency filters |
+| `web_service_name` | `localmeals-web` | Dashboard |
+| `worker_service_name` | `localmeals-worker` | Dashboard |
+| `api_url` | `https://….run.app` | Uptime + Scheduler base URL |
+| `web_url` | `https://….run.app` | Web uptime |
+| `alert_channels_extra` | `[]` | Appended to every policy |
+
+Policies (each links a [RUNBOOK](./RUNBOOK.md) section in Monitoring documentation):
 
 - API Cloud Run 5xx
+- API request latency p95 > 2s for 10m
+- Uptime (api `/health`, web `/`) when URLs are set
+- Cloud SQL saturation (connections / CPU / disk)
 - Scheduler lunch-cutoff / eod failures
 - webhook signature failures (>3/min)
 - outbox failures
+- outbox oldest-pending age (`outbox_oldest_pending_age_sec` stub until worker emits `outbox.backlog`)
 - WhatsApp send failures
 - CONFIRMING_PAYMENT stuck
 - EOD settlement.batch_failed
+- Absence of `cutoff.reached` for 1h
+- Absence of `settlement.batch_completed` (~25h; expect within 1h of EOD)
+
+Dashboard: **LocalMeals ops** (request rate / 5xx / latency, Cloud SQL, outbox + webhook sig failures, scheduler attempts).
+
+### Test-fire a policy
+
+After apply, confirm channels receive mail and that log-based metrics increment:
+
+```bash
+# Fake payment.confirming_stuck → should trip "LocalMeals CONFIRMING_PAYMENT stuck"
+gcloud logging write localmeals-alert-test \
+  '{"message":"test-fire confirming stuck","event":"payment.confirming_stuck","severity":"WARNING"}' \
+  --payload-type=json \
+  --resource=cloud_run_revision \
+  --project=home-food-513806
+
+# Inspect the log-based metric (may take a minute to appear)
+gcloud logging metrics describe localmeals-payment-confirming-stuck --project=home-food-513806
+```
+
+Note: `gcloud logging write` with `cloud_run_revision` may need resource labels (`service_name`, `revision_name`, `location`, `configuration_name`, `project_id`). If the write is rejected, use Logs Explorer → “Create log entry” on a real API revision, or temporarily lower the policy threshold and generate a real stuck-payment path in staging.
+
+Other quick fires:
+
+| Policy | Fake `jsonPayload.event` |
+|--------|--------------------------|
+| webhook signature | `webhook.signature_failed` (repeat >3/min) |
+| outbox failures | `outbox.failed` |
+| WA send | `whatsapp.send_failed` |
+| EOD fail | `settlement.batch_failed` |
+
+Uptime / 5xx / latency: stop the service briefly or force errors — do not disable prod carelessly. Scheduler: run a job with a bad token once in staging.
 
 ## Env
 

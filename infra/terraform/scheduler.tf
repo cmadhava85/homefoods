@@ -1,12 +1,21 @@
-# Meal cut-offs + EOD settlement — requires public API + INTERNAL_JOB_TOKEN.
+# Meal cut-offs + EOD settlement — needs a resolvable API base URL + INTERNAL_JOB_TOKEN.
+# Cloud Run may be deployed by CI (create_cloud_run=false); set api_url or web_public_api_url.
 
 locals {
-  create_scheduler = var.create_scheduler && local.create_api
   api_base_url = (
     var.api_custom_domain != ""
     ? "https://${var.api_custom_domain}"
-    : (local.create_api ? google_cloud_run_v2_service.api[0].uri : "")
+    : (
+      var.api_url != ""
+      ? trimsuffix(var.api_url, "/")
+      : (
+        var.web_public_api_url != ""
+        ? trimsuffix(var.web_public_api_url, "/")
+        : (local.create_api ? google_cloud_run_v2_service.api[0].uri : "")
+      )
+    )
   )
+  create_scheduler = var.create_scheduler && local.api_base_url != ""
 }
 
 resource "google_cloud_scheduler_job" "lunch_cutoff" {
@@ -27,6 +36,7 @@ resource "google_cloud_scheduler_job" "lunch_cutoff" {
     headers = {
       "Content-Type"     = "application/json"
       "X-Internal-Token" = random_password.internal_job_token.result
+      "X-Job-Caller"     = "scheduler"
     }
   }
 
@@ -34,10 +44,7 @@ resource "google_cloud_scheduler_job" "lunch_cutoff" {
     retry_count = 2
   }
 
-  depends_on = [
-    google_project_service.apis,
-    google_cloud_run_v2_service.api,
-  ]
+  depends_on = [google_project_service.apis]
 }
 
 resource "google_cloud_scheduler_job" "breakfast_cutoff" {
@@ -58,6 +65,7 @@ resource "google_cloud_scheduler_job" "breakfast_cutoff" {
     headers = {
       "Content-Type"     = "application/json"
       "X-Internal-Token" = random_password.internal_job_token.result
+      "X-Job-Caller"     = "scheduler"
     }
   }
 
@@ -65,10 +73,7 @@ resource "google_cloud_scheduler_job" "breakfast_cutoff" {
     retry_count = 2
   }
 
-  depends_on = [
-    google_project_service.apis,
-    google_cloud_run_v2_service.api,
-  ]
+  depends_on = [google_project_service.apis]
 }
 
 resource "google_cloud_scheduler_job" "dinner_cutoff" {
@@ -89,6 +94,7 @@ resource "google_cloud_scheduler_job" "dinner_cutoff" {
     headers = {
       "Content-Type"     = "application/json"
       "X-Internal-Token" = random_password.internal_job_token.result
+      "X-Job-Caller"     = "scheduler"
     }
   }
 
@@ -96,10 +102,7 @@ resource "google_cloud_scheduler_job" "dinner_cutoff" {
     retry_count = 2
   }
 
-  depends_on = [
-    google_project_service.apis,
-    google_cloud_run_v2_service.api,
-  ]
+  depends_on = [google_project_service.apis]
 }
 
 resource "google_cloud_scheduler_job" "eod_settlement" {
@@ -120,6 +123,7 @@ resource "google_cloud_scheduler_job" "eod_settlement" {
     headers = {
       "Content-Type"     = "application/json"
       "X-Internal-Token" = random_password.internal_job_token.result
+      "X-Job-Caller"     = "scheduler"
     }
   }
 
@@ -127,10 +131,7 @@ resource "google_cloud_scheduler_job" "eod_settlement" {
     retry_count = 2
   }
 
-  depends_on = [
-    google_project_service.apis,
-    google_cloud_run_v2_service.api,
-  ]
+  depends_on = [google_project_service.apis]
 }
 
 resource "google_cloud_scheduler_job" "expire_unpaid" {
@@ -151,6 +152,7 @@ resource "google_cloud_scheduler_job" "expire_unpaid" {
     headers = {
       "Content-Type"     = "application/json"
       "X-Internal-Token" = random_password.internal_job_token.result
+      "X-Job-Caller"     = "scheduler"
     }
   }
 
@@ -158,8 +160,5 @@ resource "google_cloud_scheduler_job" "expire_unpaid" {
     retry_count = 1
   }
 
-  depends_on = [
-    google_project_service.apis,
-    google_cloud_run_v2_service.api,
-  ]
+  depends_on = [google_project_service.apis]
 }

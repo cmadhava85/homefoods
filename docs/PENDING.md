@@ -6,7 +6,7 @@ Last updated after ads scaffold + deploy CI harden (migrations through `0029` in
 
 | Item | Status |
 |------|--------|
-| Migrate Cloud SQL through latest (`0009`–`0029`) | **Apply on Cloud SQL** after each deploy — local/journal has `0028` late-orders + `0029` ad_campaigns; confirm staging/prod drizzle journal |
+| Migrate Cloud SQL through latest drizzle journal | **Pipeline migrate job only** (see RUNBOOK §4). API/worker refuse to boot in production when `applied < expected` unless `ALLOW_SCHEMA_BEHIND=true`. |
 | Uploads bucket + `GCS_UPLOADS_BUCKET` on API | **Done** — `gs://home-food-513806-localmeals-uploads`; Run SA `objectAdmin`; API env set. Deploy workflow now keeps the env var. TF state import blocked on ADC reauth (`gcloud auth application-default login` then `terraform import` in `infra/terraform`) |
 | Sync local `.env` WA + Razorpay from SM | **Done** — `npm run secrets:sync` (script fixed for macOS bash 3.2) |
 | Refresh WA secrets on Run | **Done** — api `00020`, worker `00006` rebound to SM `:latest` |

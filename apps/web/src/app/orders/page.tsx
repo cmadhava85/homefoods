@@ -49,6 +49,7 @@ type HistoryOrder = {
   payerMobile?: string | null;
   roleOnOrder?: "CUSTOMER" | "PAYER";
   createdAt: string;
+  ticket?: { id: number; status: string; decision: string | null } | null;
 };
 
 type ConcernCategory =
@@ -453,6 +454,12 @@ function OrdersInner() {
             <span className={`chip tone-${statusTone(o.status)}`}>
               {customerStatusLabel(t, o.status, statusOpts(o))}
             </span>
+            {o.ticket ? (
+              <span className="chip" title={o.ticket.decision ?? undefined}>
+                Ticket #{o.ticket.id} · {o.ticket.status}
+                {o.ticket.decision ? ` · ${o.ticket.decision}` : ""}
+              </span>
+            ) : null}
           </div>
         </div>
 

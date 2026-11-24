@@ -3881,12 +3881,33 @@ export async function listOrdersForCustomer(
   const byId = new Map(cooks.map((c) => [c.id, c]));
   const { reviewFlagsForOrders } = await import("./reviews.js");
   const flags = await reviewFlagsForOrders(db, page);
+  const orderIds = page.map((o) => o.id);
+  const ticketRows =
+    orderIds.length === 0
+      ? []
+      : await db.query.supportTickets.findMany({
+          where: (t, { inArray: ia }) => ia(t.orderId, orderIds),
+          orderBy: (t, { desc }) => [desc(t.createdAt)],
+        });
+  const ticketByOrder = new Map<
+    number,
+    { id: number; status: string; decision: string | null }
+  >();
+  for (const tk of ticketRows) {
+    if (tk.orderId == null || ticketByOrder.has(tk.orderId)) continue;
+    ticketByOrder.set(tk.orderId, {
+      id: tk.id,
+      status: tk.status,
+      decision: tk.decision ?? null,
+    });
+  }
   const out = [];
   for (const o of page) {
     const cook = byId.get(o.cookId);
     const review = flags.get(o.id) ?? { canReview: false, hasReview: false };
     const isPayerOnly =
       o.payerMobile === customerMobile && o.customerMobile !== customerMobile;
+    const ticket = ticketByOrder.get(o.id) ?? null;
     out.push({
       id: o.id,
       publicId: o.publicId,
@@ -3936,6 +3957,9 @@ export async function listOrdersForCustomer(
       cancelRequestable: isPayerOnly ? false : await isOrderCancelRequestable(db, o, cook),
       canReview: isPayerOnly ? false : review.canReview,
       hasReview: review.hasReview,
+      ticket: ticket
+        ? { id: ticket.id, status: ticket.status, decision: ticket.decision }
+        : null,
       paymentUrl:
         o.status === "AWAITING_PAYMENT" ||
         o.status === "CONFIRMING_PAYMENT" ||

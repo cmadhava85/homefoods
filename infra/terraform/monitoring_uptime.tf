@@ -1,12 +1,31 @@
 # Production-readiness monitoring: external uptime checks, Cloud SQL saturation, monthly budget.
+# Prefer explicit api_url / web_url so checks work when Cloud Run is CI-managed (create_cloud_run=false).
 
 locals {
+  api_uptime_host = (
+    var.api_url != ""
+    ? trimsuffix(trimprefix(trimprefix(var.api_url, "https://"), "http://"), "/")
+    : (
+      var.api_custom_domain != ""
+      ? var.api_custom_domain
+      : (local.create_api ? trimprefix(google_cloud_run_v2_service.api[0].uri, "https://") : "")
+    )
+  )
+  web_uptime_host = (
+    var.web_url != ""
+    ? trimsuffix(trimprefix(trimprefix(var.web_url, "https://"), "http://"), "/")
+    : (
+      var.web_custom_domain != ""
+      ? var.web_custom_domain
+      : (local.create_web ? trimprefix(google_cloud_run_v2_service.web[0].uri, "https://") : "")
+    )
+  )
   uptime_targets = merge(
-    local.create_api ? {
-      api = { host = trimprefix(google_cloud_run_v2_service.api[0].uri, "https://"), path = "/health" }
+    local.api_uptime_host != "" ? {
+      api = { host = local.api_uptime_host, path = "/health" }
     } : {},
-    local.create_web ? {
-      web = { host = trimprefix(google_cloud_run_v2_service.web[0].uri, "https://"), path = "/" }
+    local.web_uptime_host != "" ? {
+      web = { host = local.web_uptime_host, path = "/" }
     } : {},
   )
 }
@@ -67,7 +86,12 @@ resource "google_monitoring_alert_policy" "uptime" {
     }
   }
 
-  notification_channels = [google_monitoring_notification_channel.email[0].id]
+  documentation {
+    content   = "${title(each.key)} uptime check failing. See [RUNBOOK §6.A Nobody can order](${local.runbook_base}#a-nobody-can-order)."
+    mime_type = "text/markdown"
+  }
+
+  notification_channels = local.alert_channels
   enabled               = true
 }
 
@@ -128,7 +152,12 @@ resource "google_monitoring_alert_policy" "db_saturation" {
     }
   }
 
-  notification_channels = [google_monitoring_notification_channel.email[0].id]
+  documentation {
+    content   = "Cloud SQL connections/CPU/disk saturation. See [RUNBOOK §6.I High 5xx / rate-limit / DB](${local.runbook_base}#i-high-5xx--rate-limit--db)."
+    mime_type = "text/markdown"
+  }
+
+  notification_channels = local.alert_channels
   enabled               = true
 
   depends_on = [google_project_service.apis]
@@ -173,4 +202,3 @@ resource "google_billing_budget" "monthly" {
 
   depends_on = [google_project_service.apis]
 }
-

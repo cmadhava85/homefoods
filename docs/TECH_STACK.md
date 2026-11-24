@@ -110,7 +110,7 @@ npm test
 
 | Feature | LocalMeals usage |
 |---------|------------------|
-| App Router (`app/`) | Routes: `/discover`, `/kitchen/[slug]`, `/cook/[slug]`, ops UI (`/lm-ops-k7v2m9`), `/orders`, `/family`, `/wa`, `/pay/...` |
+| App Router (`app/`) | Routes: `/discover`, `/kitchen/[slug]`, `/cook/[slug]`, ops UI (path from `NEXT_PUBLIC_ADMIN_PATH`), `/orders`, `/family`, `/wa`, `/pay/...` |
 | Client components | Interactive desks, carts, auth (`"use client"`) |
 | `next.config` rewrites | Browser calls `/lm-api/*` → API origin so cookies/session stay same-site friendly ([`apps/web/next.config.ts`](../apps/web/next.config.ts), [`lib/api.ts`](../apps/web/src/lib/api.ts)) |
 | Middleware | Gate sensitive paths (e.g. `/family`) — [`middleware.ts`](../apps/web/src/middleware.ts) |

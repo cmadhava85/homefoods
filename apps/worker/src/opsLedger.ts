@@ -1,4 +1,4 @@
-import { and, eq, gte } from "drizzle-orm";
+import { and, eq, gte, sql } from "drizzle-orm";
 import { orders, platformEventLedger, type Db } from "@localmeals/db";
 
 /** Tie a failed/skipped outbox notify to the order activity timeline. */
@@ -118,6 +118,43 @@ export async function recordConfirmingStuckOnce(
     channel: "SYSTEM_CRON",
     eventName: "PAYMENT_CONFIRMING_STUCK",
     rawPayload: { publicId: input.publicId, stuckMs: input.stuckMs },
+  });
+  return true;
+}
+
+/** Log ticket.sla_breached once per ticket (deduped via platform_event_ledger). */
+export async function recordTicketSlaBreachedOnce(
+  db: Db,
+  input: {
+    ticketId: number;
+    orderId?: number | null;
+    cookId?: string | null;
+    customerMobile?: string | null;
+    slaDueAt?: string | null;
+  },
+) {
+  const [existing] = await db
+    .select({ id: platformEventLedger.id })
+    .from(platformEventLedger)
+    .where(
+      and(
+        eq(platformEventLedger.eventName, "TICKET_SLA_BREACHED"),
+        sql`${platformEventLedger.rawPayload}->>'ticketId' = ${String(input.ticketId)}`,
+      ),
+    )
+    .limit(1);
+  if (existing) return false;
+
+  await db.insert(platformEventLedger).values({
+    associatedMobile: input.customerMobile ?? null,
+    orderId: input.orderId ?? null,
+    cookId: input.cookId ?? null,
+    channel: "SYSTEM_CRON",
+    eventName: "TICKET_SLA_BREACHED",
+    rawPayload: {
+      ticketId: input.ticketId,
+      slaDueAt: input.slaDueAt ?? null,
+    },
   });
   return true;
 }

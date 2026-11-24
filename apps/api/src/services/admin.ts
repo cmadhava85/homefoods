@@ -24,8 +24,18 @@ const OPEN_SETTLEMENT_STATUSES = [
 ] as const;
 
 export async function listTickets(db: Db) {
-  return db.query.supportTickets.findMany({
+  const rows = await db.query.supportTickets.findMany({
     orderBy: (t, { desc }) => [desc(t.createdAt)],
+  });
+  const now = Date.now();
+  // OPEN tickets past SLA first, then newest.
+  return [...rows].sort((a, b) => {
+    const aBreached =
+      a.status === "OPEN" && a.slaDueAt != null && a.slaDueAt.getTime() < now ? 1 : 0;
+    const bBreached =
+      b.status === "OPEN" && b.slaDueAt != null && b.slaDueAt.getTime() < now ? 1 : 0;
+    if (aBreached !== bBreached) return bBreached - aBreached;
+    return b.createdAt.getTime() - a.createdAt.getTime();
   });
 }
 
@@ -55,7 +65,8 @@ export async function getTicket(db: Db, id: number) {
   return { ...ticket, order, cook };
 }
 
-async function logAdmin(
+/** Persist an admin/ops audit row (actor from ALS, or explicit job caller). */
+export async function logAdmin(
   db: Db,
   action: string,
   entityType: string,
@@ -73,6 +84,19 @@ async function logAdmin(
     reason,
     payload,
   });
+}
+
+/** Public wrapper for route-level admin audit rows (EOD, outbox retry, …). */
+export async function logAdminAction(
+  db: Db,
+  action: string,
+  entityType: string,
+  entityId: string,
+  reason?: string,
+  payload?: object,
+  actor?: string,
+) {
+  return logAdmin(db, action, entityType, entityId, reason, payload, actor);
 }
 
 export async function holdSettlement(db: Db, orderId: number, reason: string) {
@@ -637,22 +661,26 @@ export type TicketCategory = (typeof TICKET_CATEGORIES)[number];
 export async function createTicketFromHelp(
   db: Db,
   input: {
-    customerMobile: string;
+    customerMobile?: string | null;
     orderPublicId?: string;
     summary: string;
     category?: TicketCategory;
     source?: string;
     photoUrl?: string | null;
+    /** When reporting without an order (e.g. cook desk). */
+    cookId?: string | null;
   },
 ) {
   let orderId: number | undefined;
-  let cookId: string | undefined;
+  let cookId: string | undefined = input.cookId ?? undefined;
+  let orderPublicId = input.orderPublicId;
   if (input.orderPublicId) {
     const order = await db.query.orders.findFirst({
       where: (t, { eq: e }) => e(t.publicId, input.orderPublicId!),
     });
     orderId = order?.id;
-    cookId = order?.cookId;
+    cookId = cookId ?? order?.cookId;
+    orderPublicId = order?.publicId ?? orderPublicId;
   }
   const photoUrl =
     input.photoUrl && /^\/uploads\/concern-[a-zA-Z0-9._-]+$/.test(input.photoUrl)
@@ -663,7 +691,7 @@ export async function createTicketFromHelp(
     .values({
       orderId,
       cookId,
-      customerMobile: input.customerMobile,
+      customerMobile: input.customerMobile ?? null,
       category: input.category ?? "OTHER",
       summary: input.summary,
       source: input.source ?? "WHATSAPP",
@@ -671,6 +699,62 @@ export async function createTicketFromHelp(
       slaDueAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
     })
     .returning();
+
+  await enqueueOutbox(db, "TicketCreated", {
+    ticketId: ticket.id,
+    category: ticket.category,
+    orderPublicId: orderPublicId ?? null,
+    orderId: orderId ?? null,
+    cookId: cookId ?? null,
+    customerMobile: ticket.customerMobile,
+    source: ticket.source,
+    summary: ticket.summary.slice(0, 240),
+    slaDueAt: ticket.slaDueAt?.toISOString() ?? null,
+  });
+
+  return ticket;
+}
+
+/**
+ * Cook desk "Report an issue" → support ticket (source COOK).
+ */
+export async function createCookTicket(
+  db: Db,
+  input: {
+    cookId: string;
+    cookMobile: string;
+    summary: string;
+    category?: TicketCategory;
+    orderPublicId?: string | null;
+  },
+) {
+  const summary = input.summary.trim();
+  if (summary.length < 10) {
+    throw new Error("Please describe the issue (at least a short sentence)");
+  }
+  if (summary.length > 2000) {
+    throw new Error("Issue is too long");
+  }
+  const category = input.category ?? "COOK_OPS";
+  if (!TICKET_CATEGORIES.includes(category)) {
+    throw new Error("Invalid category");
+  }
+
+  const ticket = await createTicketFromHelp(db, {
+    customerMobile: input.cookMobile,
+    cookId: input.cookId,
+    orderPublicId: input.orderPublicId ?? undefined,
+    summary: `[COOK] ${summary}`,
+    category,
+    source: "COOK",
+  });
+
+  await logAdmin(db, "COOK_TICKET", "ticket", String(ticket.id), summary, {
+    cookId: input.cookId,
+    orderPublicId: input.orderPublicId ?? null,
+    category,
+  });
+
   return ticket;
 }
 

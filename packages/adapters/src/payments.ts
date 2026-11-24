@@ -154,15 +154,28 @@ async function razorpayFetch<T>(
     ...(extra as Record<string, string> | undefined),
   };
   if (idempotencyKey) headers["Idempotency-Key"] = gatewayIdempotencyHeader(idempotencyKey);
-  const res = await fetch(`https://api.razorpay.com/v1${path}`, {
-    ...rest,
-    headers,
-  });
-  const json = (await res.json()) as T & { error?: { description?: string } };
-  if (!res.ok) {
-    throw new Error(json.error?.description ?? `Razorpay ${path} failed (${res.status})`);
+  const { fetchWithTimeout, UpstreamHttpError } = await import("./fetchWithTimeout.js");
+  const timeoutMs = Number(process.env.RAZORPAY_TIMEOUT_MS ?? 10_000);
+  try {
+    const { json } = await fetchWithTimeout(
+      `https://api.razorpay.com/v1${path}`,
+      { ...rest, headers },
+      {
+        timeoutMs,
+        retries: idempotencyKey ? 2 : 0,
+        retryOnTransient: Boolean(idempotencyKey),
+        provider: "razorpay",
+        path,
+      },
+    );
+    const body = (json ?? {}) as T & { error?: { description?: string } };
+    return body;
+  } catch (err) {
+    if (err instanceof UpstreamHttpError) {
+      throw Object.assign(new Error(err.message), { statusCode: err.statusCode, name: "UpstreamError" });
+    }
+    throw err;
   }
-  return json;
 }
 
 function safeEqualHex(a: string, b: string): boolean {

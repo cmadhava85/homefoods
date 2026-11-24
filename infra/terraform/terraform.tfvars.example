@@ -23,7 +23,7 @@ uploads_delete_days   = 180
 artifact_keep_versions = 5
 db_disk_autoresize_limit_gb = 20
 
-# Flip on after first images are in Artifact Registry
+# Flip on after first images are in Artifact Registry (CI often owns Cloud Run instead)
 create_cloud_run = false
 # api_image    = "asia-south1-docker.pkg.dev/home-food-513806/localmeals/api:latest"
 # worker_image = "asia-south1-docker.pkg.dev/home-food-513806/localmeals/worker:latest"
@@ -31,7 +31,14 @@ create_cloud_run = false
 # web_public_api_url = "https://localmeals-api-xxxxx-as.a.run.app"
 # web_origin         = "https://localmeals-web-xxxxx-as.a.run.app"
 
-# Scheduler (cut-off 08:00 + EOD 18:00 IST) — created when API Cloud Run exists
+# Service names + public URLs when create_cloud_run=false (CI-deployed Run)
+# api_service_name    = "localmeals-api"
+# web_service_name    = "localmeals-web"
+# worker_service_name = "localmeals-worker"
+# api_url             = "https://localmeals-api-xxxxx-as.a.run.app"  # uptime + Scheduler
+# web_url             = "https://localmeals-web-xxxxx-as.a.run.app"  # uptime
+
+# Scheduler (cut-off + EOD IST) — needs api_url, web_public_api_url, api_custom_domain, or TF-managed API
 create_scheduler = true
 
 # Keep mocks on until webhooks are public
@@ -41,8 +48,10 @@ mock_auth     = true
 auth_enforce  = true
 
 # Optional
-# alert_email        = "you@example.com"   # creates log-based metrics + alert policies
-# otel_exporter_otlp_endpoint = ""         # leave empty; keep otel_enabled=false for solo
+# enable_status_page   = true                # public GCS bucket for infra/status/index.html
+# alert_email          = "you@example.com"   # creates log-based metrics + alert policies + dashboard
+# alert_channels_extra = []                  # extra channel IDs (SMS / PagerDuty / Slack)
+# otel_exporter_otlp_endpoint = ""           # leave empty; keep otel_enabled=false for solo
 # confirming_stuck_ms = 900000
 # api_custom_domain  = "api.localmeals.in"
 # web_custom_domain  = "app.localmeals.in"
@@ -55,11 +64,17 @@ auth_enforce  = true
 
 # --- Production readiness ---
 # db_tier              = "db-g1-small"   # f1-micro: shared core, no SLA, ~25 connections
+# db_max_connections   = 50              # must match tier (f1-micro≈25 → lower pools or upgrade; see docs/COST.md)
 # db_availability_type = "REGIONAL"      # HA failover (~2x DB cost)
 # db_pitr_enabled      = true
 # db_log_retention_days    = 7
 # db_backup_retained_count = 14
-# alert_email          = "ops@example.com"  # enables uptime checks + all alert policies
+# backup_export_bucket = "gs://other-project-localmeals-sql-exports"  # off-project weekly export stub
+# log_archive_enabled  = true            # Cloud Run → GCS log sink, 180d retention
+# alert_email          = "ops@example.com"  # enables uptime + policies + LocalMeals ops dashboard
+# alert_channels_extra = ["projects/PROJECT/notificationChannels/CHANNEL_ID"]
+# api_url              = "https://….run.app"  # required for uptime/scheduler when create_cloud_run=false
+# web_url              = "https://….run.app"
 # billing_account_id   = "XXXXXX-XXXXXX-XXXXXX"
 # monthly_budget_inr   = 5000
 # vpc_connector_enabled = false   # only for private-IP resources; prefer Direct VPC egress

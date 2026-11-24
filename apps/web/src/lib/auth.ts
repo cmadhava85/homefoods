@@ -1,5 +1,6 @@
 import { API_BASE } from "./api";
 import { localeHeaders } from "./locale";
+import { requestIdFromResponse, withRequestRef } from "./requestRef";
 
 export type AuthRole = "CUSTOMER" | "COOK" | "ADMIN";
 
@@ -71,7 +72,11 @@ export async function requestOtp(mobile: string, role: AuthRole) {
     body: JSON.stringify({ mobile, role }),
   });
   const json = await res.json();
-  if (!res.ok) throw new Error(json.error ?? "Could not send OTP");
+  if (!res.ok) {
+    throw new Error(
+      withRequestRef(json.error ?? "Could not send OTP", requestIdFromResponse(res, json)),
+    );
+  }
   return json as { mobile: string; mockCode?: string };
 }
 
@@ -83,7 +88,11 @@ export async function verifyOtp(mobile: string, role: AuthRole, code: string) {
     body: JSON.stringify({ mobile, role, code }),
   });
   const json = await res.json();
-  if (!res.ok) throw new Error(json.error ?? "Invalid OTP");
+  if (!res.ok) {
+    throw new Error(
+      withRequestRef(json.error ?? "Invalid OTP", requestIdFromResponse(res, json)),
+    );
+  }
   setSession(null, json.user);
   return json.user as AuthUser;
 }

@@ -106,9 +106,9 @@ output "next_steps" {
          cloud-sql-proxy ${google_sql_database_instance.postgres.connection_name}
          DATABASE_URL=postgres://localmeals:PASSWORD@127.0.0.1:5432/localmeals npm run db:migrate
     3) Build/push images to ${var.region}-docker.pkg.dev/${var.project_id}/${var.name_prefix}
-    4) Set create_cloud_run=true + api_image / worker_image / web_image (scheduler follows when create_scheduler=true)
+    4) Set create_cloud_run=true + images, OR keep create_cloud_run=false and set api_url/web_url + api_service_name (scheduler when create_scheduler=true)
     5) Ensure WhatsApp/Razorpay secret versions are real (not REPLACE_ME)
-    6) Optional: alert_email=you@… ; api_custom_domain / web_custom_domain
+    6) Optional: alert_email=you@… ; alert_channels_extra ; api_custom_domain / web_custom_domain
     7) Optional remote state: create_tf_state_bucket=true, then uncomment backend in versions.tf
   EOT
 }

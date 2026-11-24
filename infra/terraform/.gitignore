@@ -1,8 +1,11 @@
 .terraform/
 .terraform.lock.hcl
+# State + var files (secrets / env-specific). Keep example vars tracked.
 *.tfstate
 *.tfstate.*
+*.tfstate*
 *.tfvars
+terraform.tfvars
 !terraform.tfvars.example
 crash.log
 override.tf

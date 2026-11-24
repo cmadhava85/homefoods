@@ -17,6 +17,31 @@ const port = Number(process.env.PORT ?? process.env.API_PORT ?? 4000);
 const flushTelemetry = await startTelemetry("localmeals-api");
 
 const db = createDb();
+
+if (process.env.NODE_ENV === "production") {
+  const { assertSchemaCurrent } = await import("@localmeals/db");
+  const { createServiceLogger } = await import("@localmeals/observability");
+  const bootLog = createServiceLogger("localmeals-api");
+  const schema = await assertSchemaCurrent(db);
+  if (!schema.ok && !schema.allowed) {
+    bootLog.error(
+      {
+        event: "schema.behind",
+        expected: schema.expected,
+        applied: schema.applied,
+      },
+      "refusing to boot — DB migrations behind this build (ALLOW_SCHEMA_BEHIND=true to override)",
+    );
+    process.exit(1);
+  }
+  if (!schema.ok) {
+    bootLog.warn(
+      { event: "schema.behind", expected: schema.expected, applied: schema.applied },
+      "ALLOW_SCHEMA_BEHIND — booting with schema behind code",
+    );
+  }
+}
+
 const app = buildApp(db);
 installProcessLifecycle({
   service: "localmeals-api",

@@ -2106,9 +2106,83 @@ function CookDeskInner() {
         </section>
       ) : null}
 
+      <section className="card" style={{ marginTop: "1.5rem" }}>
+        <h2>Report an issue</h2>
+        <p className="muted">Ops gets a WhatsApp alert. Include an order id when it helps.</p>
+        <CookReportIssue slug={slug} />
+      </section>
+
       {err ? <pre className="err">{err}</pre> : null}
       {msg ? <pre className="ok">{msg}</pre> : null}
     </main>
+  );
+}
+
+function CookReportIssue({ slug }: { slug: string }) {
+  const [summary, setSummary] = useState("");
+  const [orderPublicId, setOrderPublicId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [localErr, setLocalErr] = useState<string | null>(null);
+  const [localOk, setLocalOk] = useState<string | null>(null);
+
+  async function submit() {
+    setBusy(true);
+    setLocalErr(null);
+    setLocalOk(null);
+    try {
+      const res = await authFetch(`/cooks/${slug}/tickets`, {
+        method: "POST",
+        body: JSON.stringify({
+          summary: summary.trim(),
+          orderPublicId: orderPublicId.trim() || null,
+          category: "COOK_OPS",
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Could not submit");
+      setLocalOk(`Ticket #${json.ticketId} opened`);
+      setSummary("");
+      setOrderPublicId("");
+    } catch (e) {
+      setLocalErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="stack" style={{ gap: "0.75rem" }}>
+      <label className="order-field">
+        What happened
+        <textarea
+          value={summary}
+          onChange={(e) => setSummary(e.target.value)}
+          rows={3}
+          placeholder="Short description (min 10 characters)"
+          disabled={busy}
+        />
+      </label>
+      <label className="order-field">
+        Order id (optional)
+        <input
+          type="text"
+          value={orderPublicId}
+          onChange={(e) => setOrderPublicId(e.target.value)}
+          placeholder="LM-…"
+          disabled={busy}
+        />
+      </label>
+      <button
+        className="btn sm"
+        type="button"
+        disabled={busy || summary.trim().length < 10}
+        onClick={() => void submit()}
+      >
+        {busy ? "Sending…" : "Send to ops"}
+      </button>
+      {localErr ? <p className="err">{localErr}</p> : null}
+      {localOk ? <p className="ok">{localOk}</p> : null}
+    </div>
   );
 }
 

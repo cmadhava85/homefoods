@@ -580,6 +580,13 @@ const MyOrder = z.object({
   cancelRequestable: z.boolean(),
   canReview: z.boolean(),
   hasReview: z.boolean(),
+  ticket: z
+    .object({
+      id: Id,
+      status: z.enum(["OPEN", "RESOLVED", "CLOSED"]),
+      decision: Text(40).nullable(),
+    })
+    .nullable(),
   paymentUrl: Url.optional(),
 });
 

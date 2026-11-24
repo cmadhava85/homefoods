@@ -6,7 +6,7 @@ config();
 
 import http from "node:http";
 import { and, eq, lt } from "drizzle-orm";
-import { closeDb, createDb, orders } from "@localmeals/db";
+import { closeDb, createDb, orders, supportTickets } from "@localmeals/db";
 import {
   LogEvent,
   createServiceLogger,
@@ -16,7 +16,7 @@ import {
 } from "@localmeals/observability";
 import { drainOutboxOnce } from "./drainOutbox.js";
 import { drainUntilEmpty } from "./drainUntilEmpty.js";
-import { recordConfirmingStuckOnce } from "./opsLedger.js";
+import { recordConfirmingStuckOnce, recordTicketSlaBreachedOnce } from "./opsLedger.js";
 
 const flushTelemetry = await startTelemetry("localmeals-worker");
 
@@ -30,19 +30,49 @@ const apiBase = process.env.API_INTERNAL_URL ?? `http://127.0.0.1:${process.env.
 const CONFIRMING_STUCK_MS = Number(process.env.CONFIRMING_STUCK_MS ?? 15 * 60 * 1000);
 
 let outboxInFlight = false;
+let lastBacklogLog = 0;
+async function logOutboxBacklog() {
+  const now = Date.now();
+  if (now - lastBacklogLog < 60_000) return;
+  lastBacklogLog = now;
+  try {
+    const { sql } = await import("drizzle-orm");
+    const rows = (await db.execute(sql`
+      SELECT
+        COUNT(*) FILTER (WHERE processed_at IS NULL)::int AS pending,
+        EXTRACT(EPOCH FROM (NOW() - MIN(created_at) FILTER (WHERE processed_at IS NULL)))::int AS oldest_age
+      FROM outbox
+    `)) as unknown as Array<{ pending: number; oldest_age: number | null }>;
+    log.info(
+      {
+        event: "outbox.backlog",
+        pending: Number(rows[0]?.pending ?? 0),
+        oldestPendingAgeSec: rows[0]?.oldest_age == null ? null : Number(rows[0].oldest_age),
+      },
+      "outbox backlog",
+    );
+  } catch (err) {
+    log.warn({ err, event: "outbox.backlog" }, "outbox backlog query failed");
+  }
+}
+
 async function processOutbox() {
   // Never overlap drains in this process (a slow batch must not race the next tick).
   if (outboxInFlight) return;
   outboxInFlight = true;
   try {
     await drainOutboxOnce(db, { apiBase, logger: log });
+    await logOutboxBacklog();
   } finally {
     outboxInFlight = false;
   }
 }
 
 function internalHeaders(): Record<string, string> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "X-Job-Caller": "worker",
+  };
   const token = process.env.INTERNAL_JOB_TOKEN?.trim();
   if (token) headers["X-Internal-Token"] = token;
   return headers;
@@ -85,7 +115,47 @@ async function scanStuckConfirmingPayments() {
   return stuck.length;
 }
 
-/** The poll runs every few seconds — fire each scheduled job at most once per wall-clock slot. */
+/** OPEN tickets past slaDueAt → log ticket.sla_breached once (ledger-deduped). */
+async function scanTicketSlaBreaches() {
+  const now = new Date();
+  const breached = await db
+    .select({
+      id: supportTickets.id,
+      orderId: supportTickets.orderId,
+      cookId: supportTickets.cookId,
+      customerMobile: supportTickets.customerMobile,
+      slaDueAt: supportTickets.slaDueAt,
+    })
+    .from(supportTickets)
+    .where(and(eq(supportTickets.status, "OPEN"), lt(supportTickets.slaDueAt, now)))
+    .limit(50);
+  let logged = 0;
+  for (const t of breached) {
+    const first = await recordTicketSlaBreachedOnce(db, {
+      ticketId: t.id,
+      orderId: t.orderId,
+      cookId: t.cookId,
+      customerMobile: t.customerMobile,
+      slaDueAt: t.slaDueAt?.toISOString?.() ?? null,
+    }).catch(() => false);
+    if (!first) continue;
+    logged += 1;
+    log.warn(
+      {
+        event: LogEvent.TICKET_SLA_BREACHED,
+        ticketId: t.id,
+        orderId: t.orderId,
+        cookId: t.cookId,
+        customerMobile: t.customerMobile ? maskMobile(t.customerMobile) : undefined,
+        slaDueAt: t.slaDueAt?.toISOString?.() ?? t.slaDueAt,
+      },
+      "support ticket past SLA",
+    );
+  }
+  return logged;
+}
+
+/** The poll runs every few seconds — fire each scheduled job at most once per IST wall-clock slot. */
 const firedSlots = new Map<string, string>();
 function firstInSlot(job: string, slot: string): boolean {
   if (firedSlots.get(job) === slot) return false;
@@ -93,22 +163,66 @@ function firstInSlot(job: string, slot: string): boolean {
   return true;
 }
 
+/** Hour/minute in Asia/Kolkata so Cloud Run UTC containers still hit 03:00 / 21:00 IST. */
+export function istClock(now = new Date()): { hour: number; minute: number; dayKey: string } {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "0";
+  return {
+    hour: Number(get("hour")),
+    minute: Number(get("minute")),
+    dayKey: `${get("year")}-${get("month")}-${get("day")}`,
+  };
+}
+
+async function postInternalJob(job: string, path: string, body: string) {
+  try {
+    const res = await fetch(`${apiBase}${path}`, {
+      method: "POST",
+      headers: internalHeaders(),
+      body,
+    });
+    if (!res.ok) {
+      log.error(
+        { event: "job.failed", job, status: res.status, path },
+        "internal job returned non-OK",
+      );
+      return;
+    }
+    if (job === "retention") {
+      const counts = await res.json().catch(() => undefined);
+      log.info(
+        {
+          event: LogEvent.RETENTION_COMPLETED,
+          job,
+          path,
+          ...(counts && typeof counts === "object" ? counts : {}),
+        },
+        "retention job completed",
+      );
+    }
+  } catch (err) {
+    log.error({ event: "job.failed", job, err, path }, "internal job request failed");
+  }
+}
+
 async function maybeRunScheduled() {
-  const now = new Date();
-  const hour = now.getHours();
-  const minute = now.getMinutes();
-  const minuteSlot = `${now.toDateString()} ${hour}:${minute}`;
+  const { hour, minute, dayKey } = istClock();
+  const minuteSlot = `${dayKey} ${hour}:${minute}`;
   // Cloud Scheduler owns expiry in prod (ENABLE_AUTO_EXPIRE=false there); local dev keeps it on.
   if (
     process.env.ENABLE_AUTO_EXPIRE !== "false" &&
     minute % 5 === 0 &&
     firstInSlot("expire", minuteSlot)
   ) {
-    await fetch(`${apiBase}/internal/ops/expire-unpaid`, {
-      method: "POST",
-      headers: internalHeaders(),
-      body: "{}",
-    }).catch(() => undefined);
+    await postInternalJob("expire-unpaid", "/internal/ops/expire-unpaid", "{}");
   }
   if (
     process.env.ENABLE_AUTO_CUTOFF === "true" &&
@@ -116,11 +230,7 @@ async function maybeRunScheduled() {
     firstInSlot("cutoff", minuteSlot)
   ) {
     for (const meal of ["BREAKFAST", "LUNCH", "DINNER"] as const) {
-      await fetch(`${apiBase}/internal/cutoffs/${meal}`, {
-        method: "POST",
-        headers: internalHeaders(),
-        body: JSON.stringify({}),
-      });
+      await postInternalJob(`cutoff-${meal}`, `/internal/cutoffs/${meal}`, "{}");
     }
   }
   if (
@@ -129,24 +239,16 @@ async function maybeRunScheduled() {
     minute === 0 &&
     firstInSlot("eod", minuteSlot)
   ) {
-    await fetch(`${apiBase}/internal/settlements/eod`, {
-      method: "POST",
-      headers: internalHeaders(),
-      body: "{}",
-    });
+    await postInternalJob("eod", "/internal/settlements/eod", "{}");
   }
-  // Daily PII / ephemeral state purge (03:00 local). Override with ENABLE_AUTO_RETENTION=false.
+  // Daily PII / ephemeral state purge (03:00 IST). Override with ENABLE_AUTO_RETENTION=false.
   if (
     process.env.ENABLE_AUTO_RETENTION !== "false" &&
     hour === 3 &&
     minute === 0 &&
     firstInSlot("retention", minuteSlot)
   ) {
-    await fetch(`${apiBase}/internal/ops/retention`, {
-      method: "POST",
-      headers: internalHeaders(),
-      body: JSON.stringify({ mode: "purge" }),
-    });
+    await postInternalJob("retention", "/internal/ops/retention", JSON.stringify({ mode: "purge" }));
   }
 }
 
@@ -157,15 +259,27 @@ async function maybeRunScheduled() {
  * Cloud Scheduler fallback. Cloud Run IAM (run.invoker + OIDC) authenticates both callers.
  */
 const pushMode = process.env.WORKER_MODE === "push";
+if (pushMode && !(process.env.OUTBOX_WAKE_TOPIC ?? "").trim()) {
+  // API publishes wakes; without the topic push mode silently drops notifications between scheduler ticks.
+  log.error(
+    { event: "worker.push_misconfigured" },
+    "WORKER_MODE=push but OUTBOX_WAKE_TOPIC unset on API — apply worker_push.tf and set the topic env",
+  );
+}
 let lastStuckScan = 0;
 
 function maybeScanStuck() {
   const now = Date.now();
   if (now - lastStuckScan <= 60_000) return Promise.resolve();
   lastStuckScan = now;
-  return scanStuckConfirmingPayments()
-    .then(() => undefined)
-    .catch((err) => log.error({ err }, "stuck payment scan failed"));
+  return Promise.all([
+    scanStuckConfirmingPayments().catch((err) => {
+      log.error({ err }, "stuck payment scan failed");
+    }),
+    scanTicketSlaBreaches().catch((err) => {
+      log.error({ err }, "ticket SLA scan failed");
+    }),
+  ]).then(() => undefined);
 }
 
 let drainChain: Promise<unknown> = Promise.resolve();
@@ -190,7 +304,8 @@ function runDrainCycle() {
 const healthPort = Number(process.env.PORT ?? 8080);
 const healthServer = http
   .createServer((req, res) => {
-    if (pushMode && req.method === "POST" && req.url?.split("?")[0] === "/drain") {
+    const path = req.url?.split("?")[0] ?? "/";
+    if (pushMode && req.method === "POST" && path === "/drain") {
       req.resume();
       runDrainCycle()
         .then((r) => {
@@ -205,6 +320,21 @@ const healthServer = http
         });
       return;
     }
+    if (req.method === "GET" && path === "/ready") {
+      void (async () => {
+        try {
+          const { sql } = await import("drizzle-orm");
+          await db.execute(sql`select 1`);
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true }));
+        } catch {
+          res.writeHead(503, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: false }));
+        }
+      })();
+      return;
+    }
+    // Liveness
     res.writeHead(200, { "Content-Type": "text/plain" });
     res.end("ok");
   })

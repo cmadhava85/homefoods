@@ -8,7 +8,7 @@ import {
   setCorrField,
 } from "@localmeals/observability";
 
-const QUIET_PATHS = new Set(["/health", "/meta/features", "/meta/today"]);
+const QUIET_PATHS = new Set(["/health", "/ready", "/meta/features", "/meta/today"]);
 
 function headerString(
   headers: FastifyRequest["headers"],

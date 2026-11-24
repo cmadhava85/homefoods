@@ -65,6 +65,28 @@ gcloud storage cp "gs://${PROJECT_ID}-localmeals-uploads/menu-*" "gs://${PROJECT
 - **Staging:** never keep a second always-on instance — use the sleep scripts below, or point staging at a database on the same instance.
 - Keep PITR on (WAL storage is small) — it is the cheapest insurance in the stack.
 
+#### Tier upgrade path (capacity)
+
+`db-f1-micro` is shared-core, no SLA, and ~**25** `max_connections`. With default pools (`api_max_instances`×`db_pool_max_api` + worker + 3 headroom) Terraform’s `check.db_connection_budget` requires usage ≤ **80%** of `db_max_connections` — so f1-micro often fails plan until you lower pools or upgrade. Set `db_max_connections` to the real Cloud SQL value after each tier change.
+
+| Tier | Rough `max_connections` | Compute (ZONAL, asia-south1, list ≈) | When |
+|------|-------------------------|--------------------------------------|------|
+| `db-f1-micro` (default) | ~25 | ~$8–10/mo (~₹700–850) | Staging / idle demos only |
+| `db-g1-small` | ~50 | ~$31/mo (~₹2,600) — **≈ +$21 / ≈ +₹1,800 vs f1-micro** | First LIVE lunch pin; still shared-core, no SLA |
+| `db-custom-1-3840` | ~100 | ~$50–55/mo (~₹4,200–4,600) — **≈ +$20–25 / ≈ +₹1,700–2,100 vs g1-small** | Launch when you need a dedicated vCPU + headroom for API max-instances ≥ 5 |
+
+Example after upgrading:
+
+```hcl
+db_tier            = "db-g1-small"
+db_max_connections = 50
+# or
+db_tier            = "db-custom-1-3840"
+db_max_connections = 100
+```
+
+HA (`db_availability_type = "REGIONAL"`) roughly **2×** the instance cost above — buy it when lunch downtime is unacceptable.
+
 ## Staging sleep (biggest idle save)
 
 When you are not demoing:

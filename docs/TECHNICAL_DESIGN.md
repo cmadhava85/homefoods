@@ -14,7 +14,7 @@ LocalMeals is a hyper-local **Zero-UI** food platform for Tamil Nadu home kitche
 - **Customers** order via web, WhatsApp, or IVR (seniors)
 - **Cooks** operate mainly via WhatsApp (+ light web desk)
 - **Family (Child Pays)** approves UPI for parents
-- **Owner** resolves disputes via the obscure ops console path (default `/lm-ops-k7v2m9`)
+- **Owner** resolves disputes via the obscure ops console path (configured via `NEXT_PUBLIC_ADMIN_PATH`)
 - **Delivery partners** (later) use *their* apps; we integrate via API/webhooks
 
 This document describes **architecture, components, data flows, and implementation boundaries** so a developer can implement without re-deriving decisions from the long product blueprint.

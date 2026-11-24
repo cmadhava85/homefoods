@@ -38,7 +38,7 @@ npm run dev:web      # :3000
 
 Open http://localhost:3000
 
-Demo customer: `+919840111111` (seeded). Cook desk: `/cook/csk-homemade-delights`. Ops console: `/lm-ops-k7v2m9` (not linked publicly; override with `NEXT_PUBLIC_ADMIN_PATH`). WhatsApp sim: `/wa`.
+Demo customer: `+919840111111` (seeded). Cook desk: `/cook/csk-homemade-delights`. Ops console path is configured via `NEXT_PUBLIC_ADMIN_PATH` (not linked publicly). WhatsApp sim: `/wa`.
 
 Each cook sets their own lunch cut-off on the cook desk (`PATCH /cooks/:slug/cutoff`). Platform `LUNCH_CUTOFF_HOUR` / `MINUTE` is only the default for new cooks.
 

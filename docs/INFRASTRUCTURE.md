@@ -369,8 +369,8 @@ Workflows live in `.github/workflows/`:
 
 | File | Purpose |
 |------|---------|
-| `ci.yml` | On PR/push: install, build packages, test |
-| `deploy.yml` | On `main` / manual: CI gate → build/push images → deploy api · worker · web |
+| `ci.yml` | On PR/push: install, build packages, test, plus Docker web image build |
+| `deploy.yml` | On `main` / manual: CI gate (incl. next build) → fail-fast mock check → build/push → deploy |
 
 ### D0. One-time WIF setup (Terraform)
 
@@ -406,30 +406,41 @@ Paste the output into GitHub → **Settings → Secrets and variables → Action
 
 **Variables**
 
-| Variable | Purpose |
-|----------|---------|
-| `ENABLE_GCP_DEPLOY` | `true` to allow deploy workflow |
-| `MOCK_PAYMENTS` | default `true` until Razorpay webhook live |
-| `MOCK_WHATSAPP` | default `true` until Meta webhook live |
-| `MOCK_AUTH` | default `true` |
-| `AUTH_ENFORCE` | default `false`; set `true` in staging/prod |
+Deploy fails fast when `MOCK_PAYMENTS != false` or `AUTH_ENFORCE == false` (mirrors `apps/api/src/prodConfig.ts`). Set production-safe values **before** enabling deploy.
+
+| Variable | Production value | Notes |
+|----------|------------------|-------|
+| `ENABLE_GCP_DEPLOY` | `true` | Gate for the deploy workflow |
+| `MOCK_PAYMENTS` | `false` | **Required** — deploy blocked otherwise; API refuses to boot with mocks |
+| `MOCK_WHATSAPP` | `false` (or keep `true` only if `APP_ENV=staging`) | Staging may keep WhatsApp mock (Meta test allowlist); production must be `false` |
+| `MOCK_AUTH` | `false` (or keep `true` only if `APP_ENV=staging`) | Same staging exception as WhatsApp |
+| `AUTH_ENFORCE` | `true` | **Required** — deploy blocked if explicitly `false` |
+| `APP_ENV` | `staging` or `production` | Workflow default `production` if unset; live pin today uses `staging` |
+| `LOG_LEVEL` | `info` | Applied to API + worker (default `info`) |
+| `DB_POOL_MAX_API` | `5` | API postgres pool (matches terraform `db_pool_max_api`) |
+| `DB_POOL_MAX_WORKER` | `2` | Worker postgres pool (matches terraform `db_pool_max_worker`) |
+
+Optional ops vars (unchanged): `VPC_CONNECTOR`, `WORKER_PUSH_MODE`, `SOLO_KITCHEN_SLUG`, `HIDE_COOK_ONBOARD`, `MENU_IMAGES_PUBLIC`.
+
+Deploy uses `--update-env-vars` (merge) so keys not listed in the workflow (and any of the above once set) are not wiped on each revision.
 
 Also create GitHub **Environment** named `production` (workflow references it).
 
 ### D2. Branch strategy
 
 - `main` → production deploy (when `ENABLE_GCP_DEPLOY=true`)  
-- PRs → CI only  
+- PRs → CI only (includes `docker build -f apps/web/Dockerfile .`)  
 - Manual: Actions → **Deploy Cloud Run** → Run workflow  
 
 ### D3. What the pipeline does
 
-1. CI gate (`npm ci` → build → migrate → test)  
-2. Docker build + push `api` / `worker` / `web` tagged with `github.sha`  
-3. `gcloud run deploy` with Secret Manager mounts + `localmeals-run` SA  
-4. Job summary prints API + web URLs  
+1. CI gate (`npm ci` → build packages → migrate → test → **`next build` for web**)  
+2. Fail-fast check: `MOCK_PAYMENTS=false` and `AUTH_ENFORCE≠false`  
+3. Docker build + push `api` / `worker` / `web` tagged with `github.sha`  
+4. `gcloud run deploy` with Secret Manager mounts + `localmeals-run` SA (`--update-env-vars` for APP_ENV / LOG_LEVEL / DB_POOL_MAX / mocks)  
+5. Job summary prints API + web URLs  
 
-Keep mocks on for the first deploys; flip repo vars after webhooks work.
+Do **not** leave `MOCK_*=true` / `AUTH_ENFORCE=false` on the repo once deploy is enabled — the workflow will refuse to build.
 
 ---
 

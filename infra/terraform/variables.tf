@@ -22,6 +22,17 @@ variable "db_tier" {
   default     = "db-f1-micro"
 }
 
+variable "db_max_connections" {
+  type        = number
+  description = "Postgres max_connections for the chosen tier (f1-micro ≈ 25, g1-small ≈ 50, custom-1-3840 ≈ 100). Must match Cloud SQL — the connection-budget check fails plan when api/worker pools exceed 80% of this value."
+  # Default assumes g1-small-class headroom so lean pools plan; set 25 explicitly on f1-micro (and lower pools) or plan fails.
+  default = 50
+  validation {
+    condition     = var.db_max_connections >= 10
+    error_message = "db_max_connections must be >= 10."
+  }
+}
+
 variable "db_availability_type" {
   type        = string
   description = "ZONAL (single zone) or REGIONAL (HA standby + automatic failover)"
@@ -234,8 +245,44 @@ variable "outbox_poll_ms" {
 
 variable "create_scheduler" {
   type        = bool
-  description = "Create cut-off + EOD Cloud Scheduler jobs (needs create_cloud_run + api_image)"
+  description = "Create cut-off + EOD Cloud Scheduler jobs (needs api_url, web_public_api_url, api_custom_domain, or create_cloud_run + api_image)"
   default     = true
+}
+
+variable "api_service_name" {
+  type        = string
+  description = "Cloud Run API service name (for 5xx / latency alerts when create_cloud_run=false)"
+  default     = "localmeals-api"
+}
+
+variable "web_service_name" {
+  type        = string
+  description = "Cloud Run web service name (dashboard / filters)"
+  default     = "localmeals-web"
+}
+
+variable "worker_service_name" {
+  type        = string
+  description = "Cloud Run worker service name (dashboard / filters)"
+  default     = "localmeals-worker"
+}
+
+variable "api_url" {
+  type        = string
+  description = "Public API base URL (https://…) for uptime checks + Scheduler when Cloud Run is not TF-managed"
+  default     = ""
+}
+
+variable "web_url" {
+  type        = string
+  description = "Public web base URL (https://…) for uptime checks when Cloud Run is not TF-managed"
+  default     = ""
+}
+
+variable "alert_channels_extra" {
+  type        = list(string)
+  description = "Extra Monitoring notification channel IDs (SMS / PagerDuty / Slack) appended to every alert policy"
+  default     = []
 }
 
 variable "lunch_cutoff_schedule" {
@@ -344,4 +391,16 @@ variable "menu_images_public" {
   type        = bool
   description = "Serve menu photos from a public-read bucket (concern photos stay private)"
   default     = true
+}
+
+variable "log_archive_enabled" {
+  type        = bool
+  description = "Create GCS bucket + log sink for Cloud Run logs (180-day retention). Off by default to avoid surprise storage."
+  default     = false
+}
+
+variable "backup_export_bucket" {
+  type        = string
+  description = "Optional gs://bucket (prefer a separate project) for weekly Cloud SQL exports. Empty = stub only; no export job created yet."
+  default     = ""
 }

@@ -110,7 +110,11 @@ export function buildApp(db: Db = createDb(), opts: BuildAppOptions = {}): Fasti
     skipOnError: rateLimitFailOpen,
     allowList: (req) => {
       const url = req.url.split("?")[0] ?? "";
-      return url === "/health" || (req.method === "GET" && url.startsWith("/webhooks/whatsapp"));
+      return (
+        url === "/health" ||
+        url === "/ready" ||
+        (req.method === "GET" && url.startsWith("/webhooks/whatsapp"))
+      );
     },
   });
 

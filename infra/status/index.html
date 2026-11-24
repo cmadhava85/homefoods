@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LocalMeals status</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #1a1a1a;
+        --muted: #5c5c5c;
+        --bg: #f7f3ec;
+        --panel: #fffdf8;
+        --accent: #0b6e4f;
+        --warn: #8a4b08;
+        --warn-bg: #fff4e5;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+        background:
+          radial-gradient(1200px 500px at 10% -10%, #e8f5ef 0%, transparent 55%),
+          radial-gradient(900px 400px at 100% 0%, #f0e6d8 0%, transparent 50%),
+          var(--bg);
+        color: var(--ink);
+        line-height: 1.5;
+        min-height: 100vh;
+      }
+      main {
+        max-width: 40rem;
+        margin: 0 auto;
+        padding: 3rem 1.25rem 4rem;
+      }
+      h1 {
+        font-family: "Fraunces", Georgia, serif;
+        font-weight: 600;
+        font-size: clamp(2rem, 5vw, 2.75rem);
+        margin: 0 0 0.35rem;
+        letter-spacing: -0.02em;
+      }
+      .lede {
+        color: var(--muted);
+        margin: 0 0 1.75rem;
+      }
+      .banner {
+        background: var(--warn-bg);
+        color: var(--warn);
+        border-left: 4px solid var(--warn);
+        padding: 0.85rem 1rem;
+        margin-bottom: 1.75rem;
+        font-size: 0.95rem;
+      }
+      .banner[hidden] {
+        display: none;
+      }
+      section {
+        background: var(--panel);
+        padding: 1.25rem 1.35rem;
+        margin-bottom: 1rem;
+        border: 1px solid rgba(0, 0, 0, 0.06);
+      }
+      h2 {
+        margin: 0 0 0.5rem;
+        font-size: 1.05rem;
+      }
+      ul {
+        margin: 0;
+        padding-left: 1.15rem;
+      }
+      a {
+        color: var(--accent);
+      }
+      .ok {
+        color: var(--accent);
+        font-weight: 600;
+      }
+      footer {
+        margin-top: 2rem;
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>LocalMeals</h1>
+      <p class="lede">Service status and support contacts (static page — works even if the app is down).</p>
+
+      <!-- Set hidden="" when all clear; remove hidden during an incident. -->
+      <div class="banner" id="incident-banner" hidden>
+        We’re aware of an issue affecting ordering / payments. Ops is investigating — updates here and on WhatsApp when resolved.
+      </div>
+
+      <section>
+        <h2>Current status</h2>
+        <p class="ok" id="status-line">All systems normal for the lunch window.</p>
+        <p class="lede" style="margin: 0">
+          If the app or WhatsApp replies are slow, try again in a few minutes. Paid orders are safe.
+        </p>
+      </section>
+
+      <section>
+        <h2>Support</h2>
+        <ul>
+          <li>WhatsApp / phone: <strong>[support WhatsApp / phone]</strong></li>
+          <li>Email: <a href="mailto:[support email]">[support email]</a></li>
+          <li>Include your order id (LM-…) when you write in.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Grievance officer</h2>
+        <ul>
+          <li>Name: [Grievance Officer name]</li>
+          <li>Email: <a href="mailto:[grievance email]">[grievance email]</a></li>
+        </ul>
+      </section>
+
+      <footer>
+        Hosted on GCS separately from Cloud Run. Replace bracketed placeholders with the same values as
+        <code>NEXT_PUBLIC_SUPPORT_*</code> / grievance env vars. Toggle the incident banner in this file when declaring an outage.
+      </footer>
+    </main>
+    <script>
+      // Optional: when declaring an incident, remove `hidden` from #incident-banner
+      // and set #status-line textContent to a short update.
+    </script>
+  </body>
+</html>

@@ -220,6 +220,31 @@ describe("worker outbox notifications", () => {
     });
   }
 
+  it("TicketCreated WhatsApps every ADMIN_MOBILES number", async () => {
+    const a = mobile();
+    const b = mobile();
+    const prev = process.env.ADMIN_MOBILES;
+    process.env.ADMIN_MOBILES = `${a},${b}`;
+    try {
+      const row = await enqueue("TicketCreated", {
+        ticketId: 42,
+        category: "QUALITY",
+        orderPublicId: "LM-TK01",
+        source: "WEB",
+        summary: "Cold rice",
+        slaDueAt: "2031-01-02T10:00:00.000Z",
+      });
+      await drainOutboxOnce(db, allowed);
+      assert.equal(sentTo(a).length, 1);
+      assert.equal(sentTo(b).length, 1);
+      assert.match(sentTo(a)[0].body ?? "", /New support ticket #42[\s\S]*QUALITY[\s\S]*LM-TK01[\s\S]*SLA due/);
+      assert.ok((await reload(row.id)).processedAt);
+    } finally {
+      if (prev === undefined) delete process.env.ADMIN_MOBILES;
+      else process.env.ADMIN_MOBILES = prev;
+    }
+  });
+
   it("OrderPaid notifies cook and customer; uses the template when configured", async () => {
     process.env.WHATSAPP_TMPL_ORDER_PAID = "order_paid_v1";
     try {

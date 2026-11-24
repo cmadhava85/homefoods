@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Incident process
+    url: https://github.com/cmadhava85/homefoods/blob/main/docs/INCIDENTS.md
+    about: Severities, on-call, WA templates, postmortems (docs/INCIDENTS.md)
+  - name: Ops runbook
+    url: https://github.com/cmadhava85/homefoods/blob/main/docs/RUNBOOK.md
+    about: Day-2 playbooks, deploy/rollback, escalation order

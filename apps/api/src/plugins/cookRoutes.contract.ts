@@ -18,6 +18,7 @@ import {
   Url,
   Uuid,
 } from "../openapi/shared.js";
+import { TicketCategory, TicketStatus } from "./adminShared.contract.js";
 
 const TAGS = ["Cook desk"];
 
@@ -71,6 +72,13 @@ export const MealQueryOnly = z.object({ meal: MealQuery });
 export const DateQuery = z.object({ date: IsoDate.optional() });
 
 export const ReviewReplyBody = z.object({ reply: z.string().min(1).max(500) });
+export const CookTicketBody = z
+  .object({
+    summary: z.string().min(10).max(2000),
+    category: TicketCategory.optional(),
+    orderPublicId: OrderPublicId.optional().nullable(),
+  })
+  .describe("Cook desk issue report");
 export const AdsBoostBody = z.object({
   title: z.string().min(2).max(120).optional(),
   days: z.number().int().min(1).max(30).optional(),
@@ -982,6 +990,22 @@ export const cookOperations = defineOperations([
       dispatched: Count,
       partnerAssigned: Count,
       skippedPickup: Count,
+    }),
+  },
+  {
+    method: "post",
+    path: "/cooks/:slug/tickets",
+    operationId: "createCookTicket",
+    summary: "Cook desk: report an issue (creates a support ticket, source COOK)",
+    tags: TAGS,
+    access: "cook",
+    params: SlugParams,
+    body: CookTicketBody,
+    response: z.object({
+      ok: z.literal(true),
+      ticketId: Id,
+      status: TicketStatus,
+      source: Text(40),
     }),
   },
   {

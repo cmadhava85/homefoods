@@ -1,10 +1,21 @@
 import type { NextConfig } from "next";
 import path from "node:path";
+import { legalDetailsMissing } from "./src/lib/legal";
 
 const apiUpstream =
   process.env.API_INTERNAL_URL ??
   process.env.NEXT_PUBLIC_API_URL ??
   "http://127.0.0.1:4000";
+
+if (process.env.LEGAL_STRICT === "true") {
+  const missing = legalDetailsMissing();
+  if (missing.length) {
+    throw new Error(
+      `LEGAL_STRICT=true but legal details missing: ${missing.join(", ")}. ` +
+        "Set NEXT_PUBLIC_LEGAL_* / NEXT_PUBLIC_SUPPORT_* / NEXT_PUBLIC_GRIEVANCE_* build args.",
+    );
+  }
+}
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,

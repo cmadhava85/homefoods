@@ -28,6 +28,15 @@ function str(v: unknown) {
   return typeof v === "string" ? v : v == null ? "" : String(v);
 }
 
+function adminMobilesFromEnv(): string[] {
+  const raw = process.env.ADMIN_MOBILES?.trim();
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((m) => m.trim())
+    .filter(Boolean);
+}
+
 function rowLog(
   log: ReturnType<typeof createServiceLogger>,
   row: { id: number; eventName: string },
@@ -211,7 +220,7 @@ export async function drainOutboxOnce(
     if (attempts >= OUTBOX_MAX_ATTEMPTS) {
       logger.warn(
         {
-          event: LogEvent.OUTBOX_SKIPPED,
+          event: "outbox.parked",
           reason: "max_attempts",
           attempts,
           lastError: row.lastError,
@@ -704,6 +713,38 @@ export async function drainOutboxOnce(
           });
         }
         logger.info({ event: LogEvent.OUTBOX_PROCESSED, source: payload.source }, "OrderRefunded");
+      }
+
+      if (row.eventName === "TicketCreated") {
+        const ticketId = payload.ticketId;
+        const category = str(payload.category) || "OTHER";
+        const orderPublicId = str(payload.orderPublicId) || "—";
+        const slaDueAt = str(payload.slaDueAt) || "—";
+        const source = str(payload.source) || "WEB";
+        const summary = str(payload.summary).slice(0, 160);
+        const admins = adminMobilesFromEnv();
+        const body = [
+          `New support ticket #${ticketId}`,
+          `Source: ${source} · ${category}`,
+          `Order: ${orderPublicId}`,
+          `SLA due: ${slaDueAt}`,
+          summary ? `Note: ${summary}` : null,
+        ]
+          .filter(Boolean)
+          .join("\n");
+        for (const to of admins) {
+          await sendWa(logger, wa, { to, body });
+        }
+        logger.info(
+          {
+            event: LogEvent.OUTBOX_PROCESSED,
+            channel: "whatsapp",
+            toRole: "admin",
+            ticketId,
+            adminCount: admins.length,
+          },
+          "TicketCreated notified",
+        );
       }
 
       if (row.eventName === "CookPayoutWebhook") {

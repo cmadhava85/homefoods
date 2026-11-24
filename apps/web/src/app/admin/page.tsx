@@ -13,6 +13,10 @@ type Ticket = {
   status: string;
   orderId: number | null;
   category: string;
+  source?: string | null;
+  cookId?: string | null;
+  slaDueAt?: string | null;
+  decision?: string | null;
 };
 
 type Cook = {
@@ -1388,16 +1392,27 @@ function AdminInner() {
         <section>
           <h2>{t("admin.tabTickets")}</h2>
           {tickets.length === 0 ? <p className="muted">{t("admin.noTickets")}</p> : null}
-          {tickets.map((ticket) => (
-            <div key={ticket.id} className="card">
+          {tickets.map((ticket) => {
+            const slaPast =
+              ticket.status === "OPEN" &&
+              ticket.slaDueAt != null &&
+              new Date(ticket.slaDueAt).getTime() < Date.now();
+            return (
+            <div key={ticket.id} className={`card${slaPast ? " ticket-sla-breached" : ""}`}>
               <div className="row">
                 <strong>
                   #{ticket.id} {ticket.summary}
                 </strong>
                 <span className="chip">{ticket.status}</span>
+                {slaPast ? <span className="chip tone-warn">SLA past due</span> : null}
+                {ticket.source === "COOK" ? <span className="chip">Cook</span> : null}
               </div>
               <p className="muted">
                 {ticket.category} · orderId {ticket.orderId ?? "—"}
+                {ticket.slaDueAt
+                  ? ` · SLA ${new Date(ticket.slaDueAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}`
+                  : ""}
+                {ticket.decision ? ` · ${ticket.decision}` : ""}
               </p>
               {ticket.orderId && ticket.status === "OPEN" ? (
                 <div className="actions">
@@ -1424,9 +1439,14 @@ function AdminInner() {
                   </button>
                   <Link href={adminHref(`tickets/${ticket.id}`)}>{t("admin.detail")}</Link>
                 </div>
-              ) : null}
+              ) : (
+                <div className="actions">
+                  <Link href={adminHref(`tickets/${ticket.id}`)}>{t("admin.detail")}</Link>
+                </div>
+              )}
             </div>
-          ))}
+            );
+          })}
         </section>
       ) : null}
 

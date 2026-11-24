@@ -77,10 +77,9 @@ jobs:
           npm run db:migrate
           npm run db:seed
       - run: npm test
-      - name: Typecheck web
-        # tsc only — next build downloads Google Fonts and flakes in Actions.
-        # Full next build still runs in the Docker web image step.
-        run: npm run typecheck -w @localmeals/web
+      - name: Build web (next build)
+        # Fonts are local — next build is offline-safe in Actions (was tsc-only when Google Fonts flaked).
+        run: npm run build -w @localmeals/web
         env:
           NEXT_PUBLIC_API_URL: http://127.0.0.1:4000
 
@@ -96,6 +95,24 @@ jobs:
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # Mirror apps/api/src/prodConfig.ts — refuse deploy that would boot-crash or ship mocks.
+      - name: Refuse unsafe production flags
+        run: |
+          MOCK_PAYMENTS="${{ vars.MOCK_PAYMENTS }}"
+          AUTH_ENFORCE="${{ vars.AUTH_ENFORCE }}"
+          # Unset vars: treat like workflow defaults below (payments off / auth on).
+          if [ -z "$MOCK_PAYMENTS" ]; then MOCK_PAYMENTS=false; fi
+          if [ -z "$AUTH_ENFORCE" ]; then AUTH_ENFORCE=true; fi
+          if [ "$MOCK_PAYMENTS" != "false" ]; then
+            echo "::error::Deploy blocked: MOCK_PAYMENTS must be false (got '${MOCK_PAYMENTS}'). Set repo variable MOCK_PAYMENTS=false. API prodConfig refuses to boot otherwise — see docs/INFRASTRUCTURE.md §5."
+            exit 1
+          fi
+          if [ "$AUTH_ENFORCE" = "false" ]; then
+            echo "::error::Deploy blocked: AUTH_ENFORCE must not be false (got '${AUTH_ENFORCE}'). Set repo variable AUTH_ENFORCE=true. See docs/INFRASTRUCTURE.md §5."
+            exit 1
+          fi
+
       - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
@@ -165,6 +182,15 @@ jobs:
             --build-arg "NEXT_PUBLIC_SOLO_KITCHEN_SLUG=${SOLO_SLUG}" \
             --build-arg "NEXT_PUBLIC_HIDE_COOK_ONBOARD=${HIDE_ONBOARD}" \
             --build-arg "NEXT_PUBLIC_MENU_IMAGES_BASE=${MENU_BASE}" \
+            --build-arg "NEXT_PUBLIC_LEGAL_ENTITY_NAME=${{ vars.NEXT_PUBLIC_LEGAL_ENTITY_NAME }}" \
+            --build-arg "NEXT_PUBLIC_LEGAL_ADDRESS=${{ vars.NEXT_PUBLIC_LEGAL_ADDRESS }}" \
+            --build-arg "NEXT_PUBLIC_LEGAL_GSTIN=${{ vars.NEXT_PUBLIC_LEGAL_GSTIN }}" \
+            --build-arg "NEXT_PUBLIC_LEGAL_EFFECTIVE_DATE=${{ vars.NEXT_PUBLIC_LEGAL_EFFECTIVE_DATE }}" \
+            --build-arg "NEXT_PUBLIC_SUPPORT_EMAIL=${{ vars.NEXT_PUBLIC_SUPPORT_EMAIL }}" \
+            --build-arg "NEXT_PUBLIC_SUPPORT_PHONE=${{ vars.NEXT_PUBLIC_SUPPORT_PHONE }}" \
+            --build-arg "NEXT_PUBLIC_GRIEVANCE_OFFICER_NAME=${{ vars.NEXT_PUBLIC_GRIEVANCE_OFFICER_NAME }}" \
+            --build-arg "NEXT_PUBLIC_GRIEVANCE_OFFICER_EMAIL=${{ vars.NEXT_PUBLIC_GRIEVANCE_OFFICER_EMAIL }}" \
+            --build-arg "LEGAL_STRICT=true" \
             -t "${REGISTRY}/web:${{ steps.meta.outputs.tag }}" \
             -t "${REGISTRY}/web:latest" .
           docker push "${REGISTRY}/web:${{ steps.meta.outputs.tag }}"
@@ -201,13 +227,17 @@ jobs:
           MOCK_WHATSAPP="${{ vars.MOCK_WHATSAPP || 'false' }}"
           MOCK_AUTH="${{ vars.MOCK_AUTH || 'false' }}"
           AUTH_ENFORCE="${{ vars.AUTH_ENFORCE || 'true' }}"
+          APP_ENV="${{ vars.APP_ENV || 'production' }}"
+          LOG_LEVEL="${{ vars.LOG_LEVEL || 'info' }}"
+          DB_POOL_MAX="${{ vars.DB_POOL_MAX_API || '5' }}"
           WEB_ORIGIN="${{ secrets.WEB_ORIGIN }}"
 
           UPLOADS_BUCKET="${PROJECT_ID}-localmeals-uploads"
           # Public menu-photo bucket (terraform menu_images_public); opt-in via repo var once created.
           MENU_BUCKET=""
           if [ "${{ vars.MENU_IMAGES_PUBLIC }}" = "true" ]; then MENU_BUCKET="${PROJECT_ID}-localmeals-menu-public"; fi
-          ENV_VARS="NODE_ENV=production,MOCK_PAYMENTS=${MOCK_PAYMENTS},MOCK_WHATSAPP=${MOCK_WHATSAPP},MOCK_AUTH=${MOCK_AUTH},AUTH_ENFORCE=${AUTH_ENFORCE},WHATSAPP_API_VERSION=v21.0,GCS_UPLOADS_BUCKET=${UPLOADS_BUCKET},GCS_PUBLIC_MENU_BUCKET=${MENU_BUCKET}"
+          # --update-env-vars merges; does not wipe keys set outside this list (e.g. manual ops).
+          ENV_VARS="NODE_ENV=production,APP_ENV=${APP_ENV},LOG_LEVEL=${LOG_LEVEL},DB_POOL_MAX=${DB_POOL_MAX},MOCK_PAYMENTS=${MOCK_PAYMENTS},MOCK_WHATSAPP=${MOCK_WHATSAPP},MOCK_AUTH=${MOCK_AUTH},AUTH_ENFORCE=${AUTH_ENFORCE},WHATSAPP_API_VERSION=v21.0,GCS_UPLOADS_BUCKET=${UPLOADS_BUCKET},GCS_PUBLIC_MENU_BUCKET=${MENU_BUCKET}"
           if [ -n "$WEB_ORIGIN" ]; then
             ENV_VARS="${ENV_VARS},WEB_ORIGIN=${WEB_ORIGIN}"
           fi
@@ -234,7 +264,7 @@ jobs:
             --service-account="${RUN_SA}" \
             ${VPC_FLAGS} \
             --add-cloudsql-instances="${SQL_INSTANCE}" \
-            --set-env-vars="${ENV_VARS}" \
+            --update-env-vars="${ENV_VARS}" \
             --set-secrets="DATABASE_URL=DATABASE_URL:latest,INTERNAL_JOB_TOKEN=INTERNAL_JOB_TOKEN:latest,AUTH_SECRET=AUTH_SECRET:latest,ADMIN_MOBILES=ADMIN_MOBILES:latest,RAZORPAY_KEY_ID=RAZORPAY_KEY_ID:latest,RAZORPAY_KEY_SECRET=RAZORPAY_KEY_SECRET:latest,RAZORPAY_WEBHOOK_SECRET=RAZORPAY_WEBHOOK_SECRET:latest,WHATSAPP_VERIFY_TOKEN=WHATSAPP_VERIFY_TOKEN:latest,WHATSAPP_ACCESS_TOKEN=WHATSAPP_ACCESS_TOKEN:latest,WHATSAPP_APP_SECRET=WHATSAPP_APP_SECRET:latest,WHATSAPP_PHONE_NUMBER_ID=WHATSAPP_PHONE_NUMBER_ID:latest" \
             --memory=512Mi \
             --cpu=1 \
@@ -267,6 +297,9 @@ jobs:
         run: |
           TAG="${{ steps.meta.outputs.tag }}"
           MOCK_WHATSAPP="${{ vars.MOCK_WHATSAPP || 'false' }}"
+          APP_ENV="${{ vars.APP_ENV || 'production' }}"
+          LOG_LEVEL="${{ vars.LOG_LEVEL || 'info' }}"
+          DB_POOL_MAX="${{ vars.DB_POOL_MAX_WORKER || '2' }}"
 
           if [ "${{ vars.WORKER_PUSH_MODE }}" = "true" ]; then
             WORKER_SCALE="--min-instances=0 --cpu-throttling"
@@ -285,7 +318,7 @@ jobs:
             --service-account="${RUN_SA}" \
             ${VPC_FLAGS} \
             --add-cloudsql-instances="${SQL_INSTANCE}" \
-            --set-env-vars="NODE_ENV=production,MOCK_WHATSAPP=${MOCK_WHATSAPP},WHATSAPP_API_VERSION=v21.0,ENABLE_AUTO_CUTOFF=false,ENABLE_AUTO_EOD=false,API_INTERNAL_URL=${API_URL},WORKER_MODE=${WORKER_MODE}" \
+            --update-env-vars="NODE_ENV=production,APP_ENV=${APP_ENV},LOG_LEVEL=${LOG_LEVEL},DB_POOL_MAX=${DB_POOL_MAX},MOCK_WHATSAPP=${MOCK_WHATSAPP},WHATSAPP_API_VERSION=v21.0,ENABLE_AUTO_CUTOFF=false,ENABLE_AUTO_EOD=false,API_INTERNAL_URL=${API_URL},WORKER_MODE=${WORKER_MODE}" \
             --set-secrets="DATABASE_URL=DATABASE_URL:latest,INTERNAL_JOB_TOKEN=INTERNAL_JOB_TOKEN:latest,WHATSAPP_VERIFY_TOKEN=WHATSAPP_VERIFY_TOKEN:latest,WHATSAPP_ACCESS_TOKEN=WHATSAPP_ACCESS_TOKEN:latest,WHATSAPP_APP_SECRET=WHATSAPP_APP_SECRET:latest,WHATSAPP_PHONE_NUMBER_ID=WHATSAPP_PHONE_NUMBER_ID:latest" \
             --memory=512Mi \
             --cpu=1 \
@@ -359,5 +392,5 @@ jobs:
             echo "- Tag: \`${{ steps.meta.outputs.short }}\`"
             echo "- Mocks: payments=\`${{ vars.MOCK_PAYMENTS || 'false' }}\` whatsapp=\`${{ vars.MOCK_WHATSAPP || 'false' }}\`"
             echo ""
-            echo "Next: point Razorpay + Meta webhooks at the API URL, then set repo vars MOCK_*=false."
+            echo "Repo vars must stay MOCK_PAYMENTS=false and AUTH_ENFORCE=true (deploy fail-fast). Point Razorpay + Meta webhooks at the API URL."
           } >> "$GITHUB_STEP_SUMMARY"

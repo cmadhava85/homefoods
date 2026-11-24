@@ -15,12 +15,13 @@ Infrastructure as code for project **`home-food-513806`**. Prefer this over ad-h
 | Secrets | `DATABASE_URL`, `INTERNAL_JOB_TOKEN`, `AUTH_SECRET`, `ADMIN_MOBILES`, WhatsApp/Razorpay |
 | Runtime SA | `localmeals-run` (Cloud SQL client + secret accessor + Pub/Sub subscriber + uploads objectAdmin) |
 | Uploads bucket | `{project}-localmeals-uploads` (private; API sets `GCS_UPLOADS_BUCKET`) |
+| Status page bucket | optional (`enable_status_page`) — hosts `infra/status/index.html` |
 | Cloud Run | **api** (public) · **worker** (internal) · **web** (public) — gated by `create_cloud_run` |
-| Scheduler | `localmeals-lunch-cutoff` (08:00 IST) · `localmeals-eod` (18:00 IST) |
-| Monitoring | Email + API 5xx + Scheduler + log-based alerts (webhook sig, outbox, WA send, stuck payment, EOD fail) when `alert_email` set |
+| Scheduler | `localmeals-lunch-cutoff` · `localmeals-eod` (needs `api_url` / `web_public_api_url` / custom domain / TF API) |
+| Monitoring | Email (+ `alert_channels_extra`) · 5xx / p95 latency · uptime · Scheduler · log-based alerts · **LocalMeals ops** dashboard when `alert_email` set |
 | Optional | Custom domain mappings · GCS tfstate bucket · GitHub Actions WIF |
 
-Cloud Run / Scheduler stay **off** until images exist (`create_cloud_run=true` + image URIs).
+Cloud Run stays **off** in Terraform until `create_cloud_run=true` + image URIs. Scheduler and monitoring work with CI-deployed Run when you set `api_url` / `web_url` / `api_service_name`.
 
 **Solo cost defaults:** API/web min 0 + `cpu_idle`, worker min 1 + 5 s poll, no Pub/Sub, GCS lifecycle, Artifact cleanup, `solo_kitchen_slug`. See [docs/COST.md](../../docs/COST.md) and `scripts/cost-sleep-staging.sh`.
 
@@ -67,7 +68,7 @@ terraform apply
 
 ## Enable Cloud Run + Scheduler
 
-After images are in Artifact Registry:
+After images are in Artifact Registry (TF-managed Run):
 
 ```hcl
 create_cloud_run = true
@@ -80,11 +81,45 @@ create_scheduler   = true
 # alert_email      = "you@example.com"
 ```
 
+Or keep `create_cloud_run=false` (GitHub Actions owns Run) and still create Scheduler + alerts:
+
+```hcl
+create_cloud_run   = false
+api_url            = "https://localmeals-api-xxxxx-as.a.run.app"
+web_url            = "https://localmeals-web-xxxxx-as.a.run.app"
+api_service_name   = "localmeals-api"
+create_scheduler   = true
+alert_email        = "you@example.com"
+# alert_channels_extra = ["projects/…/notificationChannels/…"]
+```
+
 ```bash
 terraform apply
 ```
 
-Then point Razorpay + Meta webhooks at the API URL (`terraform output api_url`).
+Then point Razorpay + Meta webhooks at the API URL (`terraform output api_url` or your `api_url` tfvar).
+
+### Import existing Scheduler jobs
+
+If `localmeals-lunch-cutoff` / `localmeals-eod` (etc.) already exist in GCP, import before apply:
+
+```bash
+PROJECT_ID=home-food-513806
+REGION=asia-south1
+
+terraform import 'google_cloud_scheduler_job.lunch_cutoff[0]' \
+  "projects/${PROJECT_ID}/locations/${REGION}/jobs/localmeals-lunch-cutoff"
+terraform import 'google_cloud_scheduler_job.eod_settlement[0]' \
+  "projects/${PROJECT_ID}/locations/${REGION}/jobs/localmeals-eod"
+terraform import 'google_cloud_scheduler_job.breakfast_cutoff[0]' \
+  "projects/${PROJECT_ID}/locations/${REGION}/jobs/localmeals-breakfast-cutoff"
+terraform import 'google_cloud_scheduler_job.dinner_cutoff[0]' \
+  "projects/${PROJECT_ID}/locations/${REGION}/jobs/localmeals-dinner-cutoff"
+terraform import 'google_cloud_scheduler_job.expire_unpaid[0]' \
+  "projects/${PROJECT_ID}/locations/${REGION}/jobs/localmeals-expire-unpaid"
+```
+
+Also documented in [docs/RUNBOOK.md §3](../../docs/RUNBOOK.md#3-scheduled-jobs).
 
 ## Useful outputs
 
@@ -121,8 +156,11 @@ Grant only the ops group / deploy SA `roles/storage.objectAdmin` on that bucket.
 
 - `db_pitr_enabled` (default **true**) + `db_log_retention_days` (7) → point-in-time restore to any second in the last 7 days.
 - `db_backup_retained_count` (14) daily backups at 23:30 IST.
+- `db_max_connections` + `check.db_connection_budget` — plan fails if API/worker pools exceed 80% of max connections ([COST.md](../../docs/COST.md)).
 - `db_availability_type = "REGIONAL"` for HA failover (≈2× DB cost); `db_tier` ≥ `db-g1-small` recommended for launch (f1-micro is shared-core, no SLA, ~25 connections).
-- Restore drill: [docs/RUNBOOK.md §13](../../docs/RUNBOOK.md).
+- `log_archive_enabled` — Cloud Run logs → GCS with 180-day lifecycle ([DATA_RETENTION.md](../../docs/DATA_RETENTION.md)).
+- `backup_export_bucket` — stub for off-project weekly SQL export.
+- Restore drill: `scripts/restore-drill.sh` · [docs/RUNBOOK.md §13](../../docs/RUNBOOK.md).
 
 ## Destroy
 

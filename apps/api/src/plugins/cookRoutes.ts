@@ -7,6 +7,7 @@ import {
   listPendingCancelRequests,
   listPendingLateOrders,
 } from "../services/orders.js";
+import { createCookTicket } from "../services/admin.js";
 import {
   addCookMenuItem,
   advanceOrderKitchenStatus,
@@ -71,6 +72,7 @@ import {
   SlugParams,
   UpcomingOrdersQuery,
   WeekDiscountBody,
+  CookTicketBody,
 } from "./cookRoutes.contract.js";
 
 /** Case-insensitive meal query; unknown values fall back to LUNCH (lenient desk links). */
@@ -96,6 +98,28 @@ app.get("/cooks/:slug/reviews", async (req, reply) => {
       ...data,
       softLaunchMin: REVIEW_PUBLIC_MIN_COUNT,
     };
+  } catch (e) {
+    return sendCaughtError(reply, e);
+  }
+});
+
+app.post("/cooks/:slug/tickets", async (req, reply) => {
+  const { slug } = SlugParams.parse(req.params);
+  const body = CookTicketBody.parse(req.body ?? {});
+  try {
+    const user = assertKitchenStaff(req, slug);
+    const cook = await db.query.cookProfiles.findFirst({
+      where: (t, { eq: e }) => e(t.slugHandle, slug),
+    });
+    if (!cook) return reply.code(404).send({ error: "Kitchen not found" });
+    const ticket = await createCookTicket(db, {
+      cookId: cook.id,
+      cookMobile: user.role === "COOK" ? user.mobile : cook.mobileNumber,
+      summary: body.summary,
+      category: body.category,
+      orderPublicId: body.orderPublicId,
+    });
+    return { ok: true as const, ticketId: ticket.id, status: ticket.status, source: ticket.source };
   } catch (e) {
     return sendCaughtError(reply, e);
   }

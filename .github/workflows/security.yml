@@ -31,6 +31,25 @@ jobs:
           docker run --rm -v "$PWD:/repo" "$GITLEAKS_IMAGE" \
             git /repo --redact --no-banner --exit-code 1
 
+  # Binary Terraform plans embed full state (secrets). gitleaks cannot see inside them —
+  # fail closed if any tfplan* / *.tfplan is tracked. Mirrors scripts/security-check.mjs.
+  tfplan-guard:
+    name: Block tracked Terraform plan files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Fail if tfplan files are tracked
+        run: |
+          set -euo pipefail
+          bad="$(git ls-files | grep -E '(^|/)tfplan[^/]*$|\.tfplan$' || true)"
+          if [ -n "$bad" ]; then
+            echo "::error::Tracked Terraform plan files are forbidden (embed state/secrets):"
+            printf '%s\n' "$bad"
+            echo "Remove from git, ensure infra/terraform/.gitignore covers tfplan*, rotate secrets."
+            exit 1
+          fi
+          echo "OK — no tracked tfplan* / *.tfplan files"
+
   sbom:
     name: SBOM (CycloneDX)
     runs-on: ubuntu-latest

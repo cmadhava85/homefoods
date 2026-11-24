@@ -48,7 +48,7 @@ This document is **scope guidance**, not a PCI attestation.
 - Session revoke on logout (`auth_revocations`)
 - Upload magic-byte sniff (JPEG/PNG/WebP/GIF); concern `photoUrl` allowlisted to `/uploads/concern-…`
 - Production boot checks (`assertProductionConfig`) for secrets + `MOCK_*=false`
-- PII retention purge: `POST /internal/ops/retention` (worker daily 03:00; `PII_RETENTION_DAYS` default 90)
+- PII retention purge: `POST /internal/ops/retention` (worker daily 03:00 IST; `PII_RETENTION_DAYS` default **180** — see [DATA_RETENTION.md](./DATA_RETENTION.md))
 - Security headers on Next; CSP with per-request **nonce** (prod: no script `unsafe-inline` / `unsafe-eval`; local Next Fast Refresh still allows `unsafe-eval`)
 - `assertAuthed` **always** requires role (admin/internal never soft-open when `AUTH_ENFORCE` is off)
 - HTTP `POST /orders` (+ batch / late-request) always require CUSTOMER session; body `customerMobile` cannot spoof another account
@@ -117,7 +117,7 @@ This document is **scope guidance**, not a PCI attestation.
 - [ ] Cloud Scheduler: cut-off, EOD, and optional retention (`/internal/ops/retention`) *(deploy-time)*
 - [ ] Complete SAQ A (or successor) when taking live card volume *(business)*
 - [ ] Paid pen-test before wide launch *(business; free ZAP DAST is not a substitute)*
-- [ ] Confirm `PII_RETENTION_DAYS` matches legal / support needs *(business/legal)*
+- [ ] Confirm `PII_RETENTION_DAYS` ≥ 180 (or redaction-only) matches legal / Razorpay dispute needs *(business/legal)* — [DATA_RETENTION.md](./DATA_RETENTION.md)
 
 See also `docs/TECHNICAL_DESIGN.md` §14, `docs/ARCHITECTURE.md`, and `docs/MVP1_LAUNCH.md`.
 

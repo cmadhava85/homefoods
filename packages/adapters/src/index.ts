@@ -3,3 +3,4 @@ export * from "./whatsapp.js";
 export * from "./maps.js";
 export * from "./logistics.js";
 export * from "./ivr.js";
+export * from "./fetchWithTimeout.js";

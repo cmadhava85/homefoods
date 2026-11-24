@@ -6,7 +6,7 @@ import { assertInternalOrRoles } from "../services/internalAuth.js";
 import { runMealCutoff } from "../services/cookOps.js";
 import { runEodSettlement } from "../services/settlement.js";
 import { purgeExpiredPii, redactOldLedgerMobiles } from "../services/retention.js";
-import { holdSettlement, refundOrder, adminPauseCook } from "../services/admin.js";
+import { holdSettlement, refundOrder, adminPauseCook, logAdmin } from "../services/admin.js";
 import { expireUnpaidOrdersPastServiceDate } from "../services/orders.js";
 
 import {
@@ -20,9 +20,16 @@ import {
   RetentionBody,
 } from "./internalRoutes.contract.js";
 
+function jobActor(
+  authz: Awaited<ReturnType<typeof assertInternalOrRoles>>,
+): string | undefined {
+  if (authz.kind === "token") return authz.caller;
+  return undefined; // session → ALS / currentRequestActor
+}
+
 export async function internalRoutes(
   app: FastifyInstance,
-  opts: { db: Db,
+  opts: { db: Db;
   auth: AuthHelpers },
 ) {
   const { db, auth } = opts;
@@ -44,20 +51,43 @@ app.post("/internal/cutoffs/:mealType", async (req, reply) => {
     if (!authz.user.cookId) {
       return reply.code(403).send({ error: "Not your kitchen" });
     }
-    return runMealCutoff(db, mealType, { cookId: authz.user.cookId, force: false });
+    const result = await runMealCutoff(db, mealType, { cookId: authz.user.cookId, force: false });
+    await logAdmin(db, "RUN_CUTOFF", "meal", mealType, undefined, { force: false, cookScoped: true });
+    return result;
   }
 
-  return runMealCutoff(db, mealType, body);
+  const result = await runMealCutoff(db, mealType, body);
+  await logAdmin(
+    db,
+    "RUN_CUTOFF",
+    "meal",
+    mealType,
+    undefined,
+    { force: Boolean(body.force) },
+    jobActor(authz),
+  );
+  return result;
 });
 
 app.post("/internal/settlements/eod", async (req, reply) => {
+  let authz: Awaited<ReturnType<typeof assertInternalOrRoles>>;
   try {
-    await assertInternalOrRoles(db, req.headers, ["ADMIN"]);
+    authz = await assertInternalOrRoles(db, req.headers, ["ADMIN"]);
   } catch (e) {
     return sendCaughtError(reply, e);
   }
   const body = EodBody.parse(req.body ?? {});
-  return runEodSettlement(db, body.businessDate);
+  const result = await runEodSettlement(db, body.businessDate);
+  await logAdmin(
+    db,
+    "RUN_EOD",
+    "settlement",
+    result.businessDate ?? body.businessDate ?? "today",
+    undefined,
+    { orderCount: result.orderCount, batchCount: result.batches?.length },
+    jobActor(authz),
+  );
+  return result;
 });
 
 /** Expire stale unpaid holds + past-service-date unpaid rows. */
@@ -72,16 +102,25 @@ app.post("/internal/ops/expire-unpaid", async (req, reply) => {
 
 /** Purge expired OTP/sessions/rate buckets + old ledger PII. Scheduler or ADMIN. */
 app.post("/internal/ops/retention", async (req, reply) => {
+  let authz: Awaited<ReturnType<typeof assertInternalOrRoles>>;
   try {
-    await assertInternalOrRoles(db, req.headers, ["ADMIN"]);
+    authz = await assertInternalOrRoles(db, req.headers, ["ADMIN"]);
   } catch (e) {
     return sendCaughtError(reply, e);
   }
   const body = RetentionBody.parse(req.body ?? {});
-  if (body.mode === "redact") {
-    return redactOldLedgerMobiles(db);
-  }
-  return purgeExpiredPii(db);
+  const result =
+    body.mode === "redact" ? await redactOldLedgerMobiles(db) : await purgeExpiredPii(db);
+  await logAdmin(
+    db,
+    "RUN_RETENTION",
+    "ops",
+    body.mode ?? "purge",
+    undefined,
+    result as object,
+    jobActor(authz),
+  );
+  return result;
 });
 
 app.post("/internal/ops/holds", async (req, reply) => {

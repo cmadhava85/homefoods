@@ -1,0 +1,87 @@
+name: Incident
+description: Declare a production incident (SEV1–SEV3)
+title: "[SEV?] YYYY-MM-DD short title"
+labels: ["incident"]
+body:
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      description: See docs/INCIDENTS.md severity matrix. Use SEV1 if ordering/payments are down in a service window.
+      options:
+        - SEV1 — ordering/payments down in service window (or money/data at risk)
+        - SEV2 — notifications/settlement degraded, or outage outside service window
+        - SEV3 — cosmetic / non-blocking
+      default: 0
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: |
+        After opening, add the matching label: `sev1`, `sev2`, or `sev3`. Use `recurring` if this failure class has happened before.
+        Process: [docs/INCIDENTS.md](../../docs/INCIDENTS.md) · Playbooks: [docs/RUNBOOK.md](../../docs/RUNBOOK.md)
+  - type: input
+    id: started
+    attributes:
+      label: Started (IST and/or UTC)
+      placeholder: "2026-11-23 12:00 IST / 06:30 UTC"
+    validations:
+      required: true
+  - type: dropdown
+    id: service_window
+    attributes:
+      label: During service window?
+      options:
+        - "Yes — lunch (≈11:30–14:00 IST)"
+        - "Yes — dinner (≈20:30–22:00 IST)"
+        - "No / unclear"
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: Who is affected and what is broken (ordering, payments, WA, settlements, Admin, etc.).
+      placeholder: Customers cannot list kitchens; /kitchens and /me/* failing…
+    validations:
+      required: true
+  - type: input
+    id: commander
+    attributes:
+      label: Incident commander (primary on-call)
+      placeholder: "@handle or name"
+    validations:
+      required: true
+  - type: textarea
+    id: symptoms
+    attributes:
+      label: Symptoms / evidence
+      description: URLs, status codes, sample `requestId` / `traceId`, Cloud Run revision, log snippets (no secrets).
+      placeholder: "localmeals-api-00032; 400 column \"…\" does not exist on /kitchens"
+    validations:
+      required: true
+  - type: checkboxes
+    id: first_steps
+    attributes:
+      label: First steps done
+      options:
+        - label: Severity chosen and this issue opened
+        - label: On-call ack'd (backup paged if needed)
+        - label: Kill-switch / Admin / rollback considered (RUNBOOK §12)
+        - label: Vendor status checked if external (Razorpay / Meta / GCP / DNS)
+        - label: Customer/cook WA sent if user-visible (INCIDENTS templates)
+  - type: textarea
+    id: timeline
+    attributes:
+      label: Timeline (update as you go)
+      placeholder: |
+        HH:MM UTC — …
+    validations:
+      required: false
+  - type: textarea
+    id: resolution
+    attributes:
+      label: Resolution / next steps
+      placeholder: Mitigated how? Smoke? Refunds? Postmortem owed?
+    validations:
+      required: false

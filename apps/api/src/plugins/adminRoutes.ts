@@ -11,6 +11,7 @@ import {
   listCooks,
   listSettlementsForAdmin,
   listTickets,
+  logAdmin,
 } from "../services/admin.js";
 import { runEodSettlement } from "../services/settlement.js";
 import { getTurnoverReport } from "../services/getTurnoverReport.js";
@@ -149,7 +150,41 @@ app.post("/admin/settlements/:id/manual-pay", async (req, reply) => {
 app.post("/admin/settlements/run-eod", async (req, reply) => {
   try {
     assertAuthed(req, ["ADMIN"]);
-    return await runEodSettlement(db);
+    const result = await runEodSettlement(db);
+    await logAdmin(db, "RUN_EOD", "settlement", result.businessDate ?? "today", "admin console", {
+      orderCount: result.orderCount,
+      batchCount: result.batches?.length,
+    });
+    return result;
+  } catch (e) {
+    return sendCaughtError(reply, e);
+  }
+});
+
+/** Re-queue a parked / flag-skipped outbox row for another delivery attempt. */
+app.post("/admin/outbox/:id/retry", async (req, reply) => {
+  try {
+    assertAuthed(req, ["ADMIN"]);
+    const id = Number((req.params as { id?: string }).id);
+    if (!Number.isFinite(id)) {
+      return reply.code(400).send({ error: "Invalid outbox id" });
+    }
+    const { eq } = await import("drizzle-orm");
+    const { outbox } = await import("@localmeals/db");
+    const { logAdminAction } = await import("../services/admin.js");
+    const [row] = await db
+      .update(outbox)
+      .set({
+        processedAt: null,
+        attempts: 0,
+        lastError: null,
+        lockedUntil: null,
+      })
+      .where(eq(outbox.id, id))
+      .returning({ id: outbox.id, eventName: outbox.eventName });
+    if (!row) return reply.code(404).send({ error: "Outbox row not found" });
+    await logAdminAction(db, "OUTBOX_RETRY", "outbox", String(id), row.eventName);
+    return { ok: true, id: row.id, eventName: row.eventName };
   } catch (e) {
     return sendCaughtError(reply, e);
   }

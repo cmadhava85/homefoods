@@ -118,26 +118,42 @@ describe("httpStatusForError", () => {
     assert.equal(httpStatusForError(new Error("amount does not match")), 409);
     // "not allowed" also matches the 403 regex — CORS message is intentionally 403 today.
     assert.equal(httpStatusForError(new Error("CORS origin not allowed")), 403);
-    assert.equal(httpStatusForError(new Error("ECONNREFUSED postgres")), 500);
+    assert.equal(httpStatusForError(new Error("ECONNREFUSED postgres")), 503);
     // Idempotent-create race: a conflict the client can retry/refresh, not a server fault.
     assert.equal(httpStatusForError(new Error("duplicate key value")), 409);
-    assert.equal(httpStatusForError(new Error("violates foreign key constraint")), 500);
-    assert.equal(httpStatusForError(new Error("connection refused")), 500);
-    assert.equal(httpStatusForError(new Error("drizzle query failed")), 500);
+    assert.equal(httpStatusForError(new Error("violates foreign key constraint")), 503);
+    assert.equal(httpStatusForError(new Error("connection refused")), 503);
+    assert.equal(httpStatusForError(new Error("drizzle query failed")), 503);
     assert.equal(httpStatusForError(new Error("error.kitchenNotFound")), 404);
     assert.equal(httpStatusForError(new Error("error.customerNotFound")), 404);
     assert.equal(httpStatusForError(new Error("error.notFound")), 404);
     assert.equal(httpStatusForError(new Error("Sign in as a cook")), 401);
   });
 
+  it("maps Postgres undefined-column / missing-relation to 503", () => {
+    const undefinedCol = Object.assign(new Error('column "late_orders_enabled" does not exist'), {
+      code: "42703",
+    });
+    assert.equal(httpStatusForError(undefinedCol), 503);
+    assert.equal(publicErrorMessage(undefinedCol, "en"), t("en", "error.generic"));
+    assert.equal(
+      httpStatusForError(Object.assign(new Error("relation missing"), { code: "42P01" })),
+      503,
+    );
+  });
+
+  it("maps SyntaxError (bad upstream JSON) to 502", () => {
+    assert.equal(httpStatusForError(new SyntaxError("Unexpected token < in JSON")), 502);
+  });
+
   it("stringifies non-Error status mapping", () => {
-    assert.equal(httpStatusForError("plain failure"), 400);
-    assert.equal(httpStatusForError(null), 400);
+    assert.equal(httpStatusForError("plain failure"), 500);
+    assert.equal(httpStatusForError(null), 500);
   });
 
   it("honours statusCode on thrown objects", () => {
     assert.equal(httpStatusForError(Object.assign(new Error("x"), { statusCode: 418 })), 418);
-    assert.equal(httpStatusForError(Object.assign(new Error("x"), { statusCode: 200 })), 400);
+    assert.equal(httpStatusForError(Object.assign(new Error("x"), { statusCode: 200 })), 500);
   });
 
   it("maps Zod to 400", () => {
@@ -149,7 +165,10 @@ describe("httpStatusForError", () => {
     }
   });
 
-  it("defaults unknown errors to 400", () => {
-    assert.equal(httpStatusForError(new Error("something went sideways")), 400);
+  it("defaults unknown errors to 500 with a generic client message", () => {
+    const boom = new Error("boom");
+    assert.equal(httpStatusForError(boom), 500);
+    assert.equal(publicErrorMessage(boom, "en"), t("en", "error.generic"));
+    assert.ok(!publicErrorMessage(boom, "en").includes("boom"));
   });
 });

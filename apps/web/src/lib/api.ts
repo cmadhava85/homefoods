@@ -4,6 +4,8 @@
  * and must forward the browser Cookie header (credentials: "include" alone
  * does not attach the user's session on the server).
  */
+import { apiErrorFromResponse } from "./requestRef";
+
 const INTERNAL_API =
   process.env.API_INTERNAL_URL ??
   process.env.NEXT_PUBLIC_API_URL ??
@@ -46,8 +48,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     cache: "no-store",
   });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error ?? `API ${res.status}`);
+    throw await apiErrorFromResponse(res);
   }
   return res.json() as Promise<T>;
 }

@@ -6,6 +6,7 @@ export const LogEvent = {
   WEBHOOK_SIGNATURE_FAILED: "webhook.signature_failed",
   WEBHOOK_HANDLER_FAILED: "webhook.handler_failed",
   PAYMENT_CONFIRMING_STUCK: "payment.confirming_stuck",
+  TICKET_SLA_BREACHED: "ticket.sla_breached",
   ORDER_CREATED: "order.created",
   ORDER_PAID: "order.paid",
   ORDER_STATUS_CHANGED: "order.status_changed",
@@ -25,6 +26,8 @@ export const LogEvent = {
   REQUEST_FAILED: "request.failed",
   /** Structured HTTP access log (replaces Fastify default request logging). */
   REQUEST_COMPLETED: "request.completed",
+  /** Daily PII / ephemeral purge finished (worker → /internal/ops/retention). */
+  RETENTION_COMPLETED: "retention.completed",
 } as const;
 
 export type LogEventName = (typeof LogEvent)[keyof typeof LogEvent];

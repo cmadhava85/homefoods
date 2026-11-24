@@ -164,7 +164,7 @@ Component / page
 
 **SSR / Server Components:** `api.ts` uses `API_INTERNAL_URL` and **forwards** the request `Cookie` header so `lm_session` still authenticates.
 
-Protected soft-gates in `middleware.ts`: ops console path (`NEXT_PUBLIC_ADMIN_PATH`, default `/lm-ops-k7v2m9`), `/cook`, `/orders`, `/account`, `/family` (except `/cook/onboard`). Guessable `/admin` UI returns 404. Real authorization is always on the API.
+Protected soft-gates in `middleware.ts`: ops console path (configured via `NEXT_PUBLIC_ADMIN_PATH`), `/cook`, `/orders`, `/account`, `/family` (except `/cook/onboard`). Guessable `/admin` UI returns 404. Real authorization is always on the API.
 
 ---
 
@@ -380,7 +380,7 @@ Implemented in `plugins/internalRoutes.ts` → `cookOps` / `settlement` / `reten
 | `/login` | OTP | `/auth/*` |
 | `/cook/[slug]` | Cook desk | `/cooks/:slug/*` |
 | `/cook/onboard` | Apply | cook apply |
-| `/lm-ops-k7v2m9` (UI) | Ops | API `/admin/*` (support lookup, payouts, flags) |
+| Ops UI (`NEXT_PUBLIC_ADMIN_PATH`) | Ops | API `/admin/*` (support lookup, payouts, flags) |
 | `/wa` | WA simulator | `/webhooks/whatsapp` mock |
 
 ### 6.2 Lib / components

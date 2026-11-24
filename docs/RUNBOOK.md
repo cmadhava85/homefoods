@@ -1,7 +1,7 @@
 # LocalMeals runbook
 
 **Audience:** on-call / ops / whoever ships and keeps lunch running  
-**Companion:** [HANDBOOK.md](./HANDBOOK.md) · [PENDING.md](./PENDING.md) · [MVP1_LAUNCH.md](./MVP1_LAUNCH.md)
+**Companion:** [HANDBOOK.md](./HANDBOOK.md) · [INCIDENTS.md](./INCIDENTS.md) · [PENDING.md](./PENDING.md) · [MVP1_LAUNCH.md](./MVP1_LAUNCH.md)
 
 Use this under pressure. Prefer **feature flags** and **Admin tools** before redeploying.
 
@@ -43,24 +43,52 @@ Staging URLs (current): see [MVP1_LAUNCH.md](./MVP1_LAUNCH.md).
 
 ## 3. Scheduled jobs
 
-| Job | When (IST) | Endpoint | Header |
-|-----|------------|----------|--------|
-| Lunch cut-off | ~08:00 (align to pin) | `POST /internal/cutoffs/LUNCH` | `X-Internal-Token: $INTERNAL_JOB_TOKEN` |
+| Job | When (IST) | Endpoint | Headers |
+|-----|------------|----------|---------|
+| Lunch cut-off | ~08:00 (align to pin) | `POST /internal/cutoffs/LUNCH` | `X-Internal-Token` + `X-Job-Caller: scheduler` |
 | EOD settlement | 21:00 | `POST /internal/settlements/eod` | same |
-| Retention (optional) | daily / worker 03:00 | `POST /internal/ops/retention` | same |
+| Retention (optional) | daily / worker 03:00 | `POST /internal/ops/retention` | worker sends `X-Job-Caller: worker` |
 
-**Manual EOD (Admin):** Admin → Payouts → **Run EOD**, or `POST /admin/settlements/run-eod` as admin session.
+`X-Job-Caller` allowlist: `scheduler` | `worker` | `owner` (missing/unknown → `owner`). Audited as `RUN_EOD` / `RUN_CUTOFF` / `RUN_RETENTION` in `admin_action_log`.
+
+**Manual EOD (Admin):** Ops console → Payouts → **Run EOD**, or `POST /admin/settlements/run-eod` as admin session (audited `RUN_EOD`).
 
 **Manual cut-off / EOD (curl):**
 
 ```bash
 curl -sS -X POST "$API_URL/internal/cutoffs/LUNCH" \
-  -H "X-Internal-Token: $INTERNAL_JOB_TOKEN"
+  -H "X-Internal-Token: $INTERNAL_JOB_TOKEN" \
+  -H "X-Job-Caller: scheduler"
 curl -sS -X POST "$API_URL/internal/settlements/eod" \
-  -H "X-Internal-Token: $INTERNAL_JOB_TOKEN"
+  -H "X-Internal-Token: $INTERNAL_JOB_TOKEN" \
+  -H "X-Job-Caller: scheduler"
 ```
 
-If EOD flag is off: Admin → Features → `eod_settlement_enabled`.
+If EOD flag is off: Ops console → Features → `eod_settlement_enabled`.
+
+### Scheduler OIDC migration (preferred over plaintext token)
+
+Today Scheduler jobs send `X-Internal-Token` (Secret Manager value mirrored into job headers). Prefer **OIDC** so the token is not stored on the job:
+
+1. Create (or reuse) a Scheduler SA with `roles/run.invoker` on the API service.
+2. Update each job to `oidcToken.serviceAccountEmail` + audience = API URL (see `gcloud scheduler jobs update http … --oidc-service-account-email=…`).
+3. **API during migration:** keep accepting `X-Internal-Token`. Optionally set `INTERNAL_OIDC_STUB=true` so any `Authorization: Bearer …` is accepted as Scheduler (stub only — **not** full Google JWKS verification). Leave stub off in long-lived prod.
+4. Follow-up (not yet implemented): verify Google-signed OIDC against the run SA audience, then remove the header token from Scheduler jobs and rotate `INTERNAL_JOB_TOKEN`.
+5. Always send `X-Job-Caller: scheduler` so audits stay attributable after OIDC cut-over.
+
+**Terraform import** (jobs already created outside TF; names stay `localmeals-lunch-cutoff` / `localmeals-eod`):
+
+```bash
+cd infra/terraform
+PROJECT_ID=home-food-513806 REGION=asia-south1
+terraform import 'google_cloud_scheduler_job.lunch_cutoff[0]' \
+  "projects/${PROJECT_ID}/locations/${REGION}/jobs/localmeals-lunch-cutoff"
+terraform import 'google_cloud_scheduler_job.eod_settlement[0]' \
+  "projects/${PROJECT_ID}/locations/${REGION}/jobs/localmeals-eod"
+# Also: breakfast-cutoff, dinner-cutoff, expire-unpaid — see infra/terraform/README.md
+```
+
+With `create_cloud_run=false`, set `api_url` (or `web_public_api_url`) so Scheduler still manages these jobs.
 
 ---
 
@@ -107,6 +135,8 @@ API and worker handle `SIGTERM` (Cloud Run scale-down / new revision): the API s
 ---
 
 ## 5. Order support lookup (first tool)
+
+**Status / support page (app down):** static [`infra/status/index.html`](../infra/status/index.html) — GCS website via Terraform stub [`infra/terraform/status_bucket.tf`](../infra/terraform/status_bucket.tf) (`enable_status_page = true`). Upload with `gsutil cp infra/status/index.html gs://$PROJECT_ID-localmeals-status/index.html`; URL from `terraform output -raw status_page_url`. Toggle the incident banner in that HTML during an outage. In-app contact: `/legal/contact` (needs `NEXT_PUBLIC_LEGAL_*` / `NEXT_PUBLIC_SUPPORT_*` build args).
 
 Admin → **Orders** → paste any of:
 
@@ -254,7 +284,7 @@ After URL or secret change: update dashboard **and** Secret Manager **and** Clou
 | WA smoke | `node scripts/smoke-whatsapp.mjs` |
 | Trace one order | Cloud Logging: `jsonPayload.traceId="trc_…"` (preferred) or `publicId` — [OBSERVABILITY.md](./OBSERVABILITY.md) |
 | OTel (optional) | `OTEL_ENABLED=true` + OTLP endpoint on API + worker |
-| Alerts | 5xx, Scheduler, webhook.signature_failed, outbox.failed, whatsapp.send_failed, payment.confirming_stuck, settlement.batch_failed |
+| Alerts | 5xx, p95 latency, uptime, Scheduler, webhook.signature_failed, outbox.failed / oldest-pending, whatsapp.send_failed, payment.confirming_stuck, settlement.batch_failed, cutoff/settlement absence — see [OBSERVABILITY.md](./OBSERVABILITY.md#alerts-terraform) |
 
 ---
 
@@ -269,9 +299,62 @@ After URL or secret change: update dashboard **and** Secret Manager **and** Clou
   For HMAC-hard assert set `MOCK_PAYMENTS=false`. In-process: `apps/api/src/security.test.ts`.  
   Broader scan: `npm run security:zap` (local/CI only — never aim at prod).
 
+### Secret rotation
+
+Treat every Secret Manager value as compromised after the public `tfplan-solo-cost` leak (see [OPS_READINESS.md](./OPS_READINESS.md) P0-1). Use `scripts/rotate-secrets.sh` (project `home-food-513806`, region `asia-south1`). The script never prints secret values.
+
+Order:
+
+1. **Rotate** — run the script (all secrets, or one at a time).  
+   - `DATABASE_URL`: `gcloud sql users set-password` on `localmeals-pg` / `localmeals`, then a new SM version with the rebuilt Unix-socket URL.  
+   - `INTERNAL_JOB_TOKEN`: new SM version **and** update `X-Internal-Token` on Scheduler jobs (`localmeals-lunch-cutoff`, `breakfast-cutoff`, `dinner-cutoff`, `eod`, `expire-unpaid`).  
+   - Generated: `AUTH_SECRET`, `WHATSAPP_VERIFY_TOKEN`.  
+   - Vendor-issued (stdin/TTY): `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_APP_SECRET`.
+2. **Vendor dashboards** — Razorpay (API key + webhook secret) and Meta (access token, app secret, webhook verify token) must match SM before traffic resumes.
+3. **Redeploy** api + worker so Cloud Run mounts Secret Manager `:latest`.
+4. **Verify** — `/health` (and `/ready` when live), one Razorpay webhook delivery, WhatsApp verify challenge, Scheduler dry-run (`gcloud scheduler jobs run …`).
+5. **Disable old versions** — after soak, disable prior SM versions (`gcloud secrets versions disable …`). Do not destroy until you are sure no revision still pins an old number.
+
+```bash
+./scripts/rotate-secrets.sh                  # all (prompts for vendor secrets)
+./scripts/rotate-secrets.sh AUTH_SECRET      # one generated secret
+printf '%s' "$NEW" | ./scripts/rotate-secrets.sh RAZORPAY_WEBHOOK_SECRET --stdin
+```
+
+Leave the OPS_READINESS **P0-1** checklist box unchecked until a human has actually rotated and verified.
+
+### History purge (tfplan artifact)
+
+`infra/terraform/tfplan-solo-cost` was removed from `HEAD` but remains in git history (embeds Terraform state / secrets). **Documented only — do not force-push from an agent or casual laptop session.** Owner runs this deliberately after rotation:
+
+1. Install [git-filter-repo](https://github.com/newren/git-filter-repo) if needed.
+2. From a fresh clone (backup first):
+   ```bash
+   git filter-repo --path infra/terraform/tfplan-solo-cost --invert-paths
+   ```
+3. Force-push rewritten history to GitHub (`main` / all affected branches and tags). Coordinate downtime — this rewrites SHAs.
+4. Ask every collaborator to **re-clone** (or hard-reset to the new history). Old clones still hold the blob.
+5. Request a **GitHub Support** cache / view purge for the sensitive paths (cached blame/views can linger after rewrite).
+6. Confirm: `git log --all -- infra/terraform/tfplan-solo-cost` is empty on a new clone; secret scanning / push protection remain on.
+
+CI already fails if any tracked `tfplan*` / `*.tfplan` file reappears (`scripts/security-check.mjs` + Security workflow path check).
+
 ---
 
 ## 12. Escalation order
+
+**People, severities, vendor contacts, WA templates, postmortems:** [INCIDENTS.md](./INCIDENTS.md).  
+**Branch protection for `main`:** [INCIDENTS.md — Branch protection](./INCIDENTS.md#branch-protection-main--manual).
+
+### Declare an incident (first steps)
+
+1. Severity (SEV1 if ordering/payments down in a service window) — [matrix](./INCIDENTS.md#severity-matrix).
+2. Open a GitHub issue with the [Incident template](../.github/ISSUE_TEMPLATE/incident.yml); label `incident` + `sev1`/`sev2`/`sev3`.
+3. Ack who owns it; page backup if primary misses the ack target ([roster](./INCIDENTS.md#on-call-roster)).
+4. Stabilize with the technical order below, then vendor escalation / WA templates in INCIDENTS.md.
+5. After SEV1 (or recurring SEV2): postmortem in the [incident log](./INCIDENTS.md#incident-log) within 3 business days.
+
+### Technical escalation
 
 1. Feature flag / Admin Mark paid / pause cook  
 2. Manual Scheduler curl  
@@ -301,4 +384,10 @@ Cloud SQL keeps 14 daily backups and 7 days of transaction logs (`infra/terrafor
 5. Reconcile payments captured **after** the restore point from the Razorpay dashboard (webhook redelivery or Admin → Mark paid) — they are not in the restored DB.
 6. Import the new instance into Terraform (`terraform import`) or rename back during a maintenance window.
 
-**Drill:** run steps 2–3 against a clone once per quarter and record the time taken (target RTO < 1 h, RPO < 5 min with PITR).
+**Drill (automated):** `./scripts/restore-drill.sh` clones via PITR, waits for `RUNNABLE`, optional `psql` row counts through `cloud-sql-proxy`, prints elapsed time. Pass `--confirm` to delete the clone when finished. Target RTO &lt; 1 h, RPO &lt; 5 min with PITR. Off-project weekly export destination: Terraform `backup_export_bucket` (stub until the bucket exists).
+
+### Restore drill log
+
+| Date | Who | RTO measured | Issues |
+|------|-----|--------------|--------|
+| _yyyy-mm-dd_ | _name_ | _e.g. 18m_ | _none / notes_ |

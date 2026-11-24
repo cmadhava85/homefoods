@@ -82,6 +82,14 @@ const enValueToKey: Map<string, MsgKey> = (() => {
  * Localize an API/WA error string: message keys, known English copy, or passthrough.
  * Also sanitizes DB/driver noise.
  */
+/** Catalog key for a known API/business error string, if any. */
+export function knownErrorKey(raw: string): MsgKey | null {
+  const msg = (raw ?? "").trim();
+  if (!msg) return null;
+  if (msg in messages.en) return msg as MsgKey;
+  return enValueToKey.get(msg) ?? null;
+}
+
 export function localizeError(locale: Locale, raw: string): string {
   const msg = (raw ?? "").trim();
   if (!msg) return t(locale, "error.generic");
@@ -99,11 +107,7 @@ export function localizeError(locale: Locale, raw: string): string {
     return t(locale, "error.generic");
   }
 
-  if (msg in messages.en) {
-    return t(locale, msg as MsgKey);
-  }
-
-  const key = enValueToKey.get(msg);
+  const key = knownErrorKey(msg);
   if (key) return t(locale, key);
 
   const exists = msg.match(/^You already have a (\w+) address/i);

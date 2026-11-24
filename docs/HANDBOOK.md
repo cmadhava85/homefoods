@@ -35,10 +35,10 @@ Product locks: [PRODUCT_DECISIONS.md](./PRODUCT_DECISIONS.md).
 | **Customer** | Web storefront, WhatsApp | Browse LIVE kitchens, order (instant / late / week cart), pay UPI, track status, review after delivery |
 | **Family payer (Child Pays)** | Web `/family`, WA `Family` / `PAY` | Accept invite; pay for senior’s order |
 | **Cook** | `/cook/:slug`, WA Status | Menu (desk **or** WA `Add …`), cut-off, week discount, pickup, cook → pack → dispatch/deliver, reviews reply, payout UPI |
-| **Admin / owner** | `/lm-ops-k7v2m9` (or `NEXT_PUBLIC_ADMIN_PATH`) | Approve cooks, features flags, settlements / Mark paid, tickets, refunds/holds, analytics turnover |
+| **Admin / owner** | Ops console path configured via `NEXT_PUBLIC_ADMIN_PATH` | Approve cooks, features flags, settlements / Mark paid, tickets, refunds/holds, analytics turnover |
 | **System** | Worker + Scheduler | Outbox WA/pay jobs, lunch cut-off, EOD settlements, retention |
 
-Demo (local seed): customer `+919840111111` · cook desk `/cook/csk-homemade-delights` · ops `/lm-ops-k7v2m9` · WA sim `/wa`.
+Demo (local seed): customer `+919840111111` · cook desk `/cook/csk-homemade-delights` · ops console (`NEXT_PUBLIC_ADMIN_PATH`) · WA sim `/wa`.
 
 ---
 
