@@ -161,11 +161,11 @@
 - [ ] **P0-1** Rotate all secrets + DB password; purge plan artifact from history; review logs — *script/docs/CI gate in progress; human must rotate + purge*
 - [ ] **P0-2** Alert channels + policies + uptime checks applied and test-fired — *TF decoupling in progress; needs `alert_email` + apply*
 - [x] **P0-3** Unclassified errors → 500, logged with stack, generic message + `requestId`
-- [x] **P1-4** Schema-version boot gate (`assertSchemaCurrent` / `/ready`); pipeline-only still a manual IAM note
+- [x] **P1-4** Schema-version boot gate (`assertSchemaCurrent`); pipeline-only still a manual IAM note
 - [ ] **P1-5** `next build` in CI; repo vars aligned with live; single env source
-- [x] **P1-6** `/ready` probe (API + worker); uptime TF + deploy probes still need apply
-- [x] **P1-7** Outbox backlog / parked logs, Admin retry, job `res.ok`, IST clock, push-mode guard
-- [x] **P1-8** Third-party timeouts + retries (`fetchWithTimeout`)
+- [x] **P1-6** `/ready` on API + worker; deploy startup/liveness probes; uptime TF path `/ready` (needs `terraform apply`); smoke asserts `/ready`
+- [x] **P1-7** Outbox backlog / parked logs, Admin retry (+ wake), job `res.ok`, IST clock
+- [x] **P1-8** Third-party timeouts + retries (`fetchWithTimeout`); Meta error codes preserved for park
 - [ ] **P1-9** Real contact/grievance page, static status page, request refs, ticket alerts + SLA, cook channel
 - [ ] **P1-10** On-call + backup, severities, contacts, comms templates, postmortems, branch protection
 - [ ] **P2-11** DB tier + connection budget + cloud load test

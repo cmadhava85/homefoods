@@ -1314,6 +1314,10 @@ export async function listCookDailyMenu(
   };
 }
 
+function normalizePortionNote(raw: string | null | undefined): string | null {
+  return raw?.trim().slice(0, 120) || null;
+}
+
 /** Publish a plate for a specific date and/or weekly weekday template. */
 export async function addCookMenuItem(
   db: Db,
@@ -1325,6 +1329,7 @@ export async function addCookMenuItem(
     priceRupees?: number;
     pricePaise?: number;
     isVeg?: boolean;
+    portionNote?: string | null;
     allergens?: string[];
     totalStockAvailable?: number;
     /** Specific calendar day (YYYY-MM-DD). Omit when posting weekly-only. */
@@ -1341,6 +1346,7 @@ export async function addCookMenuItem(
   const itemName = input.itemName.trim();
   if (!itemName) throw new Error("itemName is required");
   const itemNameTa = input.itemNameTa?.trim() || null;
+  const portionNote = normalizePortionNote(input.portionNote);
 
   const pricePaise =
     input.pricePaise ??
@@ -1375,6 +1381,7 @@ export async function addCookMenuItem(
       itemNameTa,
       pricePaise,
       isVeg: input.isVeg ?? true,
+      portionNote,
       allergens: input.allergens ?? [],
       serviceDate,
       dayOfWeek,
@@ -1392,6 +1399,7 @@ export async function addCookMenuItem(
       itemNameTa,
       pricePaise,
       isVeg: input.isVeg ?? true,
+      portionNote,
       imageUrl: input.imageUrl ?? null,
       mealType,
     });
@@ -1438,6 +1446,7 @@ export async function updateCookMenuItem(
     priceRupees?: number;
     pricePaise?: number;
     isVeg?: boolean;
+    portionNote?: string | null;
     allergens?: string[];
     totalStockAvailable?: number;
     isAvailable?: boolean;
@@ -1465,6 +1474,9 @@ export async function updateCookMenuItem(
         : {}),
       ...(pricePaise != null ? { pricePaise } : {}),
       ...(patch.isVeg != null ? { isVeg: patch.isVeg } : {}),
+      ...(patch.portionNote !== undefined
+        ? { portionNote: normalizePortionNote(patch.portionNote) }
+        : {}),
       ...(patch.allergens != null ? { allergens: patch.allergens } : {}),
       ...(patch.totalStockAvailable != null
         ? { totalStockAvailable: patch.totalStockAvailable }
@@ -1506,11 +1518,13 @@ async function upsertCookSavedPlate(
     itemNameTa?: string | null;
     pricePaise: number;
     isVeg?: boolean;
+    portionNote?: string | null;
     imageUrl?: string | null;
     mealType?: MealPeriod;
   },
 ) {
   const itemName = plate.itemName.trim();
+  const portionNote = normalizePortionNote(plate.portionNote);
   const mealType = plate.mealType ?? "LUNCH";
   const existing = await db.query.cookSavedPlates.findFirst({
     where: (t, { eq: e, and: a }) =>
@@ -1523,6 +1537,7 @@ async function upsertCookSavedPlate(
         itemNameTa: plate.itemNameTa?.trim() || null,
         pricePaise: plate.pricePaise,
         isVeg: plate.isVeg ?? true,
+        portionNote,
         imageUrl: plate.imageUrl ?? null,
         updatedAt: new Date(),
       })
@@ -1538,6 +1553,7 @@ async function upsertCookSavedPlate(
       itemNameTa: plate.itemNameTa?.trim() || null,
       pricePaise: plate.pricePaise,
       isVeg: plate.isVeg ?? true,
+      portionNote,
       imageUrl: plate.imageUrl ?? null,
       mealType,
     })
@@ -1564,6 +1580,7 @@ export async function listCookSavedPlates(
       itemNameTa: r.itemNameTa,
       pricePaise: r.pricePaise,
       isVeg: r.isVeg,
+      portionNote: r.portionNote,
       imageUrl: r.imageUrl,
       mealType: r.mealType,
       updatedAt: r.updatedAt,
@@ -1580,6 +1597,7 @@ export async function saveCookSavedPlate(
     priceRupees?: number;
     pricePaise?: number;
     isVeg?: boolean;
+    portionNote?: string | null;
     imageUrl?: string | null;
     mealType?: MealPeriod;
     /** Copy fields from an existing live menu row. */
@@ -1593,6 +1611,7 @@ export async function saveCookSavedPlate(
     input.pricePaise ??
     (input.priceRupees != null ? Math.round(Number(input.priceRupees) * 100) : undefined);
   let isVeg = input.isVeg ?? true;
+  let portionNote = input.portionNote ?? null;
   let imageUrl = input.imageUrl ?? null;
   let mealType: MealPeriod = input.mealType ?? "LUNCH";
 
@@ -1605,6 +1624,7 @@ export async function saveCookSavedPlate(
     itemNameTa = menu.itemNameTa;
     pricePaise = menu.pricePaise;
     isVeg = menu.isVeg;
+    portionNote = menu.portionNote;
     imageUrl = menu.imageUrl;
     mealType = (menu.mealType as MealPeriod) || "LUNCH";
   }
@@ -1619,6 +1639,7 @@ export async function saveCookSavedPlate(
     itemNameTa,
     pricePaise,
     isVeg,
+    portionNote,
     imageUrl,
     mealType,
   });
@@ -1669,6 +1690,7 @@ export async function postCookSavedPlate(
     itemNameTa: saved.itemNameTa,
     pricePaise: saved.pricePaise,
     isVeg: saved.isVeg,
+    portionNote: saved.portionNote,
     imageUrl: saved.imageUrl,
     mealType: saved.mealType as MealPeriod,
     serviceDate,

@@ -266,65 +266,76 @@ export async function drainOutboxOnce(
         const payUrl = str(payload.paymentUrl);
         const pid = str(payload.publicId);
         const checkoutId = str(payload.checkoutId);
+        const channel = str(payload.channel) || "WEB_STOREFRONT";
         const lines = Array.isArray(payload.lines) ? payload.lines : null;
         const amountPaise = Number(payload.amountPaise ?? 0);
         const amountLabel = amountPaise > 0 ? `₹${(amountPaise / 100).toFixed(0)}` : null;
         const childPays = Boolean(payload.childPays);
         const payerMobile = str(payload.payerMobile);
+        // Web checkout already opens the pay screen — don't spam a pay link.
+        // WhatsApp-originated orders still need the link in chat.
+        // Child-pays: tell the senior who's paying (payer gets ChildPaysRequested separately).
+        const sendPayLink = channel === "WHATSAPP_BOT" && !childPays;
+        const sendSeniorWaiting = childPays;
 
-        let body: string;
-        const holdNote =
-          "Your plate is reserved for 20 minutes. Pay now to confirm — if payment isn’t completed, this hold cancels automatically (no charge).";
-        if (childPays) {
-          body = [
-            `⏳ Waiting for payment · ${kitchen}`,
-            checkoutId || pid,
-            amountLabel ? `Total ${amountLabel}` : null,
-            payerMobile
-              ? `Family ${payerMobile} needs to complete UPI.`
-              : "A family member needs to complete UPI.",
-            "",
-            "Reserved for 20 minutes. If they don’t pay in time, this hold cancels automatically (no charge).",
-          ]
-            .filter(Boolean)
-            .join("\n");
-        } else if (lines && lines.length) {
-          const dayLines = lines
-            .map((l) => {
-              const row = l as Record<string, unknown>;
-              return `· ${str(row.serviceDate)} · ${row.qty ?? 1}× ${str(row.itemName) || "plate"}`;
-            })
-            .join("\n");
-          body = [
-            `⏳ Pay to confirm · ${kitchen}`,
-            checkoutId || pid,
-            dayLines,
-            amountLabel ? `Total ${amountLabel}` : null,
-            payUrl ? `Pay here: ${payUrl}` : "Reply Pay to open UPI.",
-            "",
-            holdNote,
-          ]
-            .filter(Boolean)
-            .join("\n");
-        } else {
-          body = [
-            `⏳ Pay to confirm · ${kitchen}`,
-            `${pid} · ${payload.qty ?? 1}× ${str(payload.itemName) || "plate"}`,
-            payload.serviceDate ? `For ${str(payload.serviceDate)}` : null,
-            amountLabel ? `Amount ${amountLabel}` : null,
-            payUrl ? `Pay here: ${payUrl}` : "Reply Pay to open UPI.",
-            "",
-            holdNote,
-          ]
-            .filter(Boolean)
-            .join("\n");
-        }
+        if (!sendPayLink && !sendSeniorWaiting) {
+          logger.info(
+            { event: LogEvent.OUTBOX_SKIPPED, reason: "in_app_checkout", channel },
+            "OrderCreated WA skipped — customer pays in app; notify on paid/failed",
+          );
+        } else if (customerMobile.length > 5) {
+          let body: string;
+          const holdNote =
+            "Reserved for 20 minutes. Pay now to confirm — if payment isn’t completed, this hold cancels automatically (no charge).";
+          if (sendSeniorWaiting) {
+            body = [
+              `⏳ Waiting for payment · ${kitchen}`,
+              checkoutId || pid,
+              amountLabel ? `Total ${amountLabel}` : null,
+              payerMobile
+                ? `Family ${payerMobile} needs to complete UPI.`
+                : "A family member needs to complete UPI.",
+              "",
+              "Reserved for 20 minutes. If they don’t pay in time, this hold cancels automatically (no charge).",
+            ]
+              .filter(Boolean)
+              .join("\n");
+          } else if (lines && lines.length) {
+            const dayLines = lines
+              .map((l) => {
+                const line = l as Record<string, unknown>;
+                return `· ${str(line.serviceDate)} · ${line.qty ?? 1}× ${str(line.itemName) || "item"}`;
+              })
+              .join("\n");
+            body = [
+              `⏳ Pay to confirm · ${kitchen}`,
+              checkoutId || pid,
+              dayLines,
+              amountLabel ? `Total ${amountLabel}` : null,
+              payUrl ? `Pay here: ${payUrl}` : "Reply Pay to open UPI.",
+              "",
+              holdNote,
+            ]
+              .filter(Boolean)
+              .join("\n");
+          } else {
+            body = [
+              `⏳ Pay to confirm · ${kitchen}`,
+              `${pid} · ${payload.qty ?? 1}× ${str(payload.itemName) || "item"}`,
+              payload.serviceDate ? `For ${str(payload.serviceDate)}` : null,
+              amountLabel ? `Amount ${amountLabel}` : null,
+              payUrl ? `Pay here: ${payUrl}` : "Reply Pay to open UPI.",
+              "",
+              holdNote,
+            ]
+              .filter(Boolean)
+              .join("\n");
+          }
 
-        if (customerMobile.length > 5) {
           await sendWa(logger, wa, {
             to: customerMobile,
             body,
-            buttons: childPays
+            buttons: sendSeniorWaiting
               ? ["Orders", "Menu"].slice(0, 3)
               : pid
                 ? [`Pay ${pid}`, "Orders", "Menu"].slice(0, 3)
@@ -684,15 +695,25 @@ export async function drainOutboxOnce(
 
       if (row.eventName === "OrderPaymentFailed") {
         const customerMobile = str(payload.customerMobile);
+        const pid = str(payload.publicId);
+        const checkoutId = str(payload.checkoutId);
+        const payUrl = str(payload.paymentUrl);
+        const payRef = checkoutId || pid;
         if (customerMobile.length > 5) {
           await sendWa(logger, wa, {
             to: customerMobile,
             body: [
-              `⚠️ Payment failed · ${str(payload.publicId)}`,
-              "No money was taken. Reply Pay to try again, or Orders.",
-            ].join("\n"),
-            buttons: ["Pay", "Orders"],
+              `⚠️ Payment failed · ${payRef || "order"}`,
+              "No money was taken.",
+              payUrl ? `Pay here: ${payUrl}` : "Reply Pay to try again, or open Orders.",
+            ]
+              .filter(Boolean)
+              .join("\n"),
+            buttons: payRef
+              ? [`Pay ${payRef}`, "Orders"].slice(0, 3)
+              : ["Pay", "Orders"],
           });
+          logger.info({ event: LogEvent.OUTBOX_PROCESSED, channel: "whatsapp", toRole: "customer" }, "OrderPaymentFailed notified");
         }
       }
 

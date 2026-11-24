@@ -399,3 +399,42 @@ describe("isNonRetryableWhatsAppError", () => {
     assert.equal(isNonRetryableWhatsAppError(new Error("timeout")), false);
   });
 });
+
+describe("MetaWhatsAppProvider HTTP errors", () => {
+  it("preserves (#131030) from 400 body so outbox can park", async () => {
+    const prev = {
+      MOCK_WHATSAPP: process.env.MOCK_WHATSAPP,
+      WHATSAPP_PHONE_NUMBER_ID: process.env.WHATSAPP_PHONE_NUMBER_ID,
+      WHATSAPP_ACCESS_TOKEN: process.env.WHATSAPP_ACCESS_TOKEN,
+      fetch: globalThis.fetch,
+    };
+    process.env.MOCK_WHATSAPP = "false";
+    process.env.WHATSAPP_PHONE_NUMBER_ID = "123456";
+    process.env.WHATSAPP_ACCESS_TOKEN = "EAAB…";
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          error: { message: "Recipient phone number not in allowed list", code: 131030 },
+        }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      )) as typeof fetch;
+    try {
+      const provider = new MetaWhatsAppProvider();
+      await assert.rejects(
+        () => provider.send({ to: "+919900000001", body: "hi" }),
+        (err: unknown) =>
+          err instanceof Error &&
+          isNonRetryableWhatsAppError(err) &&
+          /#131030\b/.test(err.message),
+      );
+    } finally {
+      if (prev.MOCK_WHATSAPP === undefined) delete process.env.MOCK_WHATSAPP;
+      else process.env.MOCK_WHATSAPP = prev.MOCK_WHATSAPP;
+      if (prev.WHATSAPP_PHONE_NUMBER_ID === undefined) delete process.env.WHATSAPP_PHONE_NUMBER_ID;
+      else process.env.WHATSAPP_PHONE_NUMBER_ID = prev.WHATSAPP_PHONE_NUMBER_ID;
+      if (prev.WHATSAPP_ACCESS_TOKEN === undefined) delete process.env.WHATSAPP_ACCESS_TOKEN;
+      else process.env.WHATSAPP_ACCESS_TOKEN = prev.WHATSAPP_ACCESS_TOKEN;
+      globalThis.fetch = prev.fetch;
+    }
+  });
+});

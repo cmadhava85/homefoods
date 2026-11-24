@@ -145,6 +145,7 @@ function CookDeskInner() {
   const [itemNameTa, setItemNameTa] = useState("");
   const [priceRupees, setPriceRupees] = useState("80");
   const [isVeg, setIsVeg] = useState(true);
+  const [portionNote, setPortionNote] = useState("");
   const [targetDate, setTargetDate] = useState("");
   const [dayOfWeek, setDayOfWeek] = useState(1);
   const [postMode, setPostMode] = useState<"date" | "weekly">("date");
@@ -159,6 +160,7 @@ function CookDeskInner() {
       itemNameTa: string | null;
       pricePaise: number;
       isVeg: boolean;
+      portionNote?: string | null;
       imageUrl: string | null;
     }>
   >([]);
@@ -831,6 +833,7 @@ function CookDeskInner() {
               itemNameTa: itemNameTa.trim() || null,
               priceRupees: Number(priceRupees),
               isVeg,
+              portionNote: portionNote.trim() || null,
               weekly: true,
               dayOfWeek: weeklyDow,
               serviceDate: null,
@@ -843,6 +846,7 @@ function CookDeskInner() {
               itemNameTa: itemNameTa.trim() || null,
               priceRupees: Number(priceRupees),
               isVeg,
+              portionNote: portionNote.trim() || null,
               serviceDate: iso || undefined,
               imageUrl,
               mealType,
@@ -856,6 +860,7 @@ function CookDeskInner() {
       if (!res.ok) throw new Error(json.error ?? "Could not add menu item");
       setItemName("");
       setItemNameTa("");
+      setPortionNote("");
       setPhotoFile(null);
       setMsg(
         postMode === "weekly"
@@ -1011,6 +1016,7 @@ function CookDeskInner() {
             {m.isVeg ? t("cook.veg") : t("common.nonVeg")}
             {weekly ? ` · ${t("cook.everyDay", { day: dayLabels[m.dayOfWeek!] })}` : ""}
           </p>
+          {m.portionNote ? <p className="cook-plate-sub muted">{m.portionNote}</p> : null}
           <div className="cook-plate-actions">
             <label className={`cook-plate-link${photoBusyId === m.id ? " is-busy" : ""}`}>
               {photoBusyId === m.id ? t("cook.sending") : t("cook.photo")}
@@ -1548,6 +1554,7 @@ function CookDeskInner() {
                     <span className="muted">
                       ₹{(p.pricePaise / 100).toFixed(0)}
                       {p.isVeg ? ` · ${t("cook.veg")}` : ""}
+                      {p.portionNote ? ` · ${p.portionNote}` : ""}
                     </span>
                   </div>
                   <div className="cook-saved-actions">
@@ -1680,6 +1687,17 @@ function CookDeskInner() {
                 type="text"
                 value={itemNameTa}
                 onChange={(e) => setItemNameTa(e.target.value)}
+                autoComplete="off"
+              />
+            </label>
+            <label className="cook-add-field">
+              <span>{t("cook.portionNote")}</span>
+              <input
+                type="text"
+                value={portionNote}
+                maxLength={120}
+                placeholder={t("cook.portionNotePlaceholder")}
+                onChange={(e) => setPortionNote(e.target.value)}
                 autoComplete="off"
               />
             </label>

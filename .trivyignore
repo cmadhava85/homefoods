@@ -4,7 +4,8 @@
 # Planned fix: private IP via private service access, then ipv4_enabled = false (infra/terraform/sql.tf).
 GCP-0017 exp:2027-01-31
 
-# Menu photo CDN bucket: intentional allUsers objectViewer on a dedicated public-only bucket
-# (no concern/PII uploads). Concern photos stay in the private uploads bucket.
-# See infra/terraform/menu_images_bucket.tf and docs/COST.md.
+# Intentional public objectViewer (reviewed):
+#   - infra/terraform/menu_images_bucket.tf — menu photo CDN (no PII)
+#   - infra/terraform/status_bucket.tf — static status page when enable_status_page=true
+# Also marked with #trivy:ignore on those resources. Re-review before adding other allUsers.
 GCP-0001 exp:2027-01-31

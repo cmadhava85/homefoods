@@ -22,7 +22,7 @@ locals {
   )
   uptime_targets = merge(
     local.api_uptime_host != "" ? {
-      api = { host = local.api_uptime_host, path = "/health" }
+      api = { host = local.api_uptime_host, path = "/ready" }
     } : {},
     local.web_uptime_host != "" ? {
       web = { host = local.web_uptime_host, path = "/" }
@@ -87,7 +87,7 @@ resource "google_monitoring_alert_policy" "uptime" {
   }
 
   documentation {
-    content   = "${title(each.key)} uptime check failing. See [RUNBOOK §6.A Nobody can order](${local.runbook_base}#a-nobody-can-order)."
+    content   = "${title(each.key)} uptime check failing (API probes /ready). See [RUNBOOK §6.A Nobody can order](${local.runbook_base}#a-nobody-can-order)."
     mime_type = "text/markdown"
   }
 

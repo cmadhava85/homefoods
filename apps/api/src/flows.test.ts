@@ -58,6 +58,17 @@ describe("MVP-1 API flows", () => {
     assert.equal(res.json().ok, true);
   });
 
+  it("GET /ready is 200 when DB and schema are current", async () => {
+    const res = await app.inject({ method: "GET", url: "/ready" });
+    assert.equal(res.statusCode, 200, res.body);
+    const body = res.json();
+    assert.equal(body.ok, true);
+    assert.equal(body.db, true);
+    assert.equal(body.schema.ok, true);
+    assert.ok(typeof body.schema.expected === "number");
+    assert.ok(typeof body.outbox.pending === "number");
+  });
+
   it("GET kitchen menu includes lunchCutoff", async () => {
     const res = await app.inject({ method: "GET", url: "/kitchens/csk-homemade-delights/menu" });
     assert.equal(res.statusCode, 200);

@@ -21,9 +21,9 @@ describe("parseLocale", () => {
 describe("t", () => {
   it("interpolates and falls back", () => {
     assert.match(t("en", "pay.mockCta", { amount: "120" }), /₹120/);
-    // Everyday Tamil keeps common EN product words (Account, Orders, Login…).
-    assert.equal(t("ta", "nav.account"), "Account");
-    assert.match(t("ta", "home.tagline"), /lunch/);
+    // Tamil uses real Tamil words, not English in Latin or Tamil script.
+    assert.equal(t("ta", "nav.account"), "கணக்கு");
+    assert.match(t("ta", "home.tagline"), /மதிய உணவு/);
   });
 });
 

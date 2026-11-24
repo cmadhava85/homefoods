@@ -1545,11 +1545,13 @@ export async function createOrder(
     });
 
     // Fully credit-paid: no pay prompt — markOrderPaid below sends OrderPaid.
+    // WEB: customer is already on the pay screen — no WA until paid / failed (see drainOutbox).
     if (order.paymentMethod !== "CREDIT") await enqueueOutbox(tx, "OrderCreated", {
       orderId: order.id,
       publicId: order.publicId,
       traceId,
       checkoutId: null,
+      channel,
       cookId: cook.id,
       cookSlug: cook.slugHandle,
       kitchenName: cook.kitchenName,
@@ -2470,6 +2472,7 @@ export async function createOrderBatch(
     if (chargeMethod !== "CREDIT") await enqueueOutbox(tx, "OrderCreated", {
         checkoutId,
         traceId,
+        channel,
         orderIds: created.map((o) => o.id),
         publicIds: created.map((o) => o.publicId),
         cookId: cook.id,

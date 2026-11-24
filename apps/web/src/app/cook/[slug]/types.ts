@@ -86,6 +86,7 @@ export type MenuItem = {
   itemNameTa?: string | null;
   pricePaise: number;
   isVeg: boolean;
+  portionNote?: string | null;
   isAvailable: boolean;
   allergens: string[];
   serviceDate: string | null;

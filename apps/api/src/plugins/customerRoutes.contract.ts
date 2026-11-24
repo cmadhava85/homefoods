@@ -272,6 +272,7 @@ const MenuItem = z
     pricePaise: Paise,
     itemType: z.enum(["HOT_MEAL", "DRY_PANTRY"]),
     isVeg: z.boolean(),
+    portionNote: Text(120).nullable().describe("Plate contents / portion size"),
     allergens: z.array(Text(100)).max(50),
     dayOfWeek: z.number().int().min(0).max(6).nullable(),
     serviceDate: IsoDate.nullable(),

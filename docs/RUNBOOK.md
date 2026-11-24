@@ -115,6 +115,24 @@ The pipeline does, in order (a failed step stops the deploy; earlier revisions k
 
 Manual migration (if ever needed): `gcloud run jobs execute localmeals-migrate --region=$REGION --wait`.
 
+### Sticky Cloud Run env
+
+Deploy uses `--update-env-vars` (merge) so ops-set keys are not wiped. Each API deploy also `--remove-env-vars` for known one-offs:
+
+| Key | Why remove |
+|-----|------------|
+| `INTERNAL_OIDC_STUB` | Accepts any Bearer as Scheduler — never leave on in prod |
+| `ALLOW_SCHEMA_BEHIND` | Disables schema boot gate — lunch-outage class |
+
+To clear something else after a firefight:
+
+```bash
+gcloud run services update localmeals-api --region=$REGION \
+  --remove-env-vars=INTERNAL_OIDC_STUB,ALLOW_SCHEMA_BEHIND
+```
+
+Prefer fixing via the next Deploy Cloud Run run rather than leaving temporary keys.
+
 ### Rollback
 
 1. **Soft:** flip `ordering_enabled` off (stop new pain).  

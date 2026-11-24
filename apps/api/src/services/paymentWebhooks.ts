@@ -17,7 +17,7 @@ import {
 import { enqueueOutbox } from "./outboxEnqueue.js";
 import { assertTransition, lineTotalPaise, type OrderState } from "@localmeals/domain";
 import type { GatewayWebhookEvent } from "@localmeals/adapters";
-import { markOrderPaid } from "./orders.js";
+import { markOrderPaid, resolveCustomerPaymentUrl } from "./orders.js";
 
 const payLog = createServiceLogger("localmeals-api");
 
@@ -130,10 +130,18 @@ async function markPaymentFailed(db: Db, event: GatewayWebhookEvent) {
         .update(payments)
         .set({ status: "FAILED", rawPayload: event.raw as object })
         .where(and(eq(payments.orderId, order.id), eq(payments.kind, "CHARGE")));
+      const paymentUrl = await resolveCustomerPaymentUrl(tx as never, {
+        orderId: order.id,
+        publicId: order.publicId,
+        gatewayTxnId: order.gatewayTxnId,
+        checkoutId: order.checkoutId,
+      });
       await enqueueOutbox(tx, "OrderPaymentFailed", {
         orderId: order.id,
         publicId: order.publicId,
+        checkoutId: order.checkoutId,
         customerMobile: order.customerMobile,
+        paymentUrl: paymentUrl ?? null,
         reason: event.event,
       });
       updated.push(row);

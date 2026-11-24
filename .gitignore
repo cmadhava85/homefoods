@@ -9,6 +9,8 @@ coverage
 .DS_Store
 apps/api/uploads
 !apps/api/uploads/.gitkeep
+apps/api/.scratch-agent/
+**/.scratch-agent/
 /test-results/
 /playwright-report/
 /blob-report/

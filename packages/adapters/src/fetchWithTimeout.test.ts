@@ -48,6 +48,29 @@ describe("fetchWithTimeout", () => {
     }
   });
 
+  it("attaches response body on HTTP errors so callers can read provider codes", async () => {
+    const prev = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          error: { message: "Recipient phone number not in allowed list", code: 131030 },
+        }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      )) as typeof fetch;
+    try {
+      await assert.rejects(
+        () =>
+          fetchWithTimeout("https://example.test/messages", {}, { timeoutMs: 1000, provider: "whatsapp" }),
+        (err: unknown) =>
+          err instanceof UpstreamHttpError &&
+          err.upstreamStatus === 400 &&
+          (err.bodyJson as { error?: { code?: number } })?.error?.code === 131030,
+      );
+    } finally {
+      globalThis.fetch = prev;
+    }
+  });
+
   it("retries transient failures only when retryOnTransient is set", async () => {
     const prev = globalThis.fetch;
     let calls = 0;

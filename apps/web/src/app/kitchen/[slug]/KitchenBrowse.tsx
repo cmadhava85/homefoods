@@ -39,6 +39,7 @@ type MenuItem = {
   itemNameTa?: string | null;
   pricePaise: number;
   isVeg: boolean;
+  portionNote?: string | null;
   allergens?: string[] | null;
   imageUrl?: string | null;
   serviceDate?: string | null;
@@ -147,6 +148,8 @@ export function KitchenBrowse({
   const [availableMeals, setAvailableMeals] = useState<
     Array<{ mealType: MealType; mealLabel: string; openDayCount: number }>
   >([]);
+  /** False until /meals returns — never flash Breakfast/Dinner while loading. */
+  const [mealsLoaded, setMealsLoaded] = useState(false);
   const [data, setData] = useState<WeekPayload | null>(() =>
     initialWeek && mealType === "LUNCH" ? initialWeek : null,
   );
@@ -185,22 +188,35 @@ export function KitchenBrowse({
 
   useEffect(() => {
     let cancelled = false;
+    setMealsLoaded(false);
     fetch(`${API_BASE}/kitchens/${slug}/meals?days=7`)
       .then(async (res) => {
         const json = await res.json();
-        if (!res.ok || cancelled) return;
+        if (cancelled) return;
+        if (!res.ok) {
+          setAvailableMeals([]);
+          setMealsLoaded(true);
+          return;
+        }
         const meals = (json.meals as Array<{
           mealType: MealType;
           mealLabel: string;
           openDayCount: number;
         }>) ?? [];
+        // Only meals the kitchen actually offers with something to order this week.
         setAvailableMeals(meals);
+        setMealsLoaded(true);
         if (meals.length && !meals.some((m) => m.mealType === mealType)) {
           setMealType(meals[0].mealType);
+        } else if (!meals.length) {
+          setMealType("LUNCH");
         }
       })
       .catch(() => {
-        if (!cancelled) setAvailableMeals([]);
+        if (!cancelled) {
+          setAvailableMeals([]);
+          setMealsLoaded(true);
+        }
       });
     return () => {
       cancelled = true;
@@ -757,26 +773,38 @@ export function KitchenBrowse({
       </header>
 
       <div className="kitchen-sticky-tools">
-        <div className="seg meal-seg" role="tablist" aria-label="Meal type">
-          {(availableMeals.length
-            ? availableMeals.map((m) => ({
-                id: m.mealType,
-                label: `${m.mealLabel}${m.openDayCount ? ` · ${m.openDayCount}d` : ""}`,
-              }))
-            : MEALS
-          ).map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              role="tab"
-              aria-selected={mealType === m.id}
-              className={mealType === m.id ? "on" : ""}
-              onClick={() => setMealType(m.id)}
-            >
-              {m.label}
-            </button>
-          ))}
-        </div>
+        {(() => {
+          // Never fall back to Breakfast/Lunch/Dinner — that showed empty tabs for lunch-only kitchens.
+          const tabs = mealsLoaded
+            ? availableMeals.length
+              ? availableMeals.map((m) => ({
+                  id: m.mealType,
+                  label:
+                    availableMeals.length > 1 && m.openDayCount
+                      ? `${m.mealLabel} · ${m.openDayCount}d`
+                      : m.mealLabel,
+                }))
+              : [{ id: "LUNCH" as MealType, label: t("meal.lunch") }]
+            : [{ id: "LUNCH" as MealType, label: t("meal.lunch") }];
+          // One meal only → no tab strip (lunch-only kitchens shouldn't look like a 3-slot product).
+          if (tabs.length <= 1) return null;
+          return (
+            <div className="seg meal-seg" role="tablist" aria-label={t("kitchen.mealTabs")}>
+              {tabs.map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={mealType === m.id}
+                  className={mealType === m.id ? "on" : ""}
+                  onClick={() => setMealType(m.id)}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          );
+        })()}
         {againMode ? (
           <p className="muted kitchen-reorder-hint" style={{ margin: "0.35rem 0 0.5rem" }}>
             {t("kitchen.reorderHint")}
@@ -920,6 +948,9 @@ export function KitchenBrowse({
                               ? ` · ${t("kitchen.allergens")}: ${m.allergens.join(", ")}`
                               : ""}
                           </p>
+                          {m.portionNote ? (
+                            <p className="plate-portion">{m.portionNote}</p>
+                          ) : null}
                         </div>
                         <strong className="plate-price">₹{(m.pricePaise / 100).toFixed(0)}</strong>
                       </div>

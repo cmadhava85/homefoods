@@ -11907,6 +11907,11 @@
                               "isVeg": {
                                 "type": "boolean"
                               },
+                              "portionNote": {
+                                "type": "string",
+                                "maxLength": 120,
+                                "nullable": true
+                              },
                               "allergens": {
                                 "type": "array",
                                 "items": {
@@ -11962,6 +11967,7 @@
                               "pricePaise",
                               "itemType",
                               "isVeg",
+                              "portionNote",
                               "allergens",
                               "dayOfWeek",
                               "serviceDate",
@@ -12017,6 +12023,11 @@
                               "isVeg": {
                                 "type": "boolean"
                               },
+                              "portionNote": {
+                                "type": "string",
+                                "maxLength": 120,
+                                "nullable": true
+                              },
                               "allergens": {
                                 "type": "array",
                                 "items": {
@@ -12072,6 +12083,7 @@
                               "pricePaise",
                               "itemType",
                               "isVeg",
+                              "portionNote",
                               "allergens",
                               "dayOfWeek",
                               "serviceDate",
@@ -12198,6 +12210,11 @@
                               "isVeg": {
                                 "type": "boolean"
                               },
+                              "portionNote": {
+                                "type": "string",
+                                "maxLength": 120,
+                                "nullable": true
+                              },
                               "allergens": {
                                 "type": "array",
                                 "items": {
@@ -12253,6 +12270,7 @@
                               "pricePaise",
                               "itemType",
                               "isVeg",
+                              "portionNote",
                               "allergens",
                               "dayOfWeek",
                               "serviceDate",
@@ -12311,6 +12329,11 @@
                                   "isVeg": {
                                     "type": "boolean"
                                   },
+                                  "portionNote": {
+                                    "type": "string",
+                                    "maxLength": 120,
+                                    "nullable": true
+                                  },
                                   "allergens": {
                                     "type": "array",
                                     "items": {
@@ -12366,6 +12389,7 @@
                                   "pricePaise",
                                   "itemType",
                                   "isVeg",
+                                  "portionNote",
                                   "allergens",
                                   "dayOfWeek",
                                   "serviceDate",
@@ -12421,6 +12445,11 @@
                                   "isVeg": {
                                     "type": "boolean"
                                   },
+                                  "portionNote": {
+                                    "type": "string",
+                                    "maxLength": 120,
+                                    "nullable": true
+                                  },
                                   "allergens": {
                                     "type": "array",
                                     "items": {
@@ -12476,6 +12505,7 @@
                                   "pricePaise",
                                   "itemType",
                                   "isVeg",
+                                  "portionNote",
                                   "allergens",
                                   "dayOfWeek",
                                   "serviceDate",
@@ -12531,6 +12561,11 @@
                                   "isVeg": {
                                     "type": "boolean"
                                   },
+                                  "portionNote": {
+                                    "type": "string",
+                                    "maxLength": 120,
+                                    "nullable": true
+                                  },
                                   "allergens": {
                                     "type": "array",
                                     "items": {
@@ -12586,6 +12621,7 @@
                                   "pricePaise",
                                   "itemType",
                                   "isVeg",
+                                  "portionNote",
                                   "allergens",
                                   "dayOfWeek",
                                   "serviceDate",
@@ -12641,6 +12677,11 @@
                                   "isVeg": {
                                     "type": "boolean"
                                   },
+                                  "portionNote": {
+                                    "type": "string",
+                                    "maxLength": 120,
+                                    "nullable": true
+                                  },
                                   "allergens": {
                                     "type": "array",
                                     "items": {
@@ -12696,6 +12737,7 @@
                                   "pricePaise",
                                   "itemType",
                                   "isVeg",
+                                  "portionNote",
                                   "allergens",
                                   "dayOfWeek",
                                   "serviceDate",
@@ -12751,6 +12793,11 @@
                                   "isVeg": {
                                     "type": "boolean"
                                   },
+                                  "portionNote": {
+                                    "type": "string",
+                                    "maxLength": 120,
+                                    "nullable": true
+                                  },
                                   "allergens": {
                                     "type": "array",
                                     "items": {
@@ -12806,6 +12853,7 @@
                                   "pricePaise",
                                   "itemType",
                                   "isVeg",
+                                  "portionNote",
                                   "allergens",
                                   "dayOfWeek",
                                   "serviceDate",
@@ -12861,6 +12909,11 @@
                                   "isVeg": {
                                     "type": "boolean"
                                   },
+                                  "portionNote": {
+                                    "type": "string",
+                                    "maxLength": 120,
+                                    "nullable": true
+                                  },
                                   "allergens": {
                                     "type": "array",
                                     "items": {
@@ -12916,6 +12969,7 @@
                                   "pricePaise",
                                   "itemType",
                                   "isVeg",
+                                  "portionNote",
                                   "allergens",
                                   "dayOfWeek",
                                   "serviceDate",
@@ -12971,6 +13025,11 @@
                                   "isVeg": {
                                     "type": "boolean"
                                   },
+                                  "portionNote": {
+                                    "type": "string",
+                                    "maxLength": 120,
+                                    "nullable": true
+                                  },
                                   "allergens": {
                                     "type": "array",
                                     "items": {
@@ -13026,6 +13085,7 @@
                                   "pricePaise",
                                   "itemType",
                                   "isVeg",
+                                  "portionNote",
                                   "allergens",
                                   "dayOfWeek",
                                   "serviceDate",
@@ -13196,6 +13256,12 @@
                   "isVeg": {
                     "type": "boolean"
                   },
+                  "portionNote": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "nullable": true,
+                    "description": "Plate contents / portion size, e.g. 500ml rice + poriyal"
+                  },
                   "allergens": {
                     "type": "array",
                     "items": {
@@ -13298,6 +13364,11 @@
                     "isVeg": {
                       "type": "boolean"
                     },
+                    "portionNote": {
+                      "type": "string",
+                      "maxLength": 120,
+                      "nullable": true
+                    },
                     "allergens": {
                       "type": "array",
                       "items": {
@@ -13353,6 +13424,7 @@
                     "pricePaise",
                     "itemType",
                     "isVeg",
+                    "portionNote",
                     "allergens",
                     "dayOfWeek",
                     "serviceDate",
@@ -14179,6 +14251,11 @@
                           "isVeg": {
                             "type": "boolean"
                           },
+                          "portionNote": {
+                            "type": "string",
+                            "maxLength": 120,
+                            "nullable": true
+                          },
                           "allergens": {
                             "type": "array",
                             "items": {
@@ -14234,6 +14311,7 @@
                           "pricePaise",
                           "itemType",
                           "isVeg",
+                          "portionNote",
                           "allergens",
                           "dayOfWeek",
                           "serviceDate",
@@ -14531,6 +14609,12 @@
                   "isVeg": {
                     "type": "boolean"
                   },
+                  "portionNote": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "nullable": true,
+                    "description": "Plate contents / portion size, e.g. 500ml rice + poriyal"
+                  },
                   "allergens": {
                     "type": "array",
                     "items": {
@@ -14618,6 +14702,11 @@
                     "isVeg": {
                       "type": "boolean"
                     },
+                    "portionNote": {
+                      "type": "string",
+                      "maxLength": 120,
+                      "nullable": true
+                    },
                     "allergens": {
                       "type": "array",
                       "items": {
@@ -14673,6 +14762,7 @@
                     "pricePaise",
                     "itemType",
                     "isVeg",
+                    "portionNote",
                     "allergens",
                     "dayOfWeek",
                     "serviceDate",
@@ -15746,6 +15836,11 @@
                           "isVeg": {
                             "type": "boolean"
                           },
+                          "portionNote": {
+                            "type": "string",
+                            "maxLength": 120,
+                            "nullable": true
+                          },
                           "imageUrl": {
                             "type": "string",
                             "maxLength": 2048,
@@ -15773,6 +15868,7 @@
                           "itemNameTa",
                           "pricePaise",
                           "isVeg",
+                          "portionNote",
                           "imageUrl",
                           "mealType",
                           "updatedAt"
@@ -15919,6 +16015,12 @@
                   "isVeg": {
                     "type": "boolean"
                   },
+                  "portionNote": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "nullable": true,
+                    "description": "Plate contents / portion size, e.g. 500ml rice + poriyal"
+                  },
                   "imageUrl": {
                     "type": "string",
                     "maxLength": 2048,
@@ -15984,6 +16086,11 @@
                     "isVeg": {
                       "type": "boolean"
                     },
+                    "portionNote": {
+                      "type": "string",
+                      "maxLength": 120,
+                      "nullable": true
+                    },
                     "imageUrl": {
                       "type": "string",
                       "maxLength": 2048,
@@ -16017,6 +16124,7 @@
                     "itemNameTa",
                     "pricePaise",
                     "isVeg",
+                    "portionNote",
                     "imageUrl",
                     "mealType",
                     "createdAt",
@@ -16342,6 +16450,11 @@
                     "isVeg": {
                       "type": "boolean"
                     },
+                    "portionNote": {
+                      "type": "string",
+                      "maxLength": 120,
+                      "nullable": true
+                    },
                     "allergens": {
                       "type": "array",
                       "items": {
@@ -16397,6 +16510,7 @@
                     "pricePaise",
                     "itemType",
                     "isVeg",
+                    "portionNote",
                     "allergens",
                     "dayOfWeek",
                     "serviceDate",
@@ -20809,6 +20923,12 @@
                           "isVeg": {
                             "type": "boolean"
                           },
+                          "portionNote": {
+                            "type": "string",
+                            "maxLength": 120,
+                            "nullable": true,
+                            "description": "Plate contents / portion size"
+                          },
                           "allergens": {
                             "type": "array",
                             "items": {
@@ -20864,6 +20984,7 @@
                           "pricePaise",
                           "itemType",
                           "isVeg",
+                          "portionNote",
                           "allergens",
                           "dayOfWeek",
                           "serviceDate",
@@ -21586,6 +21707,12 @@
                                 "isVeg": {
                                   "type": "boolean"
                                 },
+                                "portionNote": {
+                                  "type": "string",
+                                  "maxLength": 120,
+                                  "nullable": true,
+                                  "description": "Plate contents / portion size"
+                                },
                                 "allergens": {
                                   "type": "array",
                                   "items": {
@@ -21641,6 +21768,7 @@
                                 "pricePaise",
                                 "itemType",
                                 "isVeg",
+                                "portionNote",
                                 "allergens",
                                 "dayOfWeek",
                                 "serviceDate",
@@ -32480,6 +32608,104 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "operationId": "ready",
+        "summary": "Readiness probe (DB + schema + outbox snapshot)",
+        "tags": [
+          "Meta"
+        ],
+        "x-access": "public",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "db": {
+                      "type": "boolean"
+                    },
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        },
+                        "expected": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "applied": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "ok",
+                        "expected",
+                        "applied"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "outbox": {
+                      "type": "object",
+                      "properties": {
+                        "pending": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "oldestPendingAgeSec": {
+                          "type": "integer",
+                          "nullable": true
+                        }
+                      },
+                      "required": [
+                        "pending",
+                        "oldestPendingAgeSec"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "db",
+                    "schema",
+                    "outbox"
+                  ],
+                  "additionalProperties": false
                 }
               }
             }

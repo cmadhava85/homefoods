@@ -66,22 +66,79 @@ describe("worker outbox notifications", () => {
     expect: Array<{ body: RegExp; buttons?: string[] }>;
   }> = [
     {
-      name: "OrderCreated (single plate) asks the customer to pay",
+      name: "OrderCreated (web) skips pay WA — customer is already on the pay screen",
       event: "OrderCreated",
-      payload: (m) => ({ customerMobile: m, kitchenName: "CSK", publicId: "LM-AA11", qty: 2, itemName: "Meals", serviceDate: "2031-01-02", amountPaise: 16800, paymentUrl: "https://pay/x" }),
-      expect: [{ body: /Pay to confirm · CSK[\s\S]*LM-AA11 · 2× Meals[\s\S]*Amount ₹168[\s\S]*Pay here: https:\/\/pay\/x[\s\S]*20 minutes/, buttons: ["Pay LM-AA11", "Orders", "Menu"] }],
+      payload: (m) => ({
+        customerMobile: m,
+        channel: "WEB_STOREFRONT",
+        kitchenName: "CSK",
+        publicId: "LM-AA11",
+        qty: 2,
+        itemName: "Meals",
+        serviceDate: "2031-01-02",
+        amountPaise: 16800,
+        paymentUrl: "https://pay/x",
+      }),
+      expect: [],
     },
     {
-      name: "OrderCreated (week cart) lists every day",
+      name: "OrderCreated (WhatsApp) asks the customer to pay",
       event: "OrderCreated",
-      payload: (m) => ({ customerMobile: m, kitchenName: "CSK", checkoutId: "CHK-BB22", lines: [{ serviceDate: "2031-01-02", qty: 1, itemName: "A" }, { serviceDate: "2031-01-03", qty: 1, itemName: "B" }] }),
-      expect: [{ body: /CHK-BB22[\s\S]*2031-01-02 · 1× A[\s\S]*2031-01-03 · 1× B[\s\S]*Reply Pay/, buttons: ["Pay CHK-BB22", "Orders", "Menu"] }],
+      payload: (m) => ({
+        customerMobile: m,
+        channel: "WHATSAPP_BOT",
+        kitchenName: "CSK",
+        publicId: "LM-AA11",
+        qty: 2,
+        itemName: "Meals",
+        serviceDate: "2031-01-02",
+        amountPaise: 16800,
+        paymentUrl: "https://pay/x",
+      }),
+      expect: [
+        {
+          body: /Pay to confirm · CSK[\s\S]*LM-AA11 · 2× Meals[\s\S]*Amount ₹168[\s\S]*Pay here: https:\/\/pay\/x[\s\S]*20 minutes/,
+          buttons: ["Pay LM-AA11", "Orders", "Menu"],
+        },
+      ],
+    },
+    {
+      name: "OrderCreated (WhatsApp week cart) lists every day",
+      event: "OrderCreated",
+      payload: (m) => ({
+        customerMobile: m,
+        channel: "WHATSAPP_BOT",
+        kitchenName: "CSK",
+        checkoutId: "CHK-BB22",
+        lines: [
+          { serviceDate: "2031-01-02", qty: 1, itemName: "A" },
+          { serviceDate: "2031-01-03", qty: 1, itemName: "B" },
+        ],
+      }),
+      expect: [
+        {
+          body: /CHK-BB22[\s\S]*2031-01-02 · 1× A[\s\S]*2031-01-03 · 1× B[\s\S]*Reply Pay/,
+          buttons: ["Pay CHK-BB22", "Orders", "Menu"],
+        },
+      ],
     },
     {
       name: "OrderCreated (child pays) tells the senior who pays",
       event: "OrderCreated",
-      payload: (m) => ({ customerMobile: m, childPays: true, payerMobile: "+919800000002", publicId: "LM-CC33", amountPaise: 9000 }),
-      expect: [{ body: /Waiting for payment[\s\S]*Total ₹90[\s\S]*Family \+919800000002/, buttons: ["Orders", "Menu"] }],
+      payload: (m) => ({
+        customerMobile: m,
+        channel: "WEB_STOREFRONT",
+        childPays: true,
+        payerMobile: "+919800000002",
+        publicId: "LM-CC33",
+        amountPaise: 9000,
+      }),
+      expect: [
+        {
+          body: /Waiting for payment[\s\S]*Total ₹90[\s\S]*Family \+919800000002/,
+          buttons: ["Orders", "Menu"],
+        },
+      ],
     },
     {
       name: "ChildPaysRequested goes to the payer",
@@ -180,10 +237,19 @@ describe("worker outbox notifications", () => {
       expect: [{ body: /Late request LM-II12 declined[\s\S]*No payment was taken/ }],
     },
     {
-      name: "OrderPaymentFailed offers retry",
+      name: "OrderPaymentFailed offers retry with pay link",
       event: "OrderPaymentFailed",
-      payload: (m) => ({ customerMobile: m, publicId: "LM-JJ13" }),
-      expect: [{ body: /Payment failed · LM-JJ13[\s\S]*No money was taken/, buttons: ["Pay", "Orders"] }],
+      payload: (m) => ({
+        customerMobile: m,
+        publicId: "LM-JJ13",
+        paymentUrl: "https://pay/retry",
+      }),
+      expect: [
+        {
+          body: /Payment failed · LM-JJ13[\s\S]*No money was taken[\s\S]*Pay here: https:\/\/pay\/retry/,
+          buttons: ["Pay LM-JJ13", "Orders"],
+        },
+      ],
     },
     {
       name: "OrderRefunded (admin) notifies",

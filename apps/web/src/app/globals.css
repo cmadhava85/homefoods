@@ -226,15 +226,6 @@ textarea:focus:not(:focus-visible) {
   max-width: 22rem;
 }
 
-.site-footer-kicker {
-  margin: 0 0 0.35rem;
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--brand);
-}
-
 .site-footer-logo {
   display: inline-block;
   margin-bottom: 0.4rem;
@@ -311,6 +302,12 @@ textarea:focus:not(:focus-visible) {
   color: var(--ink-soft);
   font-weight: 650;
   white-space: nowrap;
+  text-decoration: none;
+}
+
+a.site-footer-chip:hover {
+  color: var(--brand);
+  border-color: var(--brand);
 }
 
 .site-footer-meta {
@@ -1032,6 +1029,12 @@ h2 {
 
 .plate-sub {
   margin: 0.25rem 0 0;
+}
+
+.plate-portion {
+  margin: 0.2rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
 }
 
 .plate-price {

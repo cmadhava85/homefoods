@@ -40,6 +40,9 @@ resource "google_storage_bucket_iam_member" "status_public_read" {
   count  = var.enable_status_page ? 1 : 0
   bucket = google_storage_bucket.status[0].name
   role   = "roles/storage.objectViewer"
+  # Intentional public static status page (no PII; outage comms only).
+  #trivy:ignore:AVD-GCP-0001
+  #trivy:ignore:GCP-0001
   member = "allUsers"
 }
 

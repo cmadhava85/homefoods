@@ -23,6 +23,9 @@ resource "google_storage_bucket_iam_member" "menu_public_read" {
   count  = var.menu_images_public ? 1 : 0
   bucket = google_storage_bucket.menu_public[0].name
   role   = "roles/storage.objectViewer"
+  # Intentional public CDN for menu photos only (no PII). Concern uploads stay private.
+  #trivy:ignore:AVD-GCP-0001
+  #trivy:ignore:GCP-0001
   member = "allUsers"
 }
 

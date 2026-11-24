@@ -14,6 +14,27 @@ export const metaOperations = defineOperations([
   },
   {
     method: "get",
+    path: "/ready",
+    operationId: "ready",
+    summary: "Readiness probe (DB + schema + outbox snapshot)",
+    tags: ["Meta"],
+    access: "public",
+    response: z.object({
+      ok: z.boolean(),
+      db: z.boolean(),
+      schema: z.object({
+        ok: z.boolean(),
+        expected: z.number().int().nonnegative(),
+        applied: z.number().int().nonnegative(),
+      }),
+      outbox: z.object({
+        pending: z.number().int().nonnegative(),
+        oldestPendingAgeSec: z.number().int().nullable(),
+      }),
+    }),
+  },
+  {
+    method: "get",
     path: "/meta/today",
     operationId: "getServiceDate",
     summary: "Today's service date in Asia/Kolkata",

@@ -11,22 +11,21 @@ export function SiteFooter() {
   const browse = kitchensBrowseHref();
   const showEnroll = !hideCookOnboard();
 
-  const whatsNew = [
-    t("common.open") + " / " + t("common.closed"),
-    t("discover.yours"),
-    t("orders.reorder"),
-    t("kitchen.reviews"),
-    t("footer.family"),
-    t("cart.payWeek"),
-    t("cart.pickup"),
-  ];
+  // Only advertise features that are switched on; chips with a page are links.
+  const whatsNew: Array<{ label: string; href?: string }> = [
+    flagOn(flags, "kitchen_follow_enabled") ? { label: t("discover.yours"), href: browse } : null,
+    { label: t("orders.reorder"), href: "/orders" },
+    flagOn(flags, "reviews_enabled") ? { label: t("kitchen.reviews") } : null,
+    flagOn(flags, "child_pays_enabled") ? { label: t("footer.family"), href: "/family" } : null,
+    flagOn(flags, "week_discount_enabled") ? { label: t("cart.payWeek") } : null,
+    flagOn(flags, "pickup_enabled") ? { label: t("cart.pickup") } : null,
+  ].filter((item): item is { label: string; href?: string } => item !== null);
 
   return (
     <footer className="site-footer">
       <div className="site-footer-panel">
         <div className="site-footer-grid">
           <div className="site-footer-brand">
-            <p className="site-footer-kicker">{t("footer.metaPin")}</p>
             <Link href="/" className="brand site-footer-logo">
               LocalMeals
             </Link>
@@ -96,11 +95,17 @@ export function SiteFooter() {
 
         <div className="site-footer-whats-new" aria-label={t("footer.whatsNew")}>
           <span className="site-footer-whats-label">{t("footer.whatsNew")}</span>
-          {whatsNew.map((label) => (
-            <span key={label} className="site-footer-chip">
-              {label}
-            </span>
-          ))}
+          {whatsNew.map(({ label, href }) =>
+            href ? (
+              <Link key={label} href={href} className="site-footer-chip">
+                {label}
+              </Link>
+            ) : (
+              <span key={label} className="site-footer-chip">
+                {label}
+              </span>
+            ),
+          )}
         </div>
 
         <div className="site-footer-meta">

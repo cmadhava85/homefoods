@@ -158,14 +158,15 @@ export class MetaWhatsAppProvider implements WhatsAppProvider {
         error?: { message?: string; code?: number; error_subcode?: number };
       };
       if (body.error?.message) {
-        const code = body.error.code;
-        const detail = body.error.message;
-        throw new Error(typeof code === "number" ? `(#${code}) ${detail}` : detail);
+        throw new Error(formatMetaError(body.error));
       }
       return { messageId: body.messages?.[0]?.id ?? `wa_meta_${Date.now()}` };
     } catch (err) {
       if (err instanceof UpstreamHttpError) {
-        throw Object.assign(new Error(err.message), { statusCode: err.statusCode, name: "UpstreamError" });
+        // Preserve Meta (#code) text so isNonRetryableWhatsAppError can park allowlist failures.
+        const meta = metaErrorFromBody(err.bodyJson);
+        const message = meta ? formatMetaError(meta) : err.message;
+        throw Object.assign(new Error(message), { statusCode: err.statusCode, name: "UpstreamError" });
       }
       throw err;
     }
@@ -198,6 +199,19 @@ export function getWhatsAppProvider(): WhatsAppProvider {
         : new MetaWhatsAppProvider();
   }
   return singleton;
+}
+
+type MetaErrorBody = { message?: string; code?: number; error_subcode?: number };
+
+function metaErrorFromBody(json: unknown): MetaErrorBody | null {
+  if (!json || typeof json !== "object") return null;
+  const err = (json as { error?: MetaErrorBody }).error;
+  return err?.message ? err : null;
+}
+
+function formatMetaError(error: MetaErrorBody): string {
+  const detail = error.message ?? "WhatsApp error";
+  return typeof error.code === "number" ? `(#${error.code}) ${detail}` : detail;
 }
 
 /**

@@ -239,6 +239,13 @@
       "when": 1732525200000,
       "tag": "0033_fee_credit_qr",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1732528800000,
+      "tag": "0034_menu_portion_note",
+      "breakpoints": true
     }
   ]
 }

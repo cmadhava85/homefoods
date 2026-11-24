@@ -237,6 +237,8 @@ jobs:
           MENU_BUCKET=""
           if [ "${{ vars.MENU_IMAGES_PUBLIC }}" = "true" ]; then MENU_BUCKET="${PROJECT_ID}-localmeals-menu-public"; fi
           # --update-env-vars merges; does not wipe keys set outside this list (e.g. manual ops).
+          # Sticky danger keys (clear after one-off use): INTERNAL_OIDC_STUB, ALLOW_SCHEMA_BEHIND,
+          # MOCK_PAYMENTS=true leftovers — see RUNBOOK §4 "Sticky Cloud Run env".
           ENV_VARS="NODE_ENV=production,APP_ENV=${APP_ENV},LOG_LEVEL=${LOG_LEVEL},DB_POOL_MAX=${DB_POOL_MAX},MOCK_PAYMENTS=${MOCK_PAYMENTS},MOCK_WHATSAPP=${MOCK_WHATSAPP},MOCK_AUTH=${MOCK_AUTH},AUTH_ENFORCE=${AUTH_ENFORCE},WHATSAPP_API_VERSION=v21.0,GCS_UPLOADS_BUCKET=${UPLOADS_BUCKET},GCS_PUBLIC_MENU_BUCKET=${MENU_BUCKET}"
           if [ -n "$WEB_ORIGIN" ]; then
             ENV_VARS="${ENV_VARS},WEB_ORIGIN=${WEB_ORIGIN}"
@@ -249,11 +251,13 @@ jobs:
           if [ "${{ vars.WORKER_PUSH_MODE }}" = "true" ]; then
             ENV_VARS="${ENV_VARS},OUTBOX_WAKE_TOPIC=projects/${PROJECT_ID}/topics/localmeals.outbox-wake"
           fi
-
           # Existing service: stage the revision without traffic; promoted after smoke passes.
+          # Also clear sticky danger keys (only when updating an existing service).
           NO_TRAFFIC=""
+          REMOVE_ENV=""
           if gcloud run services describe localmeals-api --region="${REGION}" >/dev/null 2>&1; then
             NO_TRAFFIC="--no-traffic --tag=candidate"
+            REMOVE_ENV="--remove-env-vars=INTERNAL_OIDC_STUB,ALLOW_SCHEMA_BEHIND"
           fi
 
           gcloud run deploy localmeals-api ${NO_TRAFFIC} \
@@ -265,7 +269,10 @@ jobs:
             ${VPC_FLAGS} \
             --add-cloudsql-instances="${SQL_INSTANCE}" \
             --update-env-vars="${ENV_VARS}" \
+            ${REMOVE_ENV} \
             --set-secrets="DATABASE_URL=DATABASE_URL:latest,INTERNAL_JOB_TOKEN=INTERNAL_JOB_TOKEN:latest,AUTH_SECRET=AUTH_SECRET:latest,ADMIN_MOBILES=ADMIN_MOBILES:latest,RAZORPAY_KEY_ID=RAZORPAY_KEY_ID:latest,RAZORPAY_KEY_SECRET=RAZORPAY_KEY_SECRET:latest,RAZORPAY_WEBHOOK_SECRET=RAZORPAY_WEBHOOK_SECRET:latest,WHATSAPP_VERIFY_TOKEN=WHATSAPP_VERIFY_TOKEN:latest,WHATSAPP_ACCESS_TOKEN=WHATSAPP_ACCESS_TOKEN:latest,WHATSAPP_APP_SECRET=WHATSAPP_APP_SECRET:latest,WHATSAPP_PHONE_NUMBER_ID=WHATSAPP_PHONE_NUMBER_ID:latest" \
+            --startup-probe=httpGet.path=/ready,httpGet.port=8080,initialDelaySeconds=2,timeoutSeconds=3,periodSeconds=5,failureThreshold=24 \
+            --liveness-probe=httpGet.path=/health,httpGet.port=8080,periodSeconds=30,timeoutSeconds=2,failureThreshold=3 \
             --memory=512Mi \
             --cpu=1 \
             --max-instances=5 \
@@ -319,7 +326,9 @@ jobs:
             ${VPC_FLAGS} \
             --add-cloudsql-instances="${SQL_INSTANCE}" \
             --update-env-vars="NODE_ENV=production,APP_ENV=${APP_ENV},LOG_LEVEL=${LOG_LEVEL},DB_POOL_MAX=${DB_POOL_MAX},MOCK_WHATSAPP=${MOCK_WHATSAPP},WHATSAPP_API_VERSION=v21.0,ENABLE_AUTO_CUTOFF=false,ENABLE_AUTO_EOD=false,API_INTERNAL_URL=${API_URL},WORKER_MODE=${WORKER_MODE}" \
-            --set-secrets="DATABASE_URL=DATABASE_URL:latest,INTERNAL_JOB_TOKEN=INTERNAL_JOB_TOKEN:latest,WHATSAPP_VERIFY_TOKEN=WHATSAPP_VERIFY_TOKEN:latest,WHATSAPP_ACCESS_TOKEN=WHATSAPP_ACCESS_TOKEN:latest,WHATSAPP_APP_SECRET=WHATSAPP_APP_SECRET:latest,WHATSAPP_PHONE_NUMBER_ID=WHATSAPP_PHONE_NUMBER_ID:latest" \
+            --set-secrets="DATABASE_URL=DATABASE_URL:latest,INTERNAL_JOB_TOKEN=INTERNAL_JOB_TOKEN:latest,ADMIN_MOBILES=ADMIN_MOBILES:latest,WHATSAPP_VERIFY_TOKEN=WHATSAPP_VERIFY_TOKEN:latest,WHATSAPP_ACCESS_TOKEN=WHATSAPP_ACCESS_TOKEN:latest,WHATSAPP_APP_SECRET=WHATSAPP_APP_SECRET:latest,WHATSAPP_PHONE_NUMBER_ID=WHATSAPP_PHONE_NUMBER_ID:latest" \
+            --startup-probe=httpGet.path=/ready,httpGet.port=8080,initialDelaySeconds=2,timeoutSeconds=3,periodSeconds=5,failureThreshold=24 \
+            --liveness-probe=httpGet.path=/ready,httpGet.port=8080,periodSeconds=30,timeoutSeconds=2,failureThreshold=3 \
             --memory=512Mi \
             --cpu=1 \
             --max-instances=3 \

@@ -184,6 +184,10 @@ app.post("/admin/outbox/:id/retry", async (req, reply) => {
       .returning({ id: outbox.id, eventName: outbox.eventName });
     if (!row) return reply.code(404).send({ error: "Outbox row not found" });
     await logAdminAction(db, "OUTBOX_RETRY", "outbox", String(id), row.eventName);
+    // Wake push-mode workers immediately (no-op when OUTBOX_WAKE_TOPIC unset / poll mode).
+    const { outboxWaker } = await import("../services/outboxWake.js");
+    outboxWaker().markDirty();
+    void outboxWaker().flush();
     return { ok: true, id: row.id, eventName: row.eventName };
   } catch (e) {
     return sendCaughtError(reply, e);

@@ -31,6 +31,12 @@ const PriceRupees = z.number().positive().max(1_000_000).describe("Price in rupe
 const PricePaiseIn = z.number().int().positive().max(100_000_000).describe("Price in paise");
 const ItemName = z.string().min(1).max(100);
 const ItemNameTa = z.string().max(100).nullable().optional().describe("Tamil plate name");
+const PortionNoteIn = z
+  .string()
+  .max(120)
+  .nullable()
+  .optional()
+  .describe("Plate contents / portion size, e.g. 500ml rice + poriyal");
 const ImageUrlIn = Url.nullable().optional().describe("Uploaded photo URL (/uploads/…)");
 /** Loose service date: YYYY-MM-DD, "" or null (weekly) — the service interprets it. */
 const ServiceDateIn = z.string().max(10).nullable().optional().describe("YYYY-MM-DD; null with dayOfWeek = weekly");
@@ -133,6 +139,7 @@ export const MenuItemCreateBody = z
     priceRupees: PriceRupees.optional(),
     pricePaise: PricePaiseIn.optional(),
     isVeg: z.boolean().optional(),
+    portionNote: PortionNoteIn,
     allergens: Allergens.optional(),
     totalStockAvailable: StockIn.optional(),
     /** Calendar day; omit for today. Pass null with dayOfWeek for weekly. */
@@ -152,6 +159,7 @@ export const SavedPlateCreateBody = z.object({
   priceRupees: PriceRupees.optional(),
   pricePaise: PricePaiseIn.optional(),
   isVeg: z.boolean().optional(),
+  portionNote: PortionNoteIn,
   imageUrl: ImageUrlIn,
   mealType: MealType.optional(),
   fromMenuId: Id.optional().describe("Copy fields from this live menu row"),
@@ -185,6 +193,7 @@ export const MenuItemPatchBody = z.object({
   priceRupees: PriceRupees.optional(),
   pricePaise: PricePaiseIn.optional(),
   isVeg: z.boolean().optional(),
+  portionNote: PortionNoteIn,
   allergens: Allergens.optional(),
   totalStockAvailable: StockIn.optional(),
   isAvailable: z.boolean().optional(),
@@ -261,6 +270,7 @@ const MenuItemRow = z
     pricePaise: Paise,
     itemType: z.enum(["HOT_MEAL", "DRY_PANTRY"]),
     isVeg: z.boolean(),
+    portionNote: Text(120).nullable(),
     allergens: Allergens,
     dayOfWeek: DayOfWeek.nullable(),
     serviceDate: IsoDate.nullable(),
@@ -280,6 +290,7 @@ const SavedPlateRow = z
     itemNameTa: Text(100).nullable(),
     pricePaise: Paise,
     isVeg: z.boolean(),
+    portionNote: Text(120).nullable(),
     imageUrl: Url.nullable(),
     mealType: MealType,
     createdAt: Ts,

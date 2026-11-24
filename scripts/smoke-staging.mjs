@@ -56,6 +56,16 @@ try {
   const health = await req("/health");
   ok("GET /health", health.status === 200 && health.body?.ok === true, `status=${health.status}`);
 
+  const ready = await req("/ready");
+  ok(
+    "GET /ready",
+    ready.status === 200 &&
+      ready.body?.ok === true &&
+      ready.body?.db === true &&
+      ready.body?.schema?.ok === true,
+    `status=${ready.status} body=${JSON.stringify(ready.body)}`,
+  );
+
   const today = await req("/meta/today");
   ok(
     "GET /meta/today",

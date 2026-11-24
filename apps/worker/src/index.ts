@@ -259,13 +259,7 @@ async function maybeRunScheduled() {
  * Cloud Scheduler fallback. Cloud Run IAM (run.invoker + OIDC) authenticates both callers.
  */
 const pushMode = process.env.WORKER_MODE === "push";
-if (pushMode && !(process.env.OUTBOX_WAKE_TOPIC ?? "").trim()) {
-  // API publishes wakes; without the topic push mode silently drops notifications between scheduler ticks.
-  log.error(
-    { event: "worker.push_misconfigured" },
-    "WORKER_MODE=push but OUTBOX_WAKE_TOPIC unset on API — apply worker_push.tf and set the topic env",
-  );
-}
+// OUTBOX_WAKE_TOPIC belongs on the API (publisher), not the worker — do not alarm here.
 let lastStuckScan = 0;
 
 function maybeScanStuck() {

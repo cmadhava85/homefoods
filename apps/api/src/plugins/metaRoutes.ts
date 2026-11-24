@@ -18,19 +18,22 @@ export async function metaRoutes(app: FastifyInstance, opts: { db: Db }) {
    * Cloud Run startup / uptime should target this (not /health).
    */
   app.get("/ready", async (_req, reply) => {
-    const expected = expectedMigrationCount();
     let dbOk = false;
+    let schemaOk = false;
+    let expected = 0;
     let applied = 0;
     let pending = 0;
     let oldestPendingAgeSec: number | null = null;
 
     try {
+      expected = expectedMigrationCount();
       await Promise.race([
         db.execute(sql`select 1`),
         new Promise((_, rej) => setTimeout(() => rej(new Error("db_timeout")), 2000)),
       ]);
       dbOk = true;
       applied = await appliedMigrationCount(db);
+      schemaOk = applied >= expected;
       const backlog = (await db.execute(sql`
         SELECT
           COUNT(*) FILTER (WHERE processed_at IS NULL)::int AS pending,
@@ -42,9 +45,9 @@ export async function metaRoutes(app: FastifyInstance, opts: { db: Db }) {
         backlog[0]?.oldest_age == null ? null : Number(backlog[0].oldest_age);
     } catch {
       dbOk = false;
+      schemaOk = false;
     }
 
-    const schemaOk = dbOk && applied >= expected;
     const ok = dbOk && schemaOk;
     const body = {
       ok,

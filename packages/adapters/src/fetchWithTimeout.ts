@@ -19,18 +19,24 @@ export class UpstreamHttpError extends Error {
   readonly statusCode: 502 | 503 | 504;
   readonly provider: string;
   readonly upstreamStatus?: number;
+  /** Raw response body when the upstream returned HTTP error (for Meta/Razorpay error codes). */
+  readonly bodyText?: string;
+  readonly bodyJson?: unknown;
 
   constructor(
     message: string,
     statusCode: 502 | 503 | 504,
     provider: string,
     upstreamStatus?: number,
+    body?: { text?: string; json?: unknown },
   ) {
     super(message);
     this.name = "UpstreamHttpError";
     this.statusCode = statusCode;
     this.provider = provider;
     this.upstreamStatus = upstreamStatus;
+    this.bodyText = body?.text;
+    this.bodyJson = body?.json;
   }
 }
 
@@ -93,6 +99,7 @@ export async function fetchWithTimeout(
           mapped,
           provider,
           res.status,
+          { text: parsed.text, json: parsed.json },
         );
       }
       return { res, ...parsed, durationMs };

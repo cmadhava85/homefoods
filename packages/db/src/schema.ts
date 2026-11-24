@@ -213,6 +213,8 @@ export const dailyMenus = pgTable(
     pricePaise: integer("price_paise").notNull(),
     itemType: inventoryCategoryEnum("item_type").default("HOT_MEAL").notNull(),
     isVeg: boolean("is_veg").default(true).notNull(),
+    /** Plate contents / portion size shown to customers, e.g. "500ml rice + poriyal". */
+    portionNote: varchar("portion_note", { length: 120 }),
     allergens: text("allergens").array().default([]).notNull(),
     /** 0=Sun … 6=Sat (JS Date.getDay). Used when serviceDate is null = weekly template. */
     dayOfWeek: integer("day_of_week"),
@@ -603,6 +605,7 @@ export const cookSavedPlates = pgTable(
     itemNameTa: varchar("item_name_ta", { length: 100 }),
     pricePaise: integer("price_paise").notNull(),
     isVeg: boolean("is_veg").default(true).notNull(),
+    portionNote: varchar("portion_note", { length: 120 }),
     imageUrl: text("image_url"),
     mealType: mealPeriodEnum("meal_type").default("LUNCH").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
