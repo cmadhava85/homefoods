@@ -1,4 +1,4 @@
-FROM node:22-alpine AS deps
+FROM node:26-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/web/package.json apps/web/
@@ -50,7 +50,7 @@ RUN npm run build -w @localmeals/domain \
  && npm run build -w @localmeals/i18n \
  && npm run build -w @localmeals/web
 
-FROM node:22-alpine
+FROM node:26-alpine
 WORKDIR /app
 ENV NODE_ENV=production
 ENV HOSTNAME=0.0.0.0
