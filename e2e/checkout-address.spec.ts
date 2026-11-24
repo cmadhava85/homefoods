@@ -23,8 +23,9 @@ test.describe("customer address → checkout", () => {
     }
     const addForm = page.locator(".checkout-address-add");
     await expect(addForm).toBeVisible({ timeout: 10_000 });
-    await addForm.getByPlaceholder(/Tower|flat|street/i).fill(line1);
-    await addForm.getByPlaceholder(/^PIN$/i).fill("600119");
+    // Form uses labelled inputs (no placeholders on line1/PIN).
+    await addForm.locator("#checkout-line1").fill(line1);
+    await addForm.locator("#checkout-pin").fill("600119");
     await saveAddr.click();
     await expect(page.locator(".checkout-address select").first()).toContainText(line1, {
       timeout: 10_000,
