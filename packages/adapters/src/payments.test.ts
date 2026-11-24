@@ -82,6 +82,44 @@ describe("RazorpayPaymentProvider", () => {
       globalThis.fetch = realFetch;
     }
   });
+
+  it("uses referenceId / callbackUrl when given (one booking, several links)", async () => {
+    process.env.RAZORPAY_KEY_ID = "rzp_test_k";
+    process.env.RAZORPAY_KEY_SECRET = "rzp_test_s";
+    const sent: Array<Record<string, unknown>> = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+      sent.push(JSON.parse(String(init?.body ?? "{}")));
+      return new Response(JSON.stringify({ id: "plink_c", short_url: "https://rzp.io/c" }), {
+        status: 200,
+      });
+    }) as typeof fetch;
+    try {
+      await new RazorpayPaymentProvider().createPayment({
+        orderPublicId: "CAT-AB12",
+        referenceId: "CAT-AB12-B1",
+        callbackUrl: "https://web.example/catering/bookings/CAT-AB12",
+        amountPaise: 1000,
+        customerMobile: "+919840111111",
+        idempotencyKey: "k-cat",
+      });
+      assert.equal(sent[0].reference_id, "CAT-AB12-B1");
+      assert.equal(sent[0].callback_url, "https://web.example/catering/bookings/CAT-AB12");
+      assert.equal((sent[0].notes as Record<string, string>).orderPublicId, "CAT-AB12");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    const mock = await new MockPaymentProvider().createPayment({
+      orderPublicId: "CAT-AB12",
+      referenceId: "CAT-AB12-A1",
+      callbackUrl: "http://web/catering/bookings/CAT-AB12",
+      amountPaise: 1000,
+      customerMobile: "+919840111111",
+      idempotencyKey: "k-cat-mock",
+    });
+    assert.equal(mock.gatewayTxnId, "mock_txn_CAT-AB12-A1");
+    assert.equal(mock.paymentUrl, "http://web/catering/bookings/CAT-AB12?txn=mock_txn_CAT-AB12-A1");
+  });
 });
 
 describe("RazorpayPaymentProvider refunds", () => {

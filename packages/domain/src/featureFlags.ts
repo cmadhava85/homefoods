@@ -110,6 +110,13 @@ export const FEATURE_FLAG_DEFS = [
     description: "Pickup orders can pay by single-use Razorpay UPI QR (0.99%) instead of a payment link (2%).",
     defaultEnabled: true,
   },
+  {
+    key: "catering_enabled",
+    label: "Party / bulk catering (MVP-3)",
+    description:
+      "Opted-in LIVE cooks sell party combos (MOQ, 48–72h cut-off, 50% advance + 50% balance UPI). Keep OFF until the lunch pin is stable.",
+    defaultEnabled: false,
+  },
 ] as const;
 
 export type FeatureFlagKey = (typeof FEATURE_FLAG_DEFS)[number]["key"];

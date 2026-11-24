@@ -246,6 +246,13 @@
       "when": 1732528800000,
       "tag": "0034_menu_portion_note",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1732532400000,
+      "tag": "0035_catering",
+      "breakpoints": true
     }
   ]
 }

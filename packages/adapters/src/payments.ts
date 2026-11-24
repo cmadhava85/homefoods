@@ -24,6 +24,13 @@ export type CreatePaymentInput = {
   notes?: Record<string, string>;
   /** Unix seconds; defaults to now + PAYMENT_LINK_TTL_SEC, never below Razorpay's 15-min minimum. */
   expireAtUnix?: number;
+  /**
+   * Razorpay `reference_id` (must be unique per link). Defaults to orderPublicId; catering passes a
+   * per-phase id (CAT-…-A1 / -B1) because one booking has several links.
+   */
+  referenceId?: string;
+  /** Return URL after payment. Defaults to `${WEB_ORIGIN}/pay/${orderPublicId}`. */
+  callbackUrl?: string;
 };
 
 export type CreatePaymentResult = {
@@ -493,11 +500,12 @@ export function classifyPaymentWebhook(body: unknown): GatewayWebhookEvent {
 
 export class MockPaymentProvider implements PaymentProvider {
   async createPayment(input: CreatePaymentInput): Promise<CreatePaymentResult> {
-    const gatewayTxnId = `mock_txn_${input.orderPublicId}`;
+    const gatewayTxnId = `mock_txn_${input.referenceId ?? input.orderPublicId}`;
     const base = process.env.WEB_ORIGIN ?? "http://localhost:3000";
+    const returnUrl = input.callbackUrl ?? `${base}/pay/${input.orderPublicId}`;
     return {
       gatewayTxnId,
-      paymentUrl: `${base}/pay/${input.orderPublicId}?txn=${gatewayTxnId}`,
+      paymentUrl: `${returnUrl}?txn=${gatewayTxnId}`,
       provider: "mock",
     };
   }
@@ -583,7 +591,7 @@ export class RazorpayPaymentProvider implements PaymentProvider {
       amount: input.amountPaise,
       currency: "INR",
       accept_partial: false,
-      reference_id: input.orderPublicId.slice(0, 40),
+      reference_id: (input.referenceId ?? input.orderPublicId).slice(0, 40),
       description: `LocalMeals ${input.orderPublicId}`,
       customer: {
         contact: input.customerMobile.replace(/^\+/, ""),
@@ -592,7 +600,7 @@ export class RazorpayPaymentProvider implements PaymentProvider {
       reminder_enable: false,
       /** Matches unpaid soft-hold so links cannot be paid after order cancel/expiry. */
       expire_by: expireAtUnix,
-      callback_url: `${webOrigin}/pay/${input.orderPublicId}`,
+      callback_url: input.callbackUrl ?? `${webOrigin}/pay/${input.orderPublicId}`,
       callback_method: "get",
       notes: {
         orderPublicId: input.orderPublicId,

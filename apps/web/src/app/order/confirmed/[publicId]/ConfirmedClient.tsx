@@ -3,7 +3,7 @@
 import { lineTotalPaise } from "@localmeals/domain";
 
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { CancelOrderButton } from "@/components/CancelOrderButton";
 import { ReviewForm } from "@/components/ReviewForm";
 import { useLocale } from "@/components/LocaleProvider";
@@ -110,7 +110,19 @@ function lineTotal(o: {
   return lineTotalPaise(o);
 }
 
-/** One status signal: progress track on kitchen path; banner only for exceptions. */
+function StarDisplay({ rating, label }: { rating: number; label: string }) {
+  return (
+    <div className="confirm-stars" role="img" aria-label={`${label}: ${rating} of 5`}>
+      {[1, 2, 3, 4, 5].map((n) => (
+        <span key={n} className={n <= rating ? "on" : ""} aria-hidden>
+          ★
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** One status signal: progress track on kitchen path; banner only for exceptions / done. */
 function OrderProgress({
   status,
   childPays,
@@ -125,17 +137,20 @@ function OrderProgress({
   const { t } = useLocale();
   const tone = statusTone(status);
   const steps = progressSteps(t, status, fulfillmentMode, logisticsMode);
-  const showTrack = steps.some((s) => s.state !== "idle");
+  const delivered = status === "DELIVERED";
+  const showTrack = !delivered && steps.some((s) => s.state !== "idle");
   const statusOpts = { childPays, roleOnOrder: "CUSTOMER" as const, fulfillmentMode };
-  // Banner only when track isn't carrying the message (pay/cancel/fail/etc.).
-  const showBanner = !showTrack || tone === "warn" || tone === "bad";
+  // Banner when track isn't carrying the message, or when the meal is done.
+  const showBanner = delivered || !showTrack || tone === "warn" || tone === "bad";
 
   const bannerClass =
     tone === "bad"
       ? "err confirm-banner"
       : tone === "warn"
         ? "ok status-banner warn confirm-banner"
-        : "ok status-banner confirm-banner";
+        : delivered
+          ? "confirm-done-banner"
+          : "ok status-banner confirm-banner";
 
   return (
     <div className="confirm-progress">
@@ -145,6 +160,11 @@ function OrderProgress({
             <strong className="confirm-refund-title">{t("status.blurb.refundedTitle")}</strong>
             <p className="confirm-refund-body">{t("status.blurb.refunded")}</p>
           </div>
+        ) : delivered ? (
+          <p className={bannerClass} role="status">
+            {customerStatusBlurb(t, status, statusOpts)}
+            <span className="confirm-done-sub">{t("confirmed.doneBlurb")}</span>
+          </p>
         ) : (
           <p className={bannerClass} role="status">
             {customerStatusBlurb(t, status, statusOpts)}
@@ -297,6 +317,7 @@ export function ConfirmedOrderClient({ order }: { order: ConfirmedOrderView }) {
   const total = lineTotal(order);
   const solo = isSoloKitchenMode();
   const pending = order.status === "PENDING_APPROVAL";
+  const delivered = order.status === "DELIVERED";
   const childPays =
     order.awaitingFamilyPay === true ||
     (Boolean(order.payerMobile) &&
@@ -313,10 +334,22 @@ export function ConfirmedOrderClient({ order }: { order: ConfirmedOrderView }) {
     order.logisticsMode === "PARTNER" ||
     order.status === "ASSIGNING_RIDER";
   const showHowDelivered = !solo && order.fulfillmentMode !== "PICKUP";
+  const showAddressHelp = !["DELIVERED", "CANCELLED", "FAILED", "REFUNDED"].includes(order.status);
+
+  const [review, setReview] = useState(order.review ?? null);
+  const [canReview, setCanReview] = useState(Boolean(order.canReview) && !order.hasReview);
+  const reorderHref = order.cookSlug
+    ? kitchenOrderHref({
+        slug: order.cookSlug,
+        mealType: order.mealType,
+        afterServiceDate: order.serviceDate,
+        again: true,
+      })
+    : "/discover";
 
   return (
     <main className="confirm-stage">
-      <section className="card confirm-panel">
+      <section className={`card confirm-panel${delivered ? " is-delivered" : ""}`}>
         <header className="confirm-header">
           {order.kitchenName ? (
             <p className="confirm-kicker">
@@ -356,6 +389,31 @@ export function ConfirmedOrderClient({ order }: { order: ConfirmedOrderView }) {
             {order.qty}× {localizedDishName(locale, order)}
           </p>
         </div>
+
+        {canReview ? (
+          <div className="confirm-review-card">
+            <ReviewForm
+              publicId={order.publicId}
+              onDone={(saved) => {
+                setCanReview(false);
+                setReview(saved);
+              }}
+            />
+          </div>
+        ) : null}
+        {review ? (
+          <div className="confirm-review-card is-done">
+            <p className="confirm-review-kicker">{t("confirmed.ratedTitle")}</p>
+            <StarDisplay rating={review.rating} label={t("confirmed.yourRating")} />
+            {review.comment ? <p className="confirm-review-comment">{review.comment}</p> : null}
+            {review.cookReply ? (
+              <p className="confirm-cook-reply">
+                <span className="confirm-cook-reply-label">{t("confirmed.cookReplied")}</span>
+                {review.cookReply}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
 
         <div className="confirm-receipt">
           <h2 className="confirm-section-title">{t("confirmed.details")}</h2>
@@ -433,47 +491,34 @@ export function ConfirmedOrderClient({ order }: { order: ConfirmedOrderView }) {
           </div>
         </div>
 
-        <p className="confirm-help muted">{t("confirmed.wrongAddress")}</p>
-
-        {order.canReview ? (
-          <div className="confirm-review">
-            <ReviewForm publicId={order.publicId} />
-          </div>
-        ) : null}
-        {order.hasReview && order.review ? (
-          <p className="muted confirm-note">
-            {t("confirmed.yourRating")} {"★".repeat(order.review.rating)}
-            {order.review.cookReply
-              ? ` · ${t("confirmed.cookReplied")} ${order.review.cookReply}`
-              : ""}
-          </p>
-        ) : null}
+        {showAddressHelp ? <p className="confirm-help muted">{t("confirmed.wrongAddress")}</p> : null}
 
         <div className="actions confirm-actions">
-          <Link className="btn" href="/orders">
-            {t("orders.title")}
-          </Link>
-          <CancelOrderButton
-            publicId={order.publicId}
-            paid={order.status === "PAID"}
-            cancellable={order.cancellable}
-            cancelRequestable={order.cancelRequestable}
-          />
-          <Link
-            className="btn secondary"
-            href={
-              order.cookSlug
-                ? kitchenOrderHref({
-                    slug: order.cookSlug,
-                    mealType: order.mealType,
-                    afterServiceDate: order.serviceDate,
-                    again: true,
-                  })
-                : "/discover"
-            }
-          >
-            {t("confirmed.orderAgain")}
-          </Link>
+          {delivered ? (
+            <>
+              <Link className="btn" href={reorderHref}>
+                {t("confirmed.orderAgain")}
+              </Link>
+              <Link className="btn secondary" href="/orders">
+                {t("orders.title")}
+              </Link>
+            </>
+          ) : (
+            <>
+              <Link className="btn" href="/orders">
+                {t("orders.title")}
+              </Link>
+              <CancelOrderButton
+                publicId={order.publicId}
+                paid={order.status === "PAID"}
+                cancellable={order.cancellable}
+                cancelRequestable={order.cancelRequestable}
+              />
+              <Link className="btn secondary" href={reorderHref}>
+                {t("confirmed.orderAgain")}
+              </Link>
+            </>
+          )}
         </div>
       </section>
     </main>

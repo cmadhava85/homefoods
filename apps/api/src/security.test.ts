@@ -51,6 +51,30 @@ describe("security regressions", () => {
     assert.equal(res.headers["access-control-allow-origin"], origin);
   });
 
+  it("allows the alternate Cloud Run hostname for the same web service", async () => {
+    const prev = process.env.WEB_ORIGIN;
+    process.env.WEB_ORIGIN = "https://localmeals-web-1031170612008.asia-south1.run.app";
+    const { buildApp } = await import("./app.js");
+    const alt = await buildApp(db);
+    try {
+      const origin = "https://localmeals-web-o2ryh2iw2a-el.a.run.app";
+      const res = await alt.inject({
+        method: "OPTIONS",
+        url: "/health",
+        headers: {
+          Origin: origin,
+          "Access-Control-Request-Method": "GET",
+        },
+      });
+      assert.equal(res.statusCode, 204);
+      assert.equal(res.headers["access-control-allow-origin"], origin);
+    } finally {
+      await alt.close();
+      if (prev === undefined) delete process.env.WEB_ORIGIN;
+      else process.env.WEB_ORIGIN = prev;
+    }
+  });
+
   it("kitchen mutator requires cook/admin session", async () => {
     const res = await app.inject({
       method: "POST",

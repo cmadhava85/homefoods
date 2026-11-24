@@ -11,3 +11,4 @@ export * from "./checkoutStatus.js";
 export * from "./cookStops.js";
 export * from "./deliveryDistance.js";
 export * from "./errors.js";
+export * from "./catering.js";

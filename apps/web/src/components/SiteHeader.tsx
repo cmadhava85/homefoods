@@ -54,7 +54,7 @@ export function SiteHeader() {
                 {t("nav.kitchens")}
               </Link>
             </>
-          ) : (
+          ) : user?.role === "CUSTOMER" ? (
             <>
               <Link href={browse} className={navClass(browse, pathname)}>
                 {t("nav.discover")}
@@ -71,6 +71,11 @@ export function SiteHeader() {
                 {t("nav.account")}
               </Link>
             </>
+          ) : (
+            // Guest: browse only — Orders / Account / Family after customer sign-in.
+            <Link href={browse} className={navClass(browse, pathname)}>
+              {t("nav.discover")}
+            </Link>
           )}
         </nav>
 

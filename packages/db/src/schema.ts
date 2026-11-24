@@ -689,3 +689,124 @@ export const waCheckoutSessions = pgTable("wa_checkout_sessions", {
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
+
+/* ───────────── MVP-3 party / bulk catering (flag catering_enabled, default OFF) ───────────── */
+
+/** Per-cook catering opt-in + bounds. Kept off cook_profiles so lunch rows stay untouched. */
+export const cookCateringSettings = pgTable("cook_catering_settings", {
+  cookId: uuid("cook_id")
+    .primaryKey()
+    .references(() => cookProfiles.id, { onDelete: "cascade" }),
+  enabled: boolean("enabled").default(false).notNull(),
+  /** Hours before event start when booking / self-cancel closes (48–72). */
+  cutoffHours: integer("cutoff_hours").default(48).notNull(),
+  /** Max party plates across all bookings on one event date. */
+  dailyPlateCap: integer("daily_plate_cap").default(100).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+/** Cook-defined party packs (e.g. Seemantham Feast) — per-plate price + MOQ. */
+export const cateringCombos = pgTable(
+  "catering_combos",
+  {
+    id: serial("id").primaryKey(),
+    cookId: uuid("cook_id")
+      .notNull()
+      .references(() => cookProfiles.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 100 }).notNull(),
+    nameTa: varchar("name_ta", { length: 100 }),
+    /** Plate contents shown to customers. */
+    contents: varchar("contents", { length: 500 }),
+    pricePerPlatePaise: integer("price_per_plate_paise").notNull(),
+    minPlates: integer("min_plates").notNull(),
+    maxPlates: integer("max_plates").notNull(),
+    isVeg: boolean("is_veg").default(true).notNull(),
+    imageUrl: text("image_url"),
+    isActive: boolean("is_active").default(true).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("catering_combos_cook_name_uidx").on(t.cookId, t.name)],
+);
+
+/** One party order: combo × plates for one event, paid as advance + balance. */
+export const cateringBookings = pgTable(
+  "catering_bookings",
+  {
+    id: serial("id").primaryKey(),
+    publicId: varchar("public_id", { length: 20 }).notNull().unique(),
+    customerMobile: varchar("customer_mobile", { length: 15 })
+      .notNull()
+      .references(() => users.mobileNumber),
+    cookId: uuid("cook_id")
+      .notNull()
+      .references(() => cookProfiles.id),
+    comboId: integer("combo_id")
+      .notNull()
+      .references(() => cateringCombos.id),
+    comboName: varchar("combo_name", { length: 100 }).notNull(),
+    comboContents: varchar("combo_contents", { length: 500 }),
+    plates: integer("plates").notNull(),
+    pricePerPlatePaise: integer("price_per_plate_paise").notNull(),
+    foodPaise: integer("food_paise").notNull(),
+    platformFeePaise: integer("platform_fee_paise").notNull(),
+    advancePaise: integer("advance_paise").notNull(),
+    balancePaise: integer("balance_paise").notNull(),
+    eventDate: date("event_date").notNull(),
+    /** HH:MM Asia/Kolkata. */
+    eventTime: varchar("event_time", { length: 5 }).notNull(),
+    cutoffAt: timestamp("cutoff_at", { withTimezone: true }).notNull(),
+    fulfillmentMode: varchar("fulfillment_mode", { length: 16 }).default("DELIVERY").notNull(),
+    addressId: integer("address_id").references(() => addresses.id, { onDelete: "set null" }),
+    deliveryAddress: text("delivery_address").notNull(),
+    note: varchar("note", { length: 500 }),
+    /** AWAITING_ADVANCE | ADVANCE_PAID | PAID | COMPLETED | CANCELLED (see domain/catering.ts). */
+    status: varchar("status", { length: 20 }).default("AWAITING_ADVANCE").notNull(),
+    refundedPaise: integer("refunded_paise").default(0).notNull(),
+    cancelledBy: varchar("cancelled_by", { length: 20 }),
+    cancelReason: varchar("cancel_reason", { length: 300 }),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    balanceRemindedAt: timestamp("balance_reminded_at", { withTimezone: true }),
+    /** Manual cook payout (food share) — UPI/NEFT outside EOD lunch settlement. */
+    cookPaidAt: timestamp("cook_paid_at", { withTimezone: true }),
+    cookPaidUtr: varchar("cook_paid_utr", { length: 80 }),
+    traceId: varchar("trace_id", { length: 40 }).notNull(),
+    idempotencyKey: varchar("idempotency_key", { length: 160 }).unique(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index("catering_bookings_cook_date_idx").on(t.cookId, t.eventDate, t.status),
+    index("catering_bookings_customer_idx").on(t.customerMobile),
+  ],
+);
+
+/** Advance / balance links and refunds for a booking (one row per gateway attempt). */
+export const cateringPayments = pgTable(
+  "catering_payments",
+  {
+    id: serial("id").primaryKey(),
+    bookingId: integer("booking_id")
+      .notNull()
+      .references(() => cateringBookings.id),
+    /** ADVANCE | BALANCE | REFUND */
+    phase: varchar("phase", { length: 10 }).notNull(),
+    amountPaise: integer("amount_paise").notNull(),
+    /** CREATED | PAID | SUPERSEDED | REFUNDED | REFUND_FAILED */
+    status: varchar("status", { length: 20 }).notNull(),
+    /** LINK (Razorpay payment link) | MANUAL (admin-recorded cash/UPI). */
+    method: varchar("method", { length: 16 }).default("LINK").notNull(),
+    gatewayTxnId: varchar("gateway_txn_id", { length: 100 }),
+    paymentId: varchar("payment_id", { length: 100 }),
+    paymentUrl: text("payment_url"),
+    idempotencyKey: varchar("idempotency_key", { length: 160 }).notNull().unique(),
+    rawPayload: jsonb("raw_payload"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("catering_payments_booking_idx").on(t.bookingId),
+    index("catering_payments_gateway_txn_idx").on(t.gatewayTxnId),
+  ],
+);

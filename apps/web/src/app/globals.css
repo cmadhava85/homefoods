@@ -88,6 +88,17 @@ textarea:focus:not(:focus-visible) {
   min-width: 0;
 }
 
+/* Centered content columns inside .shell (avoid left-hugging max-width) */
+.content-stage {
+  width: min(100%, 560px);
+  margin: 0.35rem auto 1.75rem;
+}
+
+.content-stage--md {
+  width: min(100%, 720px);
+  margin: 0.35rem auto 1.75rem;
+}
+
 /* Full-bleed relative to shell padding — avoids 100vw horizontal scroll */
 .bleed {
   width: calc(100% + (2 * var(--shell-pad)));
@@ -1362,7 +1373,9 @@ h2 {
 
 /* —— My orders (compact list) —— */
 .orders-page {
-  max-width: 720px;
+  /* same column as .content-stage--md */
+  width: min(100%, 720px);
+  margin: 0.35rem auto 1.75rem;
 }
 
 .orders-hero {
@@ -2016,8 +2029,96 @@ h2 {
   line-height: 1.4;
 }
 
-.confirm-review {
-  margin-top: 1rem;
+.confirm-panel.is-delivered::before {
+  background: linear-gradient(90deg, var(--brand) 0%, color-mix(in srgb, var(--brand) 55%, #2f6b4f) 100%);
+}
+
+.confirm-done-banner {
+  margin: 0;
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.9rem 1rem;
+  border-radius: 14px;
+  background:
+    radial-gradient(120% 160% at 100% 0%, rgba(232, 168, 12, 0.16), transparent 55%),
+    color-mix(in srgb, var(--brand) 8%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--brand) 18%, var(--line));
+  font-weight: 700;
+  color: var(--ink);
+  animation: rise-in 0.4s var(--ease-out) both;
+}
+
+.confirm-done-sub {
+  display: block;
+  font-size: 0.88rem;
+  font-weight: 550;
+  color: var(--muted);
+}
+
+.confirm-review-card {
+  margin: 0 0 1.1rem;
+  padding: 1rem 1.05rem 1.05rem;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
+  animation: rise-in 0.45s var(--ease-out) 0.08s both;
+}
+
+.confirm-review-card .review-form {
+  padding: 0;
+  border-top: none;
+}
+
+.confirm-review-card.is-done {
+  background: color-mix(in srgb, var(--brand) 7%, var(--surface));
+  border-color: color-mix(in srgb, var(--brand) 18%, var(--line));
+}
+
+.confirm-review-kicker {
+  margin: 0 0 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.confirm-stars {
+  display: flex;
+  gap: 0.12rem;
+  font-size: 1.45rem;
+  line-height: 1;
+  color: rgba(15, 31, 25, 0.22);
+}
+
+.confirm-stars .on {
+  color: var(--accent);
+}
+
+.confirm-review-comment {
+  margin: 0.55rem 0 0;
+  font-size: 0.95rem;
+  line-height: 1.4;
+  color: var(--ink-soft);
+}
+
+.confirm-cook-reply {
+  margin: 0.65rem 0 0;
+  padding: 0.65rem 0.75rem;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--brand) 6%, transparent);
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.confirm-cook-reply-label {
+  display: block;
+  margin-bottom: 0.2rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 
 .confirm-actions {
@@ -4006,7 +4107,7 @@ select {
 .wa-shell {
   display: grid;
   gap: 0.85rem;
-  max-width: 560px;
+  width: 100%;
 }
 
 .wa-frame {

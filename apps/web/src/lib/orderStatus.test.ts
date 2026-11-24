@@ -173,6 +173,9 @@ describe("progressIndex / progressSteps", () => {
 
     const idle = progressSteps(t as never, "AWAITING_PAYMENT");
     expect(idle.every((s) => s.state === "idle")).toBe(true);
+
+    const delivered = progressSteps(t as never, "DELIVERED");
+    expect(delivered.every((s) => s.state === "done")).toBe(true);
   });
 });
 

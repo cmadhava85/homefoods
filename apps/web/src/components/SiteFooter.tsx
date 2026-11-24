@@ -1,22 +1,27 @@
 "use client";
 
 import Link from "next/link";
+import { useAuth } from "@/components/AuthProvider";
 import { useLocale } from "@/components/LocaleProvider";
 import { flagOn, useFeatureFlags } from "@/lib/features";
-import { hideCookOnboard, isSoloKitchenMode, kitchensBrowseHref } from "@/lib/soloKitchen";
+import { hideCookOnboard, kitchensBrowseHref } from "@/lib/soloKitchen";
 
 export function SiteFooter() {
   const { t } = useLocale();
+  const { user } = useAuth();
   const flags = useFeatureFlags();
   const browse = kitchensBrowseHref();
   const showEnroll = !hideCookOnboard();
+  const customer = user?.role === "CUSTOMER";
+  const ordersHref = customer ? "/orders" : "/login?role=customer&next=/orders";
+  const familyHref = customer ? "/family" : "/login?role=customer&next=/family";
 
   // Only advertise features that are switched on; chips with a page are links.
   const whatsNew: Array<{ label: string; href?: string }> = [
     flagOn(flags, "kitchen_follow_enabled") ? { label: t("discover.yours"), href: browse } : null,
-    { label: t("orders.reorder"), href: "/orders" },
+    { label: t("orders.reorder"), href: ordersHref },
     flagOn(flags, "reviews_enabled") ? { label: t("kitchen.reviews") } : null,
-    flagOn(flags, "child_pays_enabled") ? { label: t("footer.family"), href: "/family" } : null,
+    flagOn(flags, "child_pays_enabled") ? { label: t("footer.family"), href: familyHref } : null,
     flagOn(flags, "week_discount_enabled") ? { label: t("cart.payWeek") } : null,
     flagOn(flags, "pickup_enabled") ? { label: t("cart.pickup") } : null,
   ].filter((item): item is { label: string; href?: string } => item !== null);
@@ -44,11 +49,11 @@ export function SiteFooter() {
                 </li>
               ) : null}
               <li>
-                <Link href="/orders">{t("footer.myOrders")}</Link>
+                <Link href={ordersHref}>{t("footer.myOrders")}</Link>
               </li>
               {flagOn(flags, "child_pays_enabled") ? (
                 <li>
-                  <Link href="/family">{t("footer.family")}</Link>
+                  <Link href={familyHref}>{t("footer.family")}</Link>
                 </li>
               ) : null}
             </ul>

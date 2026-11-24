@@ -230,7 +230,7 @@ export default function WhatsAppSimPage() {
   }
 
   return (
-    <main>
+    <main className="content-stage">
       <h1>{t("waSim.title")}</h1>
       <p className="muted">{t("waSim.blurb")}</p>
 

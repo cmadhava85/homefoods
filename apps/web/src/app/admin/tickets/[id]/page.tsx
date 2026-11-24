@@ -170,7 +170,7 @@ function TicketDetailInner() {
   const photoSrc = ticket.photoUrl ?? null;
 
   return (
-    <main>
+    <main className="content-stage--md">
       <p className="muted">
         <Link href={adminHref()}>{t("admin.back")}</Link>
       </p>

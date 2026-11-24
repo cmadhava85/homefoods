@@ -3,6 +3,7 @@ import type { ApiOperation } from "./registry.js";
 import { accountOperations } from "../plugins/accountRoutes.contract.js";
 import { adminOperations } from "../plugins/adminRoutes.contract.js";
 import { authOperations } from "../plugins/authRoutes.contract.js";
+import { cateringOperations } from "../plugins/cateringRoutes.contract.js";
 import { cookOperations } from "../plugins/cookRoutes.contract.js";
 import { customerOperations } from "../plugins/customerRoutes.contract.js";
 import { internalOperations } from "../plugins/internalRoutes.contract.js";
@@ -19,6 +20,7 @@ export const allOperations: ApiOperation[] = [
   ...customerOperations,
   ...cookOperations,
   ...adminOperations,
+  ...cateringOperations,
   ...internalOperations,
   ...paymentOperations,
   ...whatsappOperations,

@@ -108,7 +108,7 @@ function FamilyInner() {
 
   if (!flagOn(flags, "child_pays_enabled")) {
     return (
-      <main>
+      <main className="content-stage">
         <h1>{t("family.title")}</h1>
         <p className="muted">{t("orders.featureOff")}</p>
         <Link className="btn" href="/orders">
@@ -119,7 +119,7 @@ function FamilyInner() {
   }
 
   return (
-    <main>
+    <main className="content-stage">
       <h1>{t("family.title")}</h1>
       <p className="muted">{t("family.blurb")}</p>
 

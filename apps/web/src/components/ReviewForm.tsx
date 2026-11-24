@@ -5,9 +5,11 @@ import { useLocale } from "@/components/LocaleProvider";
 import { authFetch } from "@/lib/auth";
 import { flagOn, useFeatureFlags } from "@/lib/features";
 
+type ReviewSaved = { rating: number; comment: string | null; cookReply: string | null };
+
 type Props = {
   publicId: string;
-  onDone?: () => void;
+  onDone?: (saved: ReviewSaved) => void;
   compact?: boolean;
 };
 
@@ -27,14 +29,20 @@ export function ReviewForm({ publicId, onDone, compact }: Props) {
     setBusy(true);
     setErr(null);
     try {
+      const trimmed = comment.trim() || null;
       const res = await authFetch(`/orders/${publicId}/review`, {
         method: "POST",
-        body: JSON.stringify({ rating, comment: comment.trim() || null }),
+        body: JSON.stringify({ rating, comment: trimmed }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Could not save review");
+      const saved: ReviewSaved = {
+        rating: typeof json.rating === "number" ? json.rating : rating,
+        comment: typeof json.comment === "string" ? json.comment : trimmed,
+        cookReply: typeof json.cookReply === "string" ? json.cookReply : null,
+      };
       setOk(true);
-      onDone?.();
+      onDone?.(saved);
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -42,9 +50,11 @@ export function ReviewForm({ publicId, onDone, compact }: Props) {
     }
   }
 
-  if (ok) {
+  // Parent often swaps this form for a summary card via onDone.
+  if (ok && !onDone) {
     return <p className="ok">{t("review.thanks")}</p>;
   }
+  if (ok) return null;
 
   return (
     <form className={compact ? "review-form compact" : "review-form"} onSubmit={submit}>

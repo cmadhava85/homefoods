@@ -18,6 +18,7 @@ import { enqueueOutbox } from "./outboxEnqueue.js";
 import { assertTransition, lineTotalPaise, type OrderState } from "@localmeals/domain";
 import type { GatewayWebhookEvent } from "@localmeals/adapters";
 import { markOrderPaid, resolveCustomerPaymentUrl } from "./orders.js";
+import { isCateringGatewayEvent, markCateringPaymentCaptured } from "./catering.js";
 
 const payLog = createServiceLogger("localmeals-api");
 
@@ -414,6 +415,28 @@ export async function handlePaymentWebhook(db: Db, event: GatewayWebhookEvent) {
           traceId: event.notes.traceId,
           publicId: event.orderPublicId,
         });
+      }
+      if (isCateringGatewayEvent(event)) {
+        const booking = event.gatewayTxnId
+          ? await markCateringPaymentCaptured(db, {
+              gatewayTxnId: event.gatewayTxnId,
+              paymentId: event.paymentId,
+              amountPaise: event.amountPaise,
+              raw: event.raw,
+            })
+          : null;
+        await audit(db, event, booking ? { cookId: booking.cookId, mobile: booking.customerMobile } : {});
+        if (!booking) {
+          return {
+            ok: true,
+            kind: event.kind,
+            ignored: true,
+            reason: "order_not_found",
+            gatewayTxnId: event.gatewayTxnId,
+            orderPublicId: event.orderPublicId,
+          };
+        }
+        return { ok: true, kind: event.kind, status: booking.status, orderPublicId: booking.publicId };
       }
       try {
         const order = await markOrderPaid(db, {

@@ -4,6 +4,7 @@ import {
   addresses,
   adminActionLog,
   authOtps,
+  cateringBookings,
   cookProfiles,
   customerCredits,
   orders,
@@ -66,6 +67,24 @@ export async function deleteCustomerAccount(db: Db, mobile: string) {
     );
   }
 
+  const openParties = await db
+    .select({ publicId: cateringBookings.publicId })
+    .from(cateringBookings)
+    .where(
+      and(
+        eq(cateringBookings.customerMobile, mobile),
+        notInArray(cateringBookings.status, ["COMPLETED", "CANCELLED"]),
+      ),
+    )
+    .limit(20);
+  if (openParties.length > 0) {
+    throw DomainError.conflict(
+      `You have ${openParties.length} party order(s) still open (${openParties
+        .map((o) => o.publicId)
+        .join(", ")}). Cancel them or wait until the event is done, then try again.`,
+    );
+  }
+
   const { creditBalancePaise } = await import("./credits.js");
   const credit = await creditBalancePaise(db, mobile);
   if (credit > 0) {
@@ -114,6 +133,16 @@ export async function deleteCustomerAccount(db: Db, mobile: string) {
       .update(customerCredits)
       .set({ customerMobile: tomb })
       .where(eq(customerCredits.customerMobile, mobile));
+    await tx
+      .update(cateringBookings)
+      .set({
+        customerMobile: tomb,
+        addressId: null,
+        deliveryAddress: REDACTED_ADDRESS,
+        note: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(cateringBookings.customerMobile, mobile));
     await tx
       .update(ratingsReviews)
       .set({ customerMobile: tomb })

@@ -15,6 +15,7 @@ import { authRoutes } from "./plugins/authRoutes.js";
 import { customerRoutes } from "./plugins/customerRoutes.js";
 import { cookRoutes } from "./plugins/cookRoutes.js";
 import { adminRoutes } from "./plugins/adminRoutes.js";
+import { cateringRoutes } from "./plugins/cateringRoutes.js";
 import { paymentRoutes } from "./plugins/paymentRoutes.js";
 import { internalRoutes } from "./plugins/internalRoutes.js";
 import { metaRoutes } from "./plugins/metaRoutes.js";
@@ -69,14 +70,33 @@ export function buildApp(db: Db = createDb(), opts: BuildAppOptions = {}): Fasti
       "http://127.0.0.1:3000",
       ...(process.env.CORS_ORIGINS ?? "")
         .split(",")
-        .map((s) => s.trim())
+        .map((s) => s.trim().replace(/\/$/, ""))
         .filter(Boolean),
     ].filter(Boolean),
+  );
+  /** Cloud Run exposes hash (*.a.run.app) and project-number hosts for the same service. */
+  function cloudRunServiceKey(origin: string): string | null {
+    try {
+      const host = new URL(origin).hostname.toLowerCase();
+      const hash = /^([a-z0-9-]+)-[a-z0-9]+-[a-z0-9]+\.a\.run\.app$/.exec(host);
+      if (hash) return hash[1];
+      const project = /^([a-z0-9-]+)-\d+\.[a-z0-9-]+\.run\.app$/.exec(host);
+      if (project) return project[1];
+      return null;
+    } catch {
+      return null;
+    }
+  }
+  const allowedCloudRunKeys = new Set(
+    [...corsOrigins].map(cloudRunServiceKey).filter((k): k is string => Boolean(k)),
   );
   app.register(cors, {
     origin(origin, cb) {
       if (!origin) return cb(null, true);
-      if (corsOrigins.has(origin)) return cb(null, true);
+      const normalized = origin.replace(/\/$/, "");
+      if (corsOrigins.has(normalized)) return cb(null, true);
+      const key = cloudRunServiceKey(normalized);
+      if (key && allowedCloudRunKeys.has(key)) return cb(null, true);
       cb(new Error("CORS origin not allowed"), false);
     },
     credentials: true,
@@ -153,6 +173,7 @@ export function buildApp(db: Db = createDb(), opts: BuildAppOptions = {}): Fasti
   void app.register(cookRoutes, deps);
   void app.register(internalRoutes, deps);
   void app.register(adminRoutes, deps);
+  void app.register(cateringRoutes, deps);
   void app.register(whatsappWebhook, { db });
   void app.register(logisticsWebhook, { db });
 

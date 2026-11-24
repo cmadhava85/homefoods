@@ -214,10 +214,11 @@ export function progressSteps(
 ) {
   const steps = progressLane(fulfillmentMode, logisticsMode, status);
   const active = progressIndex(status, fulfillmentMode, logisticsMode);
+  const complete = status === "DELIVERED";
   return steps.map((step, i) => ({
     key: step,
     label: customerStatusLabel(t, step, { fulfillmentMode }),
-    state: active < 0 ? "idle" : i < active ? "done" : i === active ? "current" : "todo",
+    state: active < 0 ? "idle" : complete || i < active ? "done" : i === active ? "current" : "todo",
   }));
 }
 
