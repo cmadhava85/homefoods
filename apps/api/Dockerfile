@@ -1,5 +1,5 @@
 # --- build: full deps + compile every workspace the API imports ---
-FROM node:22-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/
@@ -25,7 +25,7 @@ RUN npm run build -w @localmeals/domain \
  && npm run build -w @localmeals/api
 
 # --- prod-deps: production dependencies only (no tsx, stryker, types, test tools) ---
-FROM node:22-alpine AS prod-deps
+FROM node:26-alpine AS prod-deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/
@@ -41,7 +41,7 @@ RUN OMIT_OPT=$([ "$WITH_OTEL" = "true" ] || echo "--omit=optional") \
   -w @localmeals/observability -w @localmeals/adapters -w @localmeals/db -w @localmeals/i18n \
  && npm cache clean --force
 
-FROM node:22-alpine
+FROM node:26-alpine
 RUN apk add --no-cache tzdata
 WORKDIR /app
 ENV NODE_ENV=production
