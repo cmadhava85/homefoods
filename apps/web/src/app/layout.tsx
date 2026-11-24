@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { cookies, headers } from "next/headers";
-import { Figtree, Fraunces, Noto_Sans_Tamil } from "next/font/google";
+import localFont from "next/font/local";
 import { isLocale } from "@localmeals/i18n";
 import "./globals.css";
 import { AuthProvider } from "@/components/AuthProvider";
@@ -10,27 +10,37 @@ import { SiteHeader } from "@/components/SiteHeader";
 import { LOCALE_COOKIE } from "@/lib/locale";
 import { siteUrl } from "@/lib/site";
 
-const fraunces = Fraunces({
-  subsets: ["latin"],
+/** Self-hosted (OFL) — avoids next/font/google CDN flakes in Docker/CI builds. */
+const fraunces = localFont({
+  src: [
+    { path: "../fonts/fraunces-latin-400-normal.woff2", weight: "400", style: "normal" },
+    { path: "../fonts/fraunces-latin-700-normal.woff2", weight: "700", style: "normal" },
+  ],
   variable: "--font-fraunces",
   display: "swap",
   fallback: ["Georgia", "serif"],
 });
 
-const figtree = Figtree({
-  subsets: ["latin"],
+const figtree = localFont({
+  src: [
+    { path: "../fonts/figtree-latin-400-normal.woff2", weight: "400", style: "normal" },
+    { path: "../fonts/figtree-latin-700-normal.woff2", weight: "700", style: "normal" },
+  ],
   variable: "--font-figtree",
   display: "swap",
   fallback: ["system-ui", "sans-serif"],
 });
 
-const notoTamil = Noto_Sans_Tamil({
-  subsets: ["tamil"],
-  weight: ["400", "700"],
+const notoTamil = localFont({
+  src: [
+    { path: "../fonts/noto-sans-tamil-tamil-400-normal.woff2", weight: "400", style: "normal" },
+    { path: "../fonts/noto-sans-tamil-tamil-700-normal.woff2", weight: "700", style: "normal" },
+  ],
   variable: "--font-tamil",
   display: "swap",
   fallback: ["system-ui", "sans-serif"],
   adjustFontFallback: false,
+  preload: false,
 });
 
 const description = "Home-cooked lunch from kitchens near you";
