@@ -320,12 +320,22 @@ jobs:
           CANDIDATE=$(gcloud run services describe localmeals-web --region="$REGION" --format=json \
             | jq -r '.status.traffic[]? | select(.tag=="candidate") | .url' | head -n1)
           TARGET="${CANDIDATE:-$(gcloud run services describe localmeals-web --region="$REGION" --format='value(status.url)')}"
+          # Solo-kitchen mode redirects "/" → /kitchen/<slug> (307). Follow redirects for content checks.
           for path in / /legal/terms /api-health-does-not-exist; do
             CODE=$(curl -s -o /dev/null -w '%{http_code}' "${TARGET}${path}")
-            echo "GET ${path} → ${CODE}"
+            FOLLOW=$(curl -sL -o /dev/null -w '%{http_code}' "${TARGET}${path}")
+            echo "GET ${path} → ${CODE} (follow → ${FOLLOW})"
             case "$path" in
+              /)
+                # Solo kitchen redirects "/" → /kitchen/<slug> (307/302); otherwise 200.
+                case "$CODE" in
+                  200) ;;
+                  302|307) [ "$FOLLOW" = "200" ] || { echo "Home redirect did not land on 200 (FOLLOW=${FOLLOW})"; exit 1; } ;;
+                  *) echo "Unexpected home response CODE=${CODE} FOLLOW=${FOLLOW}"; exit 1 ;;
+                esac
+                ;;
               /api-health-does-not-exist) [ "$CODE" = "404" ] || exit 1 ;;
-              *) [ "$CODE" = "200" ] || exit 1 ;;
+              *) [ "$FOLLOW" = "200" ] || exit 1 ;;
             esac
           done
           if [ -n "$CANDIDATE" ]; then
