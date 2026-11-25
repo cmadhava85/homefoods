@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { useLocale } from "@/components/LocaleProvider";
 import { authFetch, loginPath } from "@/lib/auth";
@@ -63,6 +63,19 @@ export function OrderForm({
   const [spice, setSpice] = useState<"NORMAL" | "LESS">("NORMAL");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // Mobile only: controls stay collapsed behind one "Add" button (CSS ignores this on desktop).
+  const [open, setOpen] = useState(false);
+  const toggled = useRef(false);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const expandRef = useRef<HTMLButtonElement>(null);
+
+  // Keep keyboard/screen-reader focus on a visible control when the card opens or closes.
+  useEffect(() => {
+    if (!toggled.current) return;
+    toggled.current = false;
+    if (open) bodyRef.current?.querySelector<HTMLButtonElement>(".order-ctas button")?.focus();
+    else expandRef.current?.focus();
+  }, [open]);
   const useCart = Boolean(onAddToCart) && orderingOpen;
   const lateClosed = !orderingOpen && !lateOrdersEnabled;
   const canOrder = orderingOpen || lateOrdersEnabled;
@@ -136,77 +149,100 @@ export function OrderForm({
       qty,
       spice,
     });
+    toggled.current = true;
+    setOpen(false);
   }
 
   if (ready && (!user || user.role !== "CUSTOMER")) {
     return (
-      <p className="muted order-signin">
-        <Link href={loginPath("CUSTOMER", `/kitchen/${cookSlug}`)}>{t("order.signIn")}</Link>
-        {t("order.signInTo", { item: dish, date: serviceDate })}
-      </p>
+      <Link
+        className="btn secondary order-signin"
+        href={loginPath("CUSTOMER", `/kitchen/${cookSlug}`)}
+        aria-label={`${t("order.signInCta")}: ${dish}`}
+      >
+        {t("order.signInCta")}
+      </Link>
     );
   }
 
   return (
-    <div className="order-actions">
-      <div className="order-controls">
-        <div className="order-field">
-          <span>{t("order.qty")}</span>
-          <div className="qty-stepper" role="group" aria-label={t("order.qty")}>
-            <button
-              type="button"
-              className="qty-stepper-btn"
-              aria-label="−"
-              disabled={qty <= 1}
-              onClick={() => setQty((q) => Math.max(1, q - 1))}
-            >
-              −
-            </button>
-            <span className="qty-stepper-value" aria-live="polite">
-              {qty}
-            </span>
-            <button
-              type="button"
-              className="qty-stepper-btn"
-              aria-label="+"
-              onClick={() => setQty((q) => Math.min(20, q + 1))}
-            >
-              +
-            </button>
+    <div className={`order-actions${open ? " is-open" : ""}`}>
+      {canOrder ? (
+        <button
+          type="button"
+          ref={expandRef}
+          className="btn mustard order-expand"
+          aria-expanded={open}
+          aria-controls={`order-body-${menuItemId}-${serviceDate}`}
+          aria-label={`${orderingOpen ? t("order.add") : t("order.late")}: ${dish}`}
+          onClick={() => {
+            toggled.current = true;
+            setOpen(true);
+          }}
+        >
+          {orderingOpen ? t("order.add") : t("order.late")}
+        </button>
+      ) : null}
+      <div className="order-body" ref={bodyRef} id={`order-body-${menuItemId}-${serviceDate}`}>
+        <div className="order-controls">
+          <div className="order-field">
+            <span>{t("order.qty")}</span>
+            <div className="qty-stepper" role="group" aria-label={t("order.qty")}>
+              <button
+                type="button"
+                className="qty-stepper-btn"
+                aria-label="−"
+                disabled={qty <= 1}
+                onClick={() => setQty((q) => Math.max(1, q - 1))}
+              >
+                −
+              </button>
+              <span className="qty-stepper-value" aria-live="polite">
+                {qty}
+              </span>
+              <button
+                type="button"
+                className="qty-stepper-btn"
+                aria-label="+"
+                onClick={() => setQty((q) => Math.min(20, q + 1))}
+              >
+                +
+              </button>
+            </div>
           </div>
+          <label className="order-field order-field-grow">
+            <span>{t("order.spice")}</span>
+            <select value={spice} onChange={(e) => setSpice(e.target.value as "NORMAL" | "LESS")}>
+              <option value="NORMAL">{t("order.spiceNormal")}</option>
+              <option value="LESS">{t("order.spiceLess")}</option>
+            </select>
+          </label>
         </div>
-        <label className="order-field order-field-grow">
-          <span>{t("order.spice")}</span>
-          <select value={spice} onChange={(e) => setSpice(e.target.value as "NORMAL" | "LESS")}>
-            <option value="NORMAL">{t("order.spiceNormal")}</option>
-            <option value="LESS">{t("order.spiceLess")}</option>
-          </select>
-        </label>
-      </div>
-      <div className="order-ctas">
-        {useCart ? (
-          <button className="btn mustard order-cta-primary" type="button" disabled={!ready} onClick={addToCart}>
-            {t("order.addWeek")}
-          </button>
-        ) : null}
-        {canOrder ? (
-          <button
-            className={useCart ? "btn secondary order-cta-secondary" : "btn order-cta-primary"}
-            type="button"
-            disabled={loading || !ready}
-            onClick={submitInstant}
-          >
-            {loading
-              ? orderingOpen
-                ? t("order.creating")
-                : t("order.requesting")
-              : orderingOpen
-                ? useCart
-                  ? t("order.thisDayOnly")
-                  : t("order.forDate", { date: serviceDate })
-                : t("order.late")}
-          </button>
-        ) : null}
+        <div className="order-ctas">
+          {useCart ? (
+            <button className="btn mustard order-cta-primary" type="button" disabled={!ready} onClick={addToCart}>
+              {t("order.addWeek")}
+            </button>
+          ) : null}
+          {canOrder ? (
+            <button
+              className={useCart ? "btn secondary order-cta-secondary" : "btn order-cta-primary"}
+              type="button"
+              disabled={loading || !ready}
+              onClick={submitInstant}
+            >
+              {loading
+                ? orderingOpen
+                  ? t("order.creating")
+                  : t("order.requesting")
+                : orderingOpen
+                  ? useCart
+                    ? t("order.thisDayOnly")
+                    : t("order.forDate", { date: serviceDate })
+                  : t("order.late")}
+            </button>
+          ) : null}
+        </div>
       </div>
       {lateClosed ? (
         <p className="muted order-note">{t("order.lateClosed")}</p>

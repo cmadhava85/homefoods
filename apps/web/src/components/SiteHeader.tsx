@@ -33,7 +33,10 @@ export function SiteHeader() {
           LocalMeals
         </Link>
 
-        <nav className="site-nav" aria-label="Main">
+        <nav
+          className={`site-nav${ready && !user ? " is-single" : ""}`}
+          aria-label="Main"
+        >
           {!ready ? (
             <span className="site-nav-placeholder" aria-hidden />
           ) : user?.role === "COOK" && user.cookSlug ? (
@@ -114,7 +117,7 @@ export function SiteHeader() {
                     : t("nav.admin")}
               </span>
               <button
-                className="btn sm secondary"
+                className="btn sm secondary site-header-switch"
                 type="button"
                 onClick={() => router.push(loginPath(user.role, pathname, true))}
               >

@@ -8,6 +8,7 @@ import { useAuth } from "@/components/AuthProvider";
 import { useLocale } from "@/components/LocaleProvider";
 import { API_BASE } from "@/lib/api";
 import { authFetch } from "@/lib/auth";
+import { friendlyServiceDate } from "@/lib/serviceDate";
 
 type Cook = {
   id: string;
@@ -59,14 +60,21 @@ function imgSrc(url: string | null | undefined, i: number) {
 
 export function DiscoverClient() {
   const { user } = useAuth();
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
 
   function openLabel(
     k: Pick<Cook, "orderingOpen" | "openStatusLabel" | "nextServiceDate" | "lunchCutoff">,
   ) {
+    if (!k.orderingOpen && k.nextServiceDate) {
+      return t("discover.closedNext", {
+        date: friendlyServiceDate(k.nextServiceDate, locale, {
+          today: t("common.today"),
+          tomorrow: t("common.tomorrow"),
+        }),
+      });
+    }
     if (k.openStatusLabel) return k.openStatusLabel;
     if (k.orderingOpen) return t("discover.openBy", { cutoff: k.lunchCutoff ?? "08:00" });
-    if (k.nextServiceDate) return t("discover.closedNext", { date: k.nextServiceDate });
     return t("discover.closedNow");
   }
   const [pin, setPin] = useState("600119");
@@ -320,7 +328,7 @@ export function DiscoverClient() {
                   <li>{t("common.newKitchen")}</li>
                 )}
               </ul>
-              <span className="tile-cta-link">{t("discover.seeMenu")} →</span>
+              <span className="tile-cta-link">{t("discover.seeMenu")}</span>
             </div>
           </Link>
         ))}

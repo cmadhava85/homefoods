@@ -18,6 +18,7 @@ import { CookDeskHero } from "./CookDeskHero";
 import { CookSettingsCards } from "./CookSettingsCards";
 import { CateringDeskPanel } from "./CateringDeskPanel";
 import type { DeskReview, Manifest, MealType, MenuItem, WaFeedItem } from "./types";
+import { friendlyServiceDate } from "@/lib/serviceDate";
 
 type ManifestOrder = Manifest["orders"][number];
 type DeskStop = CookStopGroup<ManifestOrder>;
@@ -48,7 +49,9 @@ function CookDeskInner() {
   const { slug } = useParams<{ slug: string }>();
   const { user } = useAuth();
   const router = useRouter();
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
+  const fmtDate = (iso: string) =>
+    friendlyServiceDate(iso, locale, { today: t("common.today"), tomorrow: t("common.tomorrow") });
   const dayLabels = DAY_KEYS.map((k) => t(k));
   const mealTabs = MEAL_IDS.map((id) => ({ id, label: t(MEAL_KEYS[id]) }));
   const [mealType, setMealType] = useState<MealType>("LUNCH");
@@ -1196,80 +1199,6 @@ function CookDeskInner() {
 
       {deskPanel === "run" ? (
         <>
-          {data.earnings ? (
-            <section className="cook-earnings" aria-label={t("cook.earnings")}>
-              <div className="cook-earnings-head">
-                <div>
-                  <p className="cook-earnings-kicker">
-                    {t("cook.earnings")} · {data.earnings.serviceDate}
-                  </p>
-                  <h2>{t("cook.foodPaid")}</h2>
-                </div>
-                <span
-                  className={`chip cook-payout-chip tone-${
-                    data.earnings.payout.status === "PAID"
-                      ? "done"
-                      : data.earnings.payout.status === "PENDING"
-                        ? "warn"
-                        : "neutral"
-                  }`}
-                >
-                  {data.earnings.payout.label}
-                </span>
-              </div>
-              <div className="cook-earnings-grid">
-                <div className="cook-earn-stat">
-                  <strong>₹{(data.earnings.meal.foodPaise / 100).toFixed(0)}</strong>
-                  <span>
-                    {t("cook.thisMeal")} · {t("cook.plates", { n: data.earnings.meal.plates })}
-                  </span>
-                </div>
-                <div className="cook-earn-stat">
-                  <strong>₹{(data.earnings.day.foodPaise / 100).toFixed(0)}</strong>
-                  <span>
-                    {t("cook.allDay")} · {t("cook.plates", { n: data.earnings.day.plates })}
-                  </span>
-                </div>
-                <div className="cook-earn-stat">
-                  <strong>₹{(data.earnings.day.deliveredFoodPaise / 100).toFixed(0)}</strong>
-                  <span>
-                    {t("cook.deliveredPicked")} · {data.earnings.day.deliveredPlates}
-                  </span>
-                </div>
-              </div>
-              {data.earnings.payout.detail ? (
-                <p className="cook-earnings-detail">{data.earnings.payout.detail}</p>
-              ) : null}
-              {data.earnings.day.heldPlates > 0 ? (
-                <p className="muted cook-earnings-hold">
-                  {t("cook.onHold", { n: data.earnings.day.heldPlates })}
-                </p>
-              ) : null}
-              {(data.earnings.day.commissionPaise ?? 0) > 0 ? (
-                <p className="muted cook-earnings-hold">
-                  {t("cook.commissionToday", {
-                    amount: ((data.earnings.day.commissionPaise ?? 0) / 100).toFixed(2),
-                  })}
-                </p>
-              ) : null}
-              {(data.earnings.day.clawbackPaise ?? 0) > 0 ? (
-                <p className="muted cook-earnings-hold">
-                  {t("cook.clawbackToday", {
-                    amount: ((data.earnings.day.clawbackPaise ?? 0) / 100).toFixed(0),
-                  })}
-                </p>
-              ) : null}
-              {(data.earnings.day.pendingClawbackPaise ?? 0) > 0 ? (
-                <p className="muted cook-earnings-hold">
-                  {t("cook.clawbackPending", {
-                    amount: ((data.earnings.day.pendingClawbackPaise ?? 0) / 100).toFixed(0),
-                  })}
-                </p>
-              ) : null}
-              <p className="muted cook-earnings-note">{data.earnings.note}</p>
-            </section>
-          ) : null}
-
           <section className="cook-run-summary" aria-label={t("cook.tabRun")}>
             <div className="cook-stat">
               <strong>{orders.length}</strong>
@@ -1297,51 +1226,6 @@ function CookDeskInner() {
             </div>
           </section>
 
-          <section className="cook-upcoming" aria-label={t("cook.upcomingTitle")} style={{ marginBottom: "0.85rem" }}>
-            <h2 style={{ margin: "0 0 0.25rem", fontSize: "1.05rem" }}>{t("cook.upcomingTitle")}</h2>
-            <p className="muted" style={{ margin: "0 0 0.55rem", fontSize: "0.9rem" }}>
-              {t("cook.upcomingHelp")}
-            </p>
-            {upcomingDays.length === 0 ? (
-              <p className="muted" style={{ margin: 0 }}>
-                {t("cook.upcomingEmpty")}
-              </p>
-            ) : (
-              <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-                {upcomingDays.map((day) => {
-                  const dateLabel = (() => {
-                    const parts = day.serviceDate.split("-");
-                    if (parts.length === 3) return `${parts[2]}/${parts[1]}`;
-                    return day.serviceDate;
-                  })();
-                  return (
-                    <li
-                      key={`${day.serviceDate}-${day.mealType}`}
-                      style={{
-                        marginBottom: "0.55rem",
-                        paddingBottom: "0.45rem",
-                        borderBottom: "1px solid color-mix(in srgb, currentColor 12%, transparent)",
-                      }}
-                    >
-                      <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap" }}>
-                        <strong>
-                          {day.dayLabel} {dateLabel}
-                        </strong>
-                        <span className="muted">
-                          {t("cook.upcomingPlates", { n: String(day.totalPlates) })}
-                          {day.mealType && day.mealType !== "LUNCH" ? ` · ${day.mealType}` : ""}
-                        </span>
-                      </div>
-                      <p style={{ margin: "0.3rem 0 0", fontSize: "0.95rem" }}>
-                        {day.lines.map((l) => `${l.qty}× ${l.itemName}`).join(" · ")}
-                      </p>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </section>
-
           {cancelPending.length > 0 ? (
             <section aria-label={t("cook.cancelRequests")} style={{ marginBottom: "0.85rem" }}>
               <h2 style={{ margin: "0 0 0.5rem" }}>{t("cook.cancelRequests")}</h2>
@@ -1354,7 +1238,7 @@ function CookDeskInner() {
                     <span className="chip tone-warn">{t("status.label.cancelRequested")}</span>
                   </div>
                   <p className="muted" style={{ margin: "0.35rem 0 0" }}>
-                    {o.serviceDate ? `${o.serviceDate} · ` : ""}
+                    {o.serviceDate ? `${fmtDate(o.serviceDate)} · ` : ""}
                     {o.customerMobile}
                   </p>
                   <p style={{ margin: "0.4rem 0 0", fontWeight: 650 }}>
@@ -2039,6 +1923,125 @@ function CookDeskInner() {
           </div>
         );
       })}
+
+          <section className="cook-upcoming" aria-label={t("cook.upcomingTitle")} style={{ marginBottom: "0.85rem" }}>
+            <h2 style={{ margin: "0 0 0.25rem", fontSize: "1.05rem" }}>{t("cook.upcomingTitle")}</h2>
+            <p className="muted" style={{ margin: "0 0 0.55rem", fontSize: "0.9rem" }}>
+              {t("cook.upcomingHelp")}
+            </p>
+            {upcomingDays.length === 0 ? (
+              <p className="muted" style={{ margin: 0 }}>
+                {t("cook.upcomingEmpty")}
+              </p>
+            ) : (
+              <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                {upcomingDays.map((day) => {
+                  const dateLabel = (() => {
+                    const parts = day.serviceDate.split("-");
+                    if (parts.length === 3) return `${parts[2]}/${parts[1]}`;
+                    return day.serviceDate;
+                  })();
+                  return (
+                    <li
+                      key={`${day.serviceDate}-${day.mealType}`}
+                      style={{
+                        marginBottom: "0.55rem",
+                        paddingBottom: "0.45rem",
+                        borderBottom: "1px solid color-mix(in srgb, currentColor 12%, transparent)",
+                      }}
+                    >
+                      <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap" }}>
+                        <strong>
+                          {day.dayLabel} {dateLabel}
+                        </strong>
+                        <span className="muted">
+                          {t("cook.upcomingPlates", { n: String(day.totalPlates) })}
+                          {day.mealType && day.mealType !== "LUNCH" ? ` · ${day.mealType}` : ""}
+                        </span>
+                      </div>
+                      <p style={{ margin: "0.3rem 0 0", fontSize: "0.95rem" }}>
+                        {day.lines.map((l) => `${l.qty}× ${l.itemName}`).join(" · ")}
+                      </p>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+
+          {data.earnings ? (
+            <section className="cook-earnings" aria-label={t("cook.earnings")}>
+              <div className="cook-earnings-head">
+                <div>
+                  <p className="cook-earnings-kicker">
+                    {t("cook.earnings")} · {fmtDate(data.earnings.serviceDate)}
+                  </p>
+                  <h2>{t("cook.foodPaid")}</h2>
+                </div>
+                <span
+                  className={`chip cook-payout-chip tone-${
+                    data.earnings.payout.status === "PAID"
+                      ? "done"
+                      : data.earnings.payout.status === "PENDING"
+                        ? "warn"
+                        : "neutral"
+                  }`}
+                >
+                  {data.earnings.payout.label}
+                </span>
+              </div>
+              <div className="cook-earnings-grid">
+                <div className="cook-earn-stat">
+                  <strong>₹{(data.earnings.meal.foodPaise / 100).toFixed(0)}</strong>
+                  <span>
+                    {t("cook.thisMeal")} · {t("cook.plates", { n: data.earnings.meal.plates })}
+                  </span>
+                </div>
+                <div className="cook-earn-stat">
+                  <strong>₹{(data.earnings.day.foodPaise / 100).toFixed(0)}</strong>
+                  <span>
+                    {t("cook.allDay")} · {t("cook.plates", { n: data.earnings.day.plates })}
+                  </span>
+                </div>
+                <div className="cook-earn-stat">
+                  <strong>₹{(data.earnings.day.deliveredFoodPaise / 100).toFixed(0)}</strong>
+                  <span>
+                    {t("cook.deliveredPicked")} · {data.earnings.day.deliveredPlates}
+                  </span>
+                </div>
+              </div>
+              {data.earnings.payout.detail ? (
+                <p className="cook-earnings-detail">{data.earnings.payout.detail}</p>
+              ) : null}
+              {data.earnings.day.heldPlates > 0 ? (
+                <p className="muted cook-earnings-hold">
+                  {t("cook.onHold", { n: data.earnings.day.heldPlates })}
+                </p>
+              ) : null}
+              {(data.earnings.day.commissionPaise ?? 0) > 0 ? (
+                <p className="muted cook-earnings-hold">
+                  {t("cook.commissionToday", {
+                    amount: ((data.earnings.day.commissionPaise ?? 0) / 100).toFixed(2),
+                  })}
+                </p>
+              ) : null}
+              {(data.earnings.day.clawbackPaise ?? 0) > 0 ? (
+                <p className="muted cook-earnings-hold">
+                  {t("cook.clawbackToday", {
+                    amount: ((data.earnings.day.clawbackPaise ?? 0) / 100).toFixed(0),
+                  })}
+                </p>
+              ) : null}
+              {(data.earnings.day.pendingClawbackPaise ?? 0) > 0 ? (
+                <p className="muted cook-earnings-hold">
+                  {t("cook.clawbackPending", {
+                    amount: ((data.earnings.day.pendingClawbackPaise ?? 0) / 100).toFixed(0),
+                  })}
+                </p>
+              ) : null}
+              <p className="muted cook-earnings-note">{data.earnings.note}</p>
+            </section>
+          ) : null}
         </>
       ) : null}
 
@@ -2098,7 +2101,7 @@ function CookDeskInner() {
                       <span className="chip">{r.orderPublicId}</span>
                     </div>
                     <p className="cook-review-meta muted">
-                      {r.customerLabel} · {r.itemName} · {r.serviceDate}
+                      {r.customerLabel} · {r.itemName} · {fmtDate(r.serviceDate)}
                     </p>
                     {r.comment ? <p className="cook-review-comment">{r.comment}</p> : null}
                     {r.cookReply && !editing ? (

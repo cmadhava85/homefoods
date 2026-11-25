@@ -931,6 +931,18 @@ h2 {
   flex: 1;
   min-height: 44px;
   font-size: 0.86rem;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.05rem;
+  line-height: 1.15;
+}
+
+.meal-seg-sub {
+  font-size: 0.7rem;
+  font-weight: 500;
+  opacity: 0.72;
 }
 
 .kitchen-empty {
@@ -1140,6 +1152,16 @@ h2 {
   gap: 0.45rem;
 }
 
+.order-body {
+  display: flex;
+  flex-direction: column;
+  gap: inherit;
+}
+
+.order-expand {
+  display: none;
+}
+
 .order-ctas .btn {
   width: 100%;
   min-height: 48px;
@@ -1155,10 +1177,16 @@ h2 {
   font-size: 0.82rem;
 }
 
-.order-note,
-.order-signin {
+.order-note {
   margin: 0;
   font-size: 0.82rem;
+}
+
+.btn.order-signin {
+  width: 100%;
+  margin-top: 0.75rem;
+  min-height: 44px;
+  justify-content: center;
 }
 
 .cart-dock-sum {
@@ -2171,6 +2199,51 @@ h2 {
 
 .cook-hero h1 {
   margin-bottom: 0.25rem;
+}
+
+.cook-hero-more-toggle {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .cook-hero-more-toggle {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    min-height: 44px;
+    margin-top: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface);
+    color: var(--ink);
+    font: inherit;
+    font-size: 0.86rem;
+    font-weight: 650;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .cook-hero-more-toggle::after {
+    content: "▾";
+    margin-left: auto;
+    transition: transform 0.2s var(--ease-out);
+  }
+
+  .cook-hero-more-toggle[aria-expanded="true"]::after {
+    transform: rotate(180deg);
+  }
+
+  .cook-hero-more-toggle .muted {
+    font-size: 0.78rem;
+    font-weight: 500;
+  }
+
+  .cook-hero-more:not(.is-open) {
+    display: none;
+  }
 }
 
 .desk-tabs {
@@ -3206,7 +3279,14 @@ h2 {
 .onboard-standards-title {
   font-family: var(--font-display);
   font-size: 1.05rem;
-  margin: 0 0 0.35rem;
+  margin: 0;
+  cursor: pointer;
+  min-height: 32px;
+  display: list-item;
+}
+
+.onboard-standards[open] .onboard-standards-title {
+  margin-bottom: 0.35rem;
 }
 
 .onboard-accept {
@@ -3346,6 +3426,48 @@ h2 {
     grid-template-columns: 1.2fr 1fr auto;
     align-items: end;
   }
+
+  .admin-mark-paid-toggle {
+    display: none !important;
+  }
+}
+
+@media (max-width: 719.98px) {
+  .admin-mark-paid-toggle {
+    width: 100%;
+    min-height: 44px;
+    margin-top: 0.75rem;
+  }
+
+  .admin-mark-paid:not(.is-open) {
+    display: none;
+  }
+
+  /* 8 tabs: one swipeable row instead of a cramped grid. */
+  .admin-page .desk-tabs {
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity;
+  }
+
+  .admin-page .desk-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .admin-page .desk-tabs button {
+    flex: 0 0 auto;
+    padding-inline: 0.9rem;
+    scroll-snap-align: start;
+    white-space: nowrap;
+  }
+
+  .admin-page .meta-list a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 40px;
+    font-weight: 650;
+  }
 }
 
 input,
@@ -3365,7 +3487,8 @@ select {
   align-items: end;
   color: #fff;
   overflow: hidden;
-  margin: calc(-1 * max(0.75rem, env(safe-area-inset-top)) + 0px) 0 0;
+  /* margin-top only: a shorthand here would wipe .bleed's negative side margins. */
+  margin-top: calc(-1 * max(0.75rem, env(safe-area-inset-top)) + 0px);
   background: #083528;
   isolation: isolate;
 }
@@ -4254,7 +4377,9 @@ select {
   }
 
   .site-header {
-    top: max(0.15rem, env(safe-area-inset-top));
+    /* On phones the 2-row header + page sticky tools ate ~40% of the viewport; let it scroll away. */
+    position: relative;
+    top: auto;
     margin-bottom: 0.65rem;
   }
 
@@ -4292,11 +4417,13 @@ select {
   }
 
   .site-header-auth .lang-toggle button {
-    font-size: 0.68rem;
-    padding: 0.26rem 0.45rem;
+    font-size: 0.72rem;
+    padding: 0.3rem 0.6rem;
+    min-height: 34px;
   }
 
-  .site-header-ops {
+  .site-header-ops,
+  .site-header-switch {
     display: none !important;
   }
 
@@ -4330,6 +4457,24 @@ select {
     display: none;
   }
 
+  /* Guest: lone "Discover" link joins the brand row instead of taking a whole row. */
+  .site-header-inner:has(.site-nav.is-single) {
+    grid-template-columns: auto auto minmax(0, 1fr);
+    grid-template-areas: "brand nav auth";
+  }
+
+  .site-nav.is-single {
+    border-top: 0;
+    padding: 0;
+    margin: 0;
+    overflow: visible;
+  }
+
+  .site-nav.is-single a {
+    min-height: 36px;
+    padding: 0.35rem 0.6rem;
+  }
+
   .site-nav-placeholder {
     min-width: 6rem;
     min-height: 2.35rem;
@@ -4350,6 +4495,31 @@ select {
   .site-footer {
     margin-top: 1.5rem;
     padding: 0 0 0.15rem;
+  }
+
+  /* Readability + touch-target floors (≥12px text, ≥40px controls). */
+  .chip,
+  .kitchen-kicker,
+  .kitchen-tile-status,
+  .day-chip-label,
+  .day-chip-count,
+  .meal-seg-sub,
+  .cook-earnings-kicker,
+  .cook-earn-stat span,
+  .cook-stat span,
+  .admin-shell .chip {
+    font-size: 0.75rem;
+  }
+
+  main .btn.sm {
+    min-height: 40px;
+  }
+
+  main input[type="checkbox"],
+  main input[type="radio"] {
+    width: 1.25rem;
+    height: 1.25rem;
+    flex-shrink: 0;
   }
 
   .site-footer-panel {
@@ -4548,7 +4718,7 @@ select {
   }
 
   .kitchen-sticky-tools {
-    top: calc(max(0.15rem, env(safe-area-inset-top)) + 6.1rem);
+    top: env(safe-area-inset-top);
   }
 
   .plate-card {
@@ -4559,6 +4729,11 @@ select {
   .plate-media {
     aspect-ratio: 4 / 3;
     max-height: 200px;
+  }
+
+  /* No photo: the fallback banner only repeats the dish name shown right below it. */
+  .plate-card .plate-fallback {
+    display: none;
   }
 
   .plate-body {
@@ -4581,6 +4756,17 @@ select {
 
   .order-cta-primary {
     min-height: 50px;
+  }
+
+  /* Collapsed dish card: one tap target instead of qty + spice + two buttons. */
+  .order-actions:not(.is-open) .order-body {
+    display: none;
+  }
+
+  .order-actions:not(.is-open) .order-expand {
+    display: inline-flex;
+    width: 100%;
+    min-height: 46px;
   }
 
   .day-head {
@@ -4730,7 +4916,7 @@ select {
   }
 
   .order-controls {
-    grid-template-columns: 4.75rem 1fr;
+    grid-template-columns: auto 1fr;
   }
 
   .orders-hero h1 {
@@ -4794,7 +4980,7 @@ select {
   }
 
   .cook-run-bar {
-    top: calc(max(0.15rem, env(safe-area-inset-top)) + 6.4rem);
+    top: max(0.35rem, env(safe-area-inset-top));
     grid-template-columns: 1fr;
   }
 

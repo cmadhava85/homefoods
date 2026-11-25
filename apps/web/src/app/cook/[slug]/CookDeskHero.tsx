@@ -42,6 +42,7 @@ export function CookDeskHero({
   const [remainingInput, setRemainingInput] = useState("");
   const [trimBusy, setTrimBusy] = useState(false);
   const [trimMsg, setTrimMsg] = useState<string | null>(null);
+  const [moreOpen, setMoreOpen] = useState(false);
 
   async function loadCapacity() {
     try {
@@ -114,64 +115,79 @@ export function CookDeskHero({
         </button>
         <p className="muted cook-pause-help">{t("cook.pauseTodayHelp")}</p>
       </div>
-      <div className="cook-pause-row">
-        <button
-          type="button"
-          className={`cook-toggle ${lateOrdersEnabled && latePlatformEnabled ? "on tone-go" : "on tone-warn"}`}
-          role="switch"
-          aria-checked={lateOrdersEnabled}
-          disabled={togglingLate}
-          onClick={onToggleLate}
-        >
-          <span className="cook-toggle-knob" aria-hidden />
-          <span className="cook-toggle-text">
-            {lateOrdersEnabled ? t("cook.lateOn") : t("cook.lateOff")}
-          </span>
-        </button>
-        <p className="muted cook-pause-help">
-          {!latePlatformEnabled ? t("cook.latePlatformOff") : t("cook.lateHelp")}
-        </p>
-      </div>
-      <div className="cook-trim-row">
-        <p className="muted" style={{ margin: "0.5rem 0 0.25rem", fontSize: "0.9rem" }}>
-          {t("cook.trimCapacityHelp")}
-        </p>
-        {cap ? (
-          <p className="muted" style={{ margin: "0 0 0.35rem", fontSize: "0.85rem" }}>
-            {t("cook.trimCapacityUsed", {
-              used: String(cap.used),
-              remaining: String(cap.remaining),
-              max: String(cap.maxDailyCapacity),
-            })}
-          </p>
-        ) : null}
-        <div className="field-row" style={{ gap: "0.5rem", alignItems: "center" }}>
-          <label className="muted" style={{ fontSize: "0.9rem" }}>
-            {t("cook.trimCapacity")}
-            <input
-              type="number"
-              min={0}
-              max={500}
-              value={remainingInput}
-              onChange={(e) => setRemainingInput(e.target.value)}
-              style={{ marginLeft: "0.5rem", width: "4.5rem" }}
-              aria-label={t("cook.trimCapacity")}
-            />
-          </label>
+      <button
+        type="button"
+        className="cook-hero-more-toggle"
+        aria-expanded={moreOpen}
+        aria-controls="cook-hero-more"
+        onClick={() => setMoreOpen((v) => !v)}
+      >
+        <span>{t("cook.moreControls")}</span>
+        <span className="muted">
+          {lateOrdersEnabled ? t("cook.lateOn") : t("cook.lateOff")}
+          {cap ? ` · ${cap.remaining}/${cap.maxDailyCapacity}` : ""}
+        </span>
+      </button>
+      <div id="cook-hero-more" className={`cook-hero-more${moreOpen ? " is-open" : ""}`}>
+        <div className="cook-pause-row">
           <button
             type="button"
-            className="btn sm"
-            disabled={trimBusy}
-            onClick={() => void saveTrim()}
+            className={`cook-toggle ${lateOrdersEnabled && latePlatformEnabled ? "on tone-go" : "on tone-warn"}`}
+            role="switch"
+            aria-checked={lateOrdersEnabled}
+            disabled={togglingLate}
+            onClick={onToggleLate}
           >
-            {t("cook.trimCapacitySave")}
+            <span className="cook-toggle-knob" aria-hidden />
+            <span className="cook-toggle-text">
+              {lateOrdersEnabled ? t("cook.lateOn") : t("cook.lateOff")}
+            </span>
           </button>
-        </div>
-        {trimMsg ? (
-          <p className="muted" style={{ margin: "0.25rem 0 0", fontSize: "0.85rem" }}>
-            {trimMsg}
+          <p className="muted cook-pause-help">
+            {!latePlatformEnabled ? t("cook.latePlatformOff") : t("cook.lateHelp")}
           </p>
-        ) : null}
+        </div>
+        <div className="cook-trim-row">
+          <p className="muted" style={{ margin: "0.5rem 0 0.25rem", fontSize: "0.9rem" }}>
+            {t("cook.trimCapacityHelp")}
+          </p>
+          {cap ? (
+            <p className="muted" style={{ margin: "0 0 0.35rem", fontSize: "0.85rem" }}>
+              {t("cook.trimCapacityUsed", {
+                used: String(cap.used),
+                remaining: String(cap.remaining),
+                max: String(cap.maxDailyCapacity),
+              })}
+            </p>
+          ) : null}
+          <div className="field-row" style={{ gap: "0.5rem", alignItems: "center" }}>
+            <label className="muted" style={{ fontSize: "0.9rem" }}>
+              {t("cook.trimCapacity")}
+              <input
+                type="number"
+                min={0}
+                max={500}
+                value={remainingInput}
+                onChange={(e) => setRemainingInput(e.target.value)}
+                style={{ marginLeft: "0.5rem", width: "4.5rem" }}
+                aria-label={t("cook.trimCapacity")}
+              />
+            </label>
+            <button
+              type="button"
+              className="btn sm"
+              disabled={trimBusy}
+              onClick={() => void saveTrim()}
+            >
+              {t("cook.trimCapacitySave")}
+            </button>
+          </div>
+          {trimMsg ? (
+            <p className="muted" style={{ margin: "0.25rem 0 0", fontSize: "0.85rem" }}>
+              {trimMsg}
+            </p>
+          ) : null}
+        </div>
       </div>
     </header>
   );

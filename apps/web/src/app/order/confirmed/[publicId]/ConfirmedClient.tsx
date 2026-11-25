@@ -30,7 +30,10 @@ export type ConfirmedOrderView = {
   deliveryPaise: number;
   platformFeePaise: number;
   gatewayTxnId: string | null;
-  deliveryTargetAddress: string;
+  /** Owner/staff only — omitted on public (capability-link) views. */
+  deliveryTargetAddress?: string | null;
+  /** Public view flag when address was stripped for privacy. */
+  hasDeliveryAddress?: boolean;
   serviceDate: string;
   mealType?: string;
   kitchenName?: string | null;
@@ -198,11 +201,16 @@ function DetailRow({ label, children }: { label: string; children: ReactNode }) 
 function formatDeliveryAddress(
   raw: string | null | undefined,
   t: (key: MsgKey, params?: Record<string, string | number>) => string,
+  hasDeliveryAddress?: boolean,
 ) {
   const addr = (raw ?? "").trim();
-  if (!addr) return t("confirmed.addressOnFile");
-  if (/^address on file/i.test(addr)) return t("confirmed.addressPlaceholder");
-  return addr;
+  if (addr) {
+    if (/^address on file/i.test(addr)) return t("confirmed.addressPlaceholder");
+    return addr;
+  }
+  // Public GET /orders/:id strips the line but sets hasDeliveryAddress when one exists.
+  if (hasDeliveryAddress) return t("confirmed.addressPrivate");
+  return t("confirmed.addressOnFile");
 }
 
 export function ConfirmedCheckoutClient({ checkout }: { checkout: ConfirmedCheckoutView }) {
@@ -432,7 +440,11 @@ export function ConfirmedOrderClient({ order }: { order: ConfirmedOrderView }) {
           ) : (
             <>
               <DetailRow label={t("confirmed.deliverTo")}>
-                {formatDeliveryAddress(order.deliveryTargetAddress, t)}
+                {formatDeliveryAddress(
+                  order.deliveryTargetAddress,
+                  t,
+                  order.hasDeliveryAddress,
+                )}
               </DetailRow>
               {showHowDelivered ? (
                 <DetailRow label={t("confirmed.howDelivered")}>

@@ -5,7 +5,7 @@ import { useLocale } from "@/components/LocaleProvider";
 import { hideCookOnboard, kitchensBrowseHref } from "@/lib/soloKitchen";
 
 const HERO_IMG =
-  "https://images.unsplash.com/photo-1467003909585-2f8a72700288?auto=format&fit=crop&w=2000&q=80";
+  "https://images.unsplash.com/photo-1546833999-b9f581a1996d?auto=format&fit=crop&w=2000&q=80";
 
 export default function HomePage() {
   const { t } = useLocale();
@@ -19,7 +19,7 @@ export default function HomePage() {
         <img
           className="hero-media"
           src={HERO_IMG}
-          alt="Fresh home-cooked South Indian lunch plated on a table"
+          alt="Home-cooked lunch of chapati, sabzi and dal on a steel thali"
         />
         <div className="hero-shade" />
         <div className="hero-grain" aria-hidden />

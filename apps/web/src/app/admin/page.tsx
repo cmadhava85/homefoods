@@ -7,6 +7,7 @@ import { useLocale } from "@/components/LocaleProvider";
 import { authFetch } from "@/lib/auth";
 import { adminHref } from "@/lib/adminPath";
 import { CateringAdminPanel } from "./CateringAdminPanel";
+import { friendlyServiceDate } from "@/lib/serviceDate";
 
 type Ticket = {
   id: number;
@@ -251,7 +252,15 @@ function rupees(paise: number) {
 }
 
 function AdminInner() {
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
+  const fmtDate = (iso: string) =>
+    friendlyServiceDate(iso, locale, { today: t("common.today"), tomorrow: t("common.tomorrow") });
+  const unpaidAge = (days: number) =>
+    days >= 365
+      ? t("admin.unpaidYears", { n: Math.floor(days / 365) })
+      : days >= 60
+        ? t("admin.unpaidMonths", { n: Math.floor(days / 30) })
+        : t("admin.unpaidDays", { n: days });
   const [tab, setTab] = useState<Tab>("payouts");
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [cooks, setCooks] = useState<Cook[]>([]);
@@ -283,6 +292,8 @@ function AdminInner() {
   const [pickupOnDraft, setPickupOnDraft] = useState<Record<string, boolean>>({});
   const [deliveryTypeDraft, setDeliveryTypeDraft] = useState<Record<string, "SELF" | "PARTNER">>({});
   const [utrDraft, setUtrDraft] = useState<Record<number, string>>({});
+  // Mobile: mark-paid form stays collapsed per card until opened (CSS ignores on desktop).
+  const [payOpen, setPayOpen] = useState<Record<number, boolean>>({});
   const [payNoteDraft, setPayNoteDraft] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -1284,7 +1295,7 @@ function AdminInner() {
             <div key={s.id} className="card admin-settle-card">
               <div className="day-head">
                 <h2 className="order-card-title">
-                  {s.kitchenName} · {s.businessDate}
+                  {s.kitchenName} · {fmtDate(s.businessDate)}
                 </h2>
                 <span
                   className={`chip ${
@@ -1294,7 +1305,7 @@ function AdminInner() {
                   {s.manualPaidAt || s.status === "MANUAL_PAID"
                     ? t("admin.paidManually")
                     : s.overdue
-                      ? t("admin.unpaidDays", { n: s.ageDays ?? 0 })
+                      ? unpaidAge(s.ageDays ?? 0)
                       : s.status}
                 </span>
               </div>
@@ -1329,7 +1340,7 @@ function AdminInner() {
                   <li>
                     {s.ageDays === 0
                       ? t("admin.owedToday")
-                      : t("admin.unpaidDays", { n: s.ageDays })}
+                      : unpaidAge(s.ageDays)}
                   </li>
                 ) : null}
                 {s.cookMobile ? <li>{s.cookMobile}</li> : null}
@@ -1358,38 +1369,52 @@ function AdminInner() {
                 ) : null}
               </div>
               {s.needsManualPay ? (
-                <div className="admin-mark-paid">
-                  <label className="order-field">
-                    {t("admin.utr")}
-                    <input
-                      value={utrDraft[s.id] ?? ""}
-                      onChange={(e) =>
-                        setUtrDraft((p) => ({ ...p, [s.id]: e.target.value }))
-                      }
-                      placeholder="e.g. 312345678901"
-                    />
-                  </label>
-                  <label className="order-field">
-                    {t("admin.noteOptional")}
-                    <input
-                      value={payNoteDraft[s.id] ?? ""}
-                      onChange={(e) =>
-                        setPayNoteDraft((p) => ({ ...p, [s.id]: e.target.value }))
-                      }
-                      placeholder="Paid via GPay"
-                    />
-                  </label>
+                <>
                   <button
-                    className="btn"
                     type="button"
-                    disabled={busy === `settle-${s.id}`}
-                    onClick={() => void markPaid(s.id)}
+                    className="btn secondary admin-mark-paid-toggle"
+                    aria-expanded={Boolean(payOpen[s.id])}
+                    aria-controls={`mark-paid-${s.id}`}
+                    onClick={() => setPayOpen((p) => ({ ...p, [s.id]: !p[s.id] }))}
                   >
-                    {busy === `settle-${s.id}`
-                      ? t("admin.saving")
-                      : t("admin.markPaid", { amount: (s.netPaise / 100).toFixed(2) })}
+                    {t("admin.recordPayment")}
                   </button>
-                </div>
+                  <div
+                    id={`mark-paid-${s.id}`}
+                    className={`admin-mark-paid${payOpen[s.id] ? " is-open" : ""}`}
+                  >
+                    <label className="order-field">
+                      {t("admin.utr")}
+                      <input
+                        value={utrDraft[s.id] ?? ""}
+                        onChange={(e) =>
+                          setUtrDraft((p) => ({ ...p, [s.id]: e.target.value }))
+                        }
+                        placeholder="e.g. 312345678901"
+                      />
+                    </label>
+                    <label className="order-field">
+                      {t("admin.noteOptional")}
+                      <input
+                        value={payNoteDraft[s.id] ?? ""}
+                        onChange={(e) =>
+                          setPayNoteDraft((p) => ({ ...p, [s.id]: e.target.value }))
+                        }
+                        placeholder="Paid via GPay"
+                      />
+                    </label>
+                    <button
+                      className="btn"
+                      type="button"
+                      disabled={busy === `settle-${s.id}`}
+                      onClick={() => void markPaid(s.id)}
+                    >
+                      {busy === `settle-${s.id}`
+                        ? t("admin.saving")
+                        : t("admin.markPaid", { amount: (s.netPaise / 100).toFixed(2) })}
+                    </button>
+                  </div>
+                </>
               ) : (
                 <p className="ok" style={{ marginTop: "0.75rem" }}>
                   {s.manualUtr
@@ -1542,7 +1567,7 @@ function AdminInner() {
                     {busy === `approve-${c.id}` ? t("admin.saving") : t("admin.approveLive")}
                   </button>
                 ) : null}
-                <Link href={`/cook/${c.slugHandle}`}>{t("admin.desk")}</Link>
+                <Link className="btn secondary" href={`/cook/${c.slugHandle}`}>{t("admin.desk")}</Link>
                 {c.isActive ? (
                   <button className="btn secondary" type="button" onClick={() => pause(c.id)}>
                     {t("admin.pauseCook")}

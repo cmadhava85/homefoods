@@ -23,6 +23,7 @@ import {
 import { resolveSelfDeliveryPaise } from "@/lib/deliveryDistance";
 import { isExternalPaymentUrl, payPageHref } from "@/lib/payments";
 import { isSoloKitchenMode } from "@/lib/soloKitchen";
+import { friendlyServiceDate } from "@/lib/serviceDate";
 import { localizedDishName } from "@localmeals/i18n";
 import { OrderForm, type CartAddPayload } from "./OrderForm";
 import {
@@ -664,13 +665,20 @@ export function KitchenBrowse({
     (c) => c.serviceDate === day.serviceDate && c.mealType === mealType,
   );
 
-  const statusText =
-    data.openStatusLabel ??
-    (data.orderingOpen
+  // Compose client-side so the date is human-friendly and localized (API label is English ISO).
+  const statusText = data.intakePaused
+    ? (data.openStatusLabel ?? t("kitchen.closed"))
+    : data.orderingOpen
       ? t("kitchen.openStatus", { cutoff })
       : data.nextServiceDate
-        ? t("kitchen.closedNext", { date: data.nextServiceDate })
-        : t("kitchen.closed"));
+        ? t("kitchen.closedNextBy", {
+            date: friendlyServiceDate(data.nextServiceDate, locale, {
+              today: t("common.today"),
+              tomorrow: t("common.tomorrow"),
+            }),
+            cutoff,
+          })
+        : (data.openStatusLabel ?? t("kitchen.closed"));
 
   return (
     <main
@@ -802,13 +810,14 @@ export function KitchenBrowse({
             ? availableMeals.length
               ? availableMeals.map((m) => ({
                   id: m.mealType,
-                  label:
+                  label: m.mealLabel,
+                  sub:
                     availableMeals.length > 1 && m.openDayCount
-                      ? `${m.mealLabel} · ${m.openDayCount}d`
-                      : m.mealLabel,
+                      ? t("kitchen.daysCount", { n: m.openDayCount })
+                      : null,
                 }))
-              : [{ id: "LUNCH" as MealType, label: t("meal.lunch") }]
-            : [{ id: "LUNCH" as MealType, label: t("meal.lunch") }];
+              : [{ id: "LUNCH" as MealType, label: t("meal.lunch"), sub: null }]
+            : [{ id: "LUNCH" as MealType, label: t("meal.lunch"), sub: null }];
           // One meal only → no tab strip (lunch-only kitchens shouldn't look like a 3-slot product).
           if (tabs.length <= 1) return null;
           return (
@@ -822,7 +831,8 @@ export function KitchenBrowse({
                   className={mealType === m.id ? "on" : ""}
                   onClick={() => setMealType(m.id)}
                 >
-                  {m.label}
+                  <span className="meal-seg-label">{m.label}</span>
+                  {m.sub ? <span className="meal-seg-sub">{m.sub}</span> : null}
                 </button>
               ))}
             </div>
@@ -952,7 +962,16 @@ export function KitchenBrowse({
                     {src ? (
                       <div className="plate-media">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img className="plate-photo" src={src} alt={dish} />
+                        <img
+                          className="plate-photo"
+                          src={src}
+                          alt={dish}
+                          loading="lazy"
+                          onError={(e) => {
+                            const media = e.currentTarget.parentElement;
+                            if (media) media.style.display = "none";
+                          }}
+                        />
                       </div>
                     ) : (
                       <div className="plate-fallback" aria-hidden>

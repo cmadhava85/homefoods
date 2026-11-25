@@ -107,18 +107,6 @@ export default function CookOnboardPage() {
         <li>{t("onboard.pointNoAadhaar")}</li>
       </ul>
 
-      <section className="onboard-standards" aria-labelledby="onboard-standards-title">
-        <h2 id="onboard-standards-title" className="onboard-standards-title">
-          {t("onboard.standardsTitle")}
-        </h2>
-        <p className="muted">{t("onboard.standardsLead")}</p>
-        <ul className="onboard-points">
-          {STANDARD_KEYS.map((key) => (
-            <li key={key}>{t(key)}</li>
-          ))}
-        </ul>
-      </section>
-
       <form onSubmit={submit} style={{ marginTop: "1rem" }}>
         <label className="order-field">
           {t("onboard.mobile")}
@@ -173,6 +161,7 @@ export default function CookOnboardPage() {
           </ol>
           <p>
             <a
+              className="btn sm secondary"
               href="https://foscos.fssai.gov.in/"
               target="_blank"
               rel="noopener noreferrer"
@@ -208,6 +197,16 @@ export default function CookOnboardPage() {
             disabled={busy}
           />
         </label>
+
+        <details className="onboard-standards">
+          <summary className="onboard-standards-title">{t("onboard.standardsTitle")}</summary>
+          <p className="muted">{t("onboard.standardsLead")}</p>
+          <ul className="onboard-points">
+            {STANDARD_KEYS.map((key) => (
+              <li key={key}>{t(key)}</li>
+            ))}
+          </ul>
+        </details>
 
         <label className="onboard-accept">
           <input

@@ -63,12 +63,24 @@ export function SiteFooter() {
           <nav className="site-footer-col" aria-label={t("footer.account")}>
             <h2 className="site-footer-heading">{t("footer.account")}</h2>
             <ul className="site-footer-links">
-              <li>
-                <Link href="/login?role=customer">{t("footer.customerLogin")}</Link>
-              </li>
-              <li>
-                <Link href="/login?role=cook">{t("footer.cookLogin")}</Link>
-              </li>
+              {customer ? (
+                <li>
+                  <Link href="/account">{t("nav.account")}</Link>
+                </li>
+              ) : user?.role === "COOK" && user.cookSlug ? (
+                <li>
+                  <Link href={`/cook/${user.cookSlug}`}>{t("nav.desk")}</Link>
+                </li>
+              ) : (
+                <>
+                  <li>
+                    <Link href="/login?role=customer">{t("footer.customerLogin")}</Link>
+                  </li>
+                  <li>
+                    <Link href="/login?role=cook">{t("footer.cookLogin")}</Link>
+                  </li>
+                </>
+              )}
               {showEnroll ? (
                 <li>
                   <Link href="/cook/onboard">{t("footer.enrollCook")}</Link>
