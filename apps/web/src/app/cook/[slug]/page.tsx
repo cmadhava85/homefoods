@@ -9,13 +9,14 @@ import { useAuth } from "@/components/AuthProvider";
 import { useLocale } from "@/components/LocaleProvider";
 import { API_BASE } from "@/lib/api";
 import { authFetch } from "@/lib/auth";
-import { loadFeatureFlags } from "@/lib/features";
+import { flagOn, loadFeatureFlags, useFeatureFlags } from "@/lib/features";
 import { prepareMenuPhoto } from "@/lib/menuImage";
 import { groupCookStops, type CookStopGroup } from "@/lib/cookStops";
 import { cookNextAction, customerStatusLabel, statusTone } from "@/lib/orderStatus";
 import type { MsgKey } from "@localmeals/i18n";
 import { CookDeskHero } from "./CookDeskHero";
 import { CookSettingsCards } from "./CookSettingsCards";
+import { CateringDeskPanel } from "./CateringDeskPanel";
 import type { DeskReview, Manifest, MealType, MenuItem, WaFeedItem } from "./types";
 
 type ManifestOrder = Manifest["orders"][number];
@@ -84,7 +85,8 @@ function CookDeskInner() {
   const [weekByDay, setWeekByDay] = useState<Record<string, MenuItem[]>>({});
   const [serviceDate, setServiceDate] = useState<string>("");
   const [tab, setTab] = useState<"day" | "week">("day");
-  const [deskPanel, setDeskPanel] = useState<"run" | "menu" | "reviews">("run");
+  const [deskPanel, setDeskPanel] = useState<"run" | "menu" | "reviews" | "party">("run");
+  const cateringOn = flagOn(useFeatureFlags(), "catering_enabled");
   const [deskReviews, setDeskReviews] = useState<DeskReview[]>([]);
   const [reviewSummary, setReviewSummary] = useState<{
     average: number | null;
@@ -1164,9 +1166,22 @@ function CookDeskInner() {
         >
           {t("cook.tabReviews")}
         </button>
+        {cateringOn ? (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={deskPanel === "party"}
+            className={deskPanel === "party" ? "on" : ""}
+            onClick={() => setDeskPanel("party")}
+          >
+            {t("cat.myParties")}
+          </button>
+        ) : null}
       </div>
 
-      <div className="seg meal-seg" style={{ margin: "0.65rem 0 0.9rem" }}>
+      {deskPanel === "party" && cateringOn ? <CateringDeskPanel slug={slug} /> : null}
+
+      <div className="seg meal-seg" style={{ margin: "0.65rem 0 0.9rem", display: deskPanel === "party" ? "none" : undefined }}>
         {mealTabs.map((m) => (
           <button
             key={m.id}
@@ -1228,6 +1243,13 @@ function CookDeskInner() {
               {data.earnings.day.heldPlates > 0 ? (
                 <p className="muted cook-earnings-hold">
                   {t("cook.onHold", { n: data.earnings.day.heldPlates })}
+                </p>
+              ) : null}
+              {(data.earnings.day.commissionPaise ?? 0) > 0 ? (
+                <p className="muted cook-earnings-hold">
+                  {t("cook.commissionToday", {
+                    amount: ((data.earnings.day.commissionPaise ?? 0) / 100).toFixed(2),
+                  })}
                 </p>
               ) : null}
               {(data.earnings.day.clawbackPaise ?? 0) > 0 ? (

@@ -307,6 +307,7 @@ const OrderRow = z
     weekDiscountPercent: Percent.nullable(),
     deliveryPaise: Paise,
     platformFeePaise: Paise,
+    commissionBps: z.number().int().min(0).max(10_000).describe("Cook commission snapshot (basis points of food)"),
     convenienceFeePaise: Paise,
     creditAppliedPaise: Paise,
     paymentMethod: PaymentMethodOut,

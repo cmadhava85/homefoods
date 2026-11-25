@@ -1029,6 +1029,10 @@
                           "type": "string",
                           "maxLength": 300
                         },
+                        "commissionPaise": {
+                          "type": "string",
+                          "maxLength": 300
+                        },
                         "gmvStatuses": {
                           "type": "array",
                           "items": {
@@ -1061,6 +1065,7 @@
                         "foodGmvPaise",
                         "platformFeePaise",
                         "settledNetPaise",
+                        "commissionPaise",
                         "gmvStatuses"
                       ],
                       "additionalProperties": false
@@ -1114,6 +1119,12 @@
                           "maximum": 10000000000000,
                           "description": "Aggregate amount in paise"
                         },
+                        "commissionPaise": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 10000000000000,
+                          "description": "Aggregate amount in paise"
+                        },
                         "cookCountWithVolume": {
                           "type": "integer",
                           "minimum": 0,
@@ -1129,6 +1140,7 @@
                         "orderCount",
                         "refundedFoodPaise",
                         "settledNetPaise",
+                        "commissionPaise",
                         "cookCountWithVolume"
                       ],
                       "additionalProperties": false
@@ -1240,6 +1252,12 @@
                             "maximum": 10000000000000,
                             "description": "Aggregate amount in paise"
                           },
+                          "commissionPaise": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 10000000000000,
+                            "description": "Aggregate amount in paise"
+                          },
                           "settledOrderCount": {
                             "type": "integer",
                             "minimum": 0,
@@ -1278,6 +1296,7 @@
                           "refundedFoodPaise",
                           "refundedOrderCount",
                           "settledNetPaise",
+                          "commissionPaise",
                           "settledOrderCount",
                           "manualPaidPaise",
                           "transferCompletedPaise"
@@ -1614,6 +1633,24 @@
                             "nullable": true,
                             "description": "Shown to the cook only after the advance is paid"
                           },
+                          "commissionBps": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 10000,
+                            "description": "Commission snapshot (basis points of food)"
+                          },
+                          "commissionPaise": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 100000000,
+                            "description": "Platform commission on food"
+                          },
+                          "cookPayoutPaise": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 100000000,
+                            "description": "Food minus commission — what to pay the cook"
+                          },
                           "cookPaidAt": {
                             "type": "string",
                             "maxLength": 40,
@@ -1728,6 +1765,9 @@
                           "deliveryAddress",
                           "pickupLandmark",
                           "customerMobile",
+                          "commissionBps",
+                          "commissionPaise",
+                          "cookPayoutPaise",
                           "cookPaidAt",
                           "cookPaidUtr",
                           "payments"
@@ -2052,6 +2092,24 @@
                           "nullable": true,
                           "description": "Shown to the cook only after the advance is paid"
                         },
+                        "commissionBps": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 10000,
+                          "description": "Commission snapshot (basis points of food)"
+                        },
+                        "commissionPaise": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000000,
+                          "description": "Platform commission on food"
+                        },
+                        "cookPayoutPaise": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000000,
+                          "description": "Food minus commission — what to pay the cook"
+                        },
                         "cookPaidAt": {
                           "type": "string",
                           "maxLength": 40,
@@ -2166,6 +2224,9 @@
                         "deliveryAddress",
                         "pickupLandmark",
                         "customerMobile",
+                        "commissionBps",
+                        "commissionPaise",
+                        "cookPayoutPaise",
                         "cookPaidAt",
                         "cookPaidUtr",
                         "payments"
@@ -2515,6 +2576,24 @@
                           "nullable": true,
                           "description": "Shown to the cook only after the advance is paid"
                         },
+                        "commissionBps": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 10000,
+                          "description": "Commission snapshot (basis points of food)"
+                        },
+                        "commissionPaise": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000000,
+                          "description": "Platform commission on food"
+                        },
+                        "cookPayoutPaise": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000000,
+                          "description": "Food minus commission — what to pay the cook"
+                        },
                         "cookPaidAt": {
                           "type": "string",
                           "maxLength": 40,
@@ -2629,6 +2708,9 @@
                         "deliveryAddress",
                         "pickupLandmark",
                         "customerMobile",
+                        "commissionBps",
+                        "commissionPaise",
+                        "cookPayoutPaise",
                         "cookPaidAt",
                         "cookPaidUtr",
                         "payments"
@@ -2965,6 +3047,24 @@
                           "nullable": true,
                           "description": "Shown to the cook only after the advance is paid"
                         },
+                        "commissionBps": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 10000,
+                          "description": "Commission snapshot (basis points of food)"
+                        },
+                        "commissionPaise": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000000,
+                          "description": "Platform commission on food"
+                        },
+                        "cookPayoutPaise": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000000,
+                          "description": "Food minus commission — what to pay the cook"
+                        },
                         "cookPaidAt": {
                           "type": "string",
                           "maxLength": 40,
@@ -3079,6 +3179,9 @@
                         "deliveryAddress",
                         "pickupLandmark",
                         "customerMobile",
+                        "commissionBps",
+                        "commissionPaise",
+                        "cookPayoutPaise",
                         "cookPaidAt",
                         "cookPaidUtr",
                         "payments"
@@ -3356,6 +3459,13 @@
                       "offerCustomerArrange": {
                         "type": "boolean"
                       },
+                      "commissionBps": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 10000,
+                        "description": "Per-cook commission override (null = platform default)",
+                        "nullable": true
+                      },
                       "createdAt": {
                         "type": "string",
                         "maxLength": 40,
@@ -3395,6 +3505,7 @@
                       "lateOrdersEnabled",
                       "offerCookDelivery",
                       "offerCustomerArrange",
+                      "commissionBps",
                       "createdAt"
                     ],
                     "additionalProperties": false,
@@ -3661,6 +3772,13 @@
                     "offerCustomerArrange": {
                       "type": "boolean"
                     },
+                    "commissionBps": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10000,
+                      "description": "Per-cook commission override (null = platform default)",
+                      "nullable": true
+                    },
                     "createdAt": {
                       "type": "string",
                       "maxLength": 40,
@@ -3700,6 +3818,7 @@
                     "lateOrdersEnabled",
                     "offerCookDelivery",
                     "offerCustomerArrange",
+                    "commissionBps",
                     "createdAt"
                   ],
                   "additionalProperties": false,
@@ -3740,6 +3859,348 @@
           },
           "404": {
             "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/cooks/{id}/commission": {
+      "post": {
+        "operationId": "adminSetCookCommission",
+        "summary": "Set or clear a per-cook commission override (applies to new orders only)",
+        "tags": [
+          "Admin"
+        ],
+        "x-access": "admin",
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Cook id",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "maxLength": 36
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "commissionBps": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000,
+                    "nullable": true,
+                    "description": "Override in basis points; null = use platform default"
+                  }
+                },
+                "required": [
+                  "commissionBps"
+                ],
+                "additionalProperties": false,
+                "description": "Per-cook commission override"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "maxLength": 36,
+                      "description": "UUID"
+                    },
+                    "mobileNumber": {
+                      "type": "string",
+                      "maxLength": 20,
+                      "description": "Mobile number, e.g. +919876543210"
+                    },
+                    "kitchenName": {
+                      "type": "string",
+                      "maxLength": 100
+                    },
+                    "slugHandle": {
+                      "type": "string",
+                      "maxLength": 50
+                    },
+                    "lat": {
+                      "type": "string",
+                      "maxLength": 20,
+                      "pattern": "^-?\\d+(\\.\\d+)?$",
+                      "description": "Decimal string",
+                      "nullable": true
+                    },
+                    "lng": {
+                      "type": "string",
+                      "maxLength": 20,
+                      "pattern": "^-?\\d+(\\.\\d+)?$",
+                      "description": "Decimal string",
+                      "nullable": true
+                    },
+                    "pinCode": {
+                      "type": "string",
+                      "maxLength": 6
+                    },
+                    "deliveryType": {
+                      "type": "string",
+                      "enum": [
+                        "SELF",
+                        "PARTNER"
+                      ]
+                    },
+                    "flatSelfDeliveryFee": {
+                      "type": "string",
+                      "maxLength": 20,
+                      "pattern": "^-?\\d+(\\.\\d+)?$",
+                      "description": "Decimal string"
+                    },
+                    "maxSelfDistanceKm": {
+                      "type": "string",
+                      "maxLength": 20,
+                      "pattern": "^-?\\d+(\\.\\d+)?$",
+                      "description": "Decimal string"
+                    },
+                    "maxDailyCapacity": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000000,
+                      "description": "Count"
+                    },
+                    "lunchCutoffHour": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 23
+                    },
+                    "lunchCutoffMinute": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 59
+                    },
+                    "deliveryWindowStartHour": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 23
+                    },
+                    "deliveryWindowStartMinute": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 59
+                    },
+                    "deliveryWindowEndHour": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 23
+                    },
+                    "deliveryWindowEndMinute": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 59
+                    },
+                    "isActive": {
+                      "type": "boolean"
+                    },
+                    "onboardingStatus": {
+                      "type": "string",
+                      "enum": [
+                        "DRAFT",
+                        "DOCS_SUBMITTED",
+                        "GATEWAY_KYC_PENDING",
+                        "LIVE",
+                        "REJECTED"
+                      ]
+                    },
+                    "fssaiNumber": {
+                      "type": "string",
+                      "maxLength": 32,
+                      "nullable": true
+                    },
+                    "fssaiVerifiedAt": {
+                      "type": "string",
+                      "maxLength": 40,
+                      "description": "ISO-8601 timestamp",
+                      "nullable": true
+                    },
+                    "payoutBeneficiaryRef": {
+                      "type": "string",
+                      "maxLength": 80,
+                      "nullable": true
+                    },
+                    "payoutUpiId": {
+                      "type": "string",
+                      "maxLength": 80,
+                      "nullable": true
+                    },
+                    "payoutAccountNote": {
+                      "type": "string",
+                      "maxLength": 2000,
+                      "nullable": true
+                    },
+                    "weekDiscountPercent": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100
+                    },
+                    "weekDiscountMinDays": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 31
+                    },
+                    "pickupLandmark": {
+                      "type": "string",
+                      "maxLength": 2000,
+                      "nullable": true
+                    },
+                    "pickupEnabled": {
+                      "type": "boolean"
+                    },
+                    "intakePausedDate": {
+                      "type": "string",
+                      "maxLength": 10,
+                      "nullable": true
+                    },
+                    "lateOrdersEnabled": {
+                      "type": "boolean"
+                    },
+                    "offerCookDelivery": {
+                      "type": "boolean"
+                    },
+                    "offerCustomerArrange": {
+                      "type": "boolean"
+                    },
+                    "commissionBps": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10000,
+                      "description": "Per-cook commission override (null = platform default)",
+                      "nullable": true
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "maxLength": 40,
+                      "description": "ISO-8601 timestamp"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "mobileNumber",
+                    "kitchenName",
+                    "slugHandle",
+                    "lat",
+                    "lng",
+                    "pinCode",
+                    "deliveryType",
+                    "flatSelfDeliveryFee",
+                    "maxSelfDistanceKm",
+                    "maxDailyCapacity",
+                    "lunchCutoffHour",
+                    "lunchCutoffMinute",
+                    "deliveryWindowStartHour",
+                    "deliveryWindowStartMinute",
+                    "deliveryWindowEndHour",
+                    "deliveryWindowEndMinute",
+                    "isActive",
+                    "onboardingStatus",
+                    "fssaiNumber",
+                    "fssaiVerifiedAt",
+                    "payoutBeneficiaryRef",
+                    "payoutUpiId",
+                    "payoutAccountNote",
+                    "weekDiscountPercent",
+                    "weekDiscountMinDays",
+                    "pickupLandmark",
+                    "pickupEnabled",
+                    "intakePausedDate",
+                    "lateOrdersEnabled",
+                    "offerCookDelivery",
+                    "offerCustomerArrange",
+                    "commissionBps",
+                    "createdAt"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Cook profile"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (validation or business rule)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in / invalid credentials or signature",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in but not allowed for this resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Cook not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -4019,6 +4480,13 @@
                     "offerCustomerArrange": {
                       "type": "boolean"
                     },
+                    "commissionBps": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10000,
+                      "description": "Per-cook commission override (null = platform default)",
+                      "nullable": true
+                    },
                     "createdAt": {
                       "type": "string",
                       "maxLength": 40,
@@ -4058,6 +4526,7 @@
                     "lateOrdersEnabled",
                     "offerCookDelivery",
                     "offerCustomerArrange",
+                    "commissionBps",
                     "createdAt"
                   ],
                   "additionalProperties": false,
@@ -6075,6 +6544,415 @@
         }
       }
     },
+    "/admin/outbox/{id}/retry": {
+      "post": {
+        "operationId": "adminRetryOutbox",
+        "summary": "Re-queue a parked or flag-skipped outbox row and wake push workers",
+        "tags": [
+          "Admin"
+        ],
+        "x-access": "admin",
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Numeric id",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 10,
+              "pattern": "^\\d+$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false,
+                "description": "No body fields"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "id": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 2147483647,
+                      "description": "Numeric id"
+                    },
+                    "eventName": {
+                      "type": "string",
+                      "maxLength": 120
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "id",
+                    "eventName"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid outbox id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in / invalid credentials or signature",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in but not allowed for this resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Outbox row not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/pricing": {
+      "get": {
+        "operationId": "adminGetPricing",
+        "summary": "Platform fee and default cook commission",
+        "tags": [
+          "Admin"
+        ],
+        "x-access": "admin",
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "platformFeePaise": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000000,
+                      "description": "Amount in paise (₹1 = 100)"
+                    },
+                    "cookCommissionBps": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10000,
+                      "description": "Basis points (1% = 100)"
+                    },
+                    "maxPlatformFeePaise": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000000,
+                      "description": "Amount in paise (₹1 = 100)"
+                    },
+                    "maxCookCommissionBps": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10000,
+                      "description": "Basis points (1% = 100)"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "maxLength": 40,
+                      "description": "ISO-8601 timestamp",
+                      "nullable": true
+                    },
+                    "updatedBy": {
+                      "type": "string",
+                      "maxLength": 80,
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "platformFeePaise",
+                    "cookCommissionBps",
+                    "maxPlatformFeePaise",
+                    "maxCookCommissionBps",
+                    "updatedAt",
+                    "updatedBy"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Platform fee + default cook commission"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in / invalid credentials or signature",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in but not allowed for this resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "adminSetPricing",
+        "summary": "Change platform fee and/or default cook commission (applies to new orders only)",
+        "tags": [
+          "Admin"
+        ],
+        "x-access": "admin",
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "platformFeePaise": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 5000,
+                    "description": "Customer fee per checkout"
+                  },
+                  "cookCommissionBps": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000,
+                    "description": "Default cook commission on food (basis points)"
+                  }
+                },
+                "additionalProperties": false,
+                "description": "Platform pricing (at least one field)"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "platformFeePaise": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000000,
+                      "description": "Amount in paise (₹1 = 100)"
+                    },
+                    "cookCommissionBps": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10000,
+                      "description": "Basis points (1% = 100)"
+                    },
+                    "maxPlatformFeePaise": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000000,
+                      "description": "Amount in paise (₹1 = 100)"
+                    },
+                    "maxCookCommissionBps": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10000,
+                      "description": "Basis points (1% = 100)"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "maxLength": 40,
+                      "description": "ISO-8601 timestamp",
+                      "nullable": true
+                    },
+                    "updatedBy": {
+                      "type": "string",
+                      "maxLength": 80,
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "platformFeePaise",
+                    "cookCommissionBps",
+                    "maxPlatformFeePaise",
+                    "maxCookCommissionBps",
+                    "updatedAt",
+                    "updatedBy"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Platform fee + default cook commission"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (validation or business rule)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in / invalid credentials or signature",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in but not allowed for this resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/admin/settlements": {
       "get": {
         "operationId": "adminListSettlements",
@@ -7244,6 +8122,12 @@
                           "maximum": 100000000,
                           "description": "Amount in paise (₹1 = 100)"
                         },
+                        "commissionBps": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 10000,
+                          "description": "Cook commission snapshot taken at EOD"
+                        },
                         "convenienceFeePaise": {
                           "type": "integer",
                           "minimum": 0,
@@ -7388,6 +8272,7 @@
                         "weekDiscountPercent",
                         "deliveryPaise",
                         "platformFeePaise",
+                        "commissionBps",
                         "convenienceFeePaise",
                         "creditAppliedPaise",
                         "paymentMethod",
@@ -9783,6 +10668,19 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false,
+                "description": "No body fields"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "OK",
@@ -10117,6 +11015,19 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false,
+                "description": "No body fields"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "OK",
@@ -11159,6 +12070,12 @@
                             "maximum": 100000000,
                             "description": "Amount in paise (₹1 = 100)"
                           },
+                          "commissionBps": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 10000,
+                            "description": "Cook commission snapshot (basis points of food)"
+                          },
                           "convenienceFeePaise": {
                             "type": "integer",
                             "minimum": 0,
@@ -11345,6 +12262,7 @@
                           "weekDiscountPercent",
                           "deliveryPaise",
                           "platformFeePaise",
+                          "commissionBps",
                           "convenienceFeePaise",
                           "creditAppliedPaise",
                           "paymentMethod",
@@ -13379,6 +14297,19 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false,
+                "description": "No body fields"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "OK",
@@ -15351,6 +16282,12 @@
                             "maximum": 100000000,
                             "description": "Amount in paise (₹1 = 100)"
                           },
+                          "commissionBps": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 10000,
+                            "description": "Commission snapshot (basis points of food)"
+                          },
                           "convenienceFeePaise": {
                             "type": "integer",
                             "minimum": 0,
@@ -15500,6 +16437,7 @@
                           "weekDiscountPercent",
                           "deliveryPaise",
                           "platformFeePaise",
+                          "commissionBps",
                           "convenienceFeePaise",
                           "creditAppliedPaise",
                           "paymentMethod",
@@ -15929,6 +16867,12 @@
                             "maximum": 100000000,
                             "description": "Amount in paise (₹1 = 100)"
                           },
+                          "commissionBps": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 10000,
+                            "description": "Commission snapshot (basis points of food)"
+                          },
                           "convenienceFeePaise": {
                             "type": "integer",
                             "minimum": 0,
@@ -16078,6 +17022,7 @@
                           "weekDiscountPercent",
                           "deliveryPaise",
                           "platformFeePaise",
+                          "commissionBps",
                           "convenienceFeePaise",
                           "creditAppliedPaise",
                           "paymentMethod",
@@ -16161,6 +17106,12 @@
                           "type": "string",
                           "maxLength": 200
                         },
+                        "commissionBps": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 10000,
+                          "description": "Current commission for new orders (basis points)"
+                        },
                         "meal": {
                           "type": "object",
                           "properties": {
@@ -16226,6 +17177,12 @@
                               "maximum": 1000000,
                               "description": "Count"
                             },
+                            "commissionPaise": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 100000000,
+                              "description": "Commission on today's plates (snapshot rates)"
+                            },
                             "pendingClawbackPaise": {
                               "type": "integer",
                               "minimum": 0,
@@ -16245,6 +17202,7 @@
                             "deliveredPlates",
                             "deliveredFoodPaise",
                             "heldPlates",
+                            "commissionPaise",
                             "pendingClawbackPaise",
                             "clawbackPaise"
                           ],
@@ -16276,6 +17234,12 @@
                               "minimum": -100000000,
                               "maximum": 100000000,
                               "nullable": true
+                            },
+                            "feesPaise": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 100000000,
+                              "description": "Commission deducted in this settlement"
                             },
                             "orderCount": {
                               "type": "integer",
@@ -16312,6 +17276,7 @@
                             "label",
                             "detail",
                             "netPaise",
+                            "feesPaise",
                             "orderCount",
                             "manualPaidAt",
                             "manualUtr",
@@ -16324,6 +17289,7 @@
                       "required": [
                         "serviceDate",
                         "note",
+                        "commissionBps",
                         "meal",
                         "day",
                         "payout"
@@ -23801,6 +24767,19 @@
             "bearerAuth": []
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false,
+                "description": "No body fields"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "OK",
@@ -23827,6 +24806,16 @@
                     "reminded"
                   ],
                   "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (validation or business rule)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -24340,6 +25329,13 @@
                     "offerCustomerArrange": {
                       "type": "boolean"
                     },
+                    "commissionBps": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10000,
+                      "description": "Per-cook commission override (null = platform default)",
+                      "nullable": true
+                    },
                     "createdAt": {
                       "type": "string",
                       "maxLength": 40,
@@ -24379,6 +25375,7 @@
                     "lateOrdersEnabled",
                     "offerCookDelivery",
                     "offerCustomerArrange",
+                    "commissionBps",
                     "createdAt"
                   ],
                   "additionalProperties": false,
@@ -24735,6 +25732,12 @@
                       "maximum": 100000000,
                       "description": "Amount in paise (₹1 = 100)"
                     },
+                    "commissionBps": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10000,
+                      "description": "Cook commission snapshot taken at EOD"
+                    },
                     "convenienceFeePaise": {
                       "type": "integer",
                       "minimum": 0,
@@ -24879,6 +25882,7 @@
                     "weekDiscountPercent",
                     "deliveryPaise",
                     "platformFeePaise",
+                    "commissionBps",
                     "convenienceFeePaise",
                     "creditAppliedPaise",
                     "paymentMethod",
@@ -25134,6 +26138,12 @@
                       "maximum": 100000000,
                       "description": "Amount in paise (₹1 = 100)"
                     },
+                    "commissionBps": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10000,
+                      "description": "Cook commission snapshot taken at EOD"
+                    },
                     "convenienceFeePaise": {
                       "type": "integer",
                       "minimum": 0,
@@ -25303,6 +26313,7 @@
                     "weekDiscountPercent",
                     "deliveryPaise",
                     "platformFeePaise",
+                    "commissionBps",
                     "convenienceFeePaise",
                     "creditAppliedPaise",
                     "paymentMethod",
@@ -26179,6 +27190,12 @@
                       "maximum": 72,
                       "description": "Cut-off hours before event start"
                     },
+                    "platformFeePaise": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000000,
+                      "description": "Admin-set platform fee per booking, charged with the advance"
+                    },
                     "earliestEventDate": {
                       "type": "string",
                       "minLength": 10,
@@ -26291,6 +27308,7 @@
                     "kitchenName",
                     "pinCode",
                     "cutoffHours",
+                    "platformFeePaise",
                     "earliestEventDate",
                     "latestEventDate",
                     "fulfillment",
@@ -30194,10 +31212,27 @@
                         "type": "boolean"
                       },
                       "description": "Flag key → enabled"
+                    },
+                    "pricing": {
+                      "type": "object",
+                      "properties": {
+                        "platformFeePaise": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000000,
+                          "description": "Customer platform fee per checkout"
+                        }
+                      },
+                      "required": [
+                        "platformFeePaise"
+                      ],
+                      "additionalProperties": false,
+                      "description": "Live customer-facing pricing"
                     }
                   },
                   "required": [
-                    "flags"
+                    "flags",
+                    "pricing"
                   ],
                   "additionalProperties": false
                 }
@@ -30520,6 +31555,12 @@
                       "maximum": 100000000,
                       "description": "Amount in paise (₹1 = 100)"
                     },
+                    "commissionBps": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10000,
+                      "description": "Cook commission snapshot (basis points of food)"
+                    },
                     "convenienceFeePaise": {
                       "type": "integer",
                       "minimum": 0,
@@ -30676,6 +31717,7 @@
                     "weekDiscountPercent",
                     "deliveryPaise",
                     "platformFeePaise",
+                    "commissionBps",
                     "convenienceFeePaise",
                     "creditAppliedPaise",
                     "paymentMethod",
@@ -31434,6 +32476,12 @@
                       "maximum": 100000000,
                       "description": "Amount in paise (₹1 = 100)"
                     },
+                    "commissionBps": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10000,
+                      "description": "Cook commission snapshot (basis points of food)"
+                    },
                     "convenienceFeePaise": {
                       "type": "integer",
                       "minimum": 0,
@@ -31620,6 +32668,7 @@
                     "weekDiscountPercent",
                     "deliveryPaise",
                     "platformFeePaise",
+                    "commissionBps",
                     "convenienceFeePaise",
                     "creditAppliedPaise",
                     "paymentMethod",
@@ -31876,6 +32925,12 @@
                       "maximum": 100000000,
                       "description": "Amount in paise (₹1 = 100)"
                     },
+                    "commissionBps": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10000,
+                      "description": "Cook commission snapshot (basis points of food)"
+                    },
                     "convenienceFeePaise": {
                       "type": "integer",
                       "minimum": 0,
@@ -32047,6 +33102,7 @@
                     "weekDiscountPercent",
                     "deliveryPaise",
                     "platformFeePaise",
+                    "commissionBps",
                     "convenienceFeePaise",
                     "creditAppliedPaise",
                     "paymentMethod",
@@ -32305,6 +33361,12 @@
                       "maximum": 100000000,
                       "description": "Amount in paise (₹1 = 100)"
                     },
+                    "commissionBps": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10000,
+                      "description": "Cook commission snapshot (basis points of food)"
+                    },
                     "convenienceFeePaise": {
                       "type": "integer",
                       "minimum": 0,
@@ -32456,6 +33518,7 @@
                     "weekDiscountPercent",
                     "deliveryPaise",
                     "platformFeePaise",
+                    "commissionBps",
                     "convenienceFeePaise",
                     "creditAppliedPaise",
                     "paymentMethod",
@@ -33039,6 +34102,12 @@
                       "maximum": 100000000,
                       "description": "Amount in paise (₹1 = 100)"
                     },
+                    "commissionBps": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10000,
+                      "description": "Commission snapshot (basis points of food)"
+                    },
                     "convenienceFeePaise": {
                       "type": "integer",
                       "minimum": 0,
@@ -33188,6 +34257,7 @@
                     "weekDiscountPercent",
                     "deliveryPaise",
                     "platformFeePaise",
+                    "commissionBps",
                     "convenienceFeePaise",
                     "creditAppliedPaise",
                     "paymentMethod",
@@ -33436,6 +34506,12 @@
                       "maximum": 100000000,
                       "description": "Amount in paise (₹1 = 100)"
                     },
+                    "commissionBps": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10000,
+                      "description": "Commission snapshot (basis points of food)"
+                    },
                     "convenienceFeePaise": {
                       "type": "integer",
                       "minimum": 0,
@@ -33585,6 +34661,7 @@
                     "weekDiscountPercent",
                     "deliveryPaise",
                     "platformFeePaise",
+                    "commissionBps",
                     "convenienceFeePaise",
                     "creditAppliedPaise",
                     "paymentMethod",
@@ -33833,6 +34910,12 @@
                       "maximum": 100000000,
                       "description": "Amount in paise (₹1 = 100)"
                     },
+                    "commissionBps": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10000,
+                      "description": "Commission snapshot (basis points of food)"
+                    },
                     "convenienceFeePaise": {
                       "type": "integer",
                       "minimum": 0,
@@ -33982,6 +35065,7 @@
                     "weekDiscountPercent",
                     "deliveryPaise",
                     "platformFeePaise",
+                    "commissionBps",
                     "convenienceFeePaise",
                     "creditAppliedPaise",
                     "paymentMethod",
@@ -34235,6 +35319,12 @@
                       "maximum": 100000000,
                       "description": "Amount in paise (₹1 = 100)"
                     },
+                    "commissionBps": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10000,
+                      "description": "Cook commission snapshot (basis points of food)"
+                    },
                     "convenienceFeePaise": {
                       "type": "integer",
                       "minimum": 0,
@@ -34391,6 +35481,7 @@
                     "weekDiscountPercent",
                     "deliveryPaise",
                     "platformFeePaise",
+                    "commissionBps",
                     "convenienceFeePaise",
                     "creditAppliedPaise",
                     "paymentMethod",
@@ -34659,6 +35750,12 @@
                       "maximum": 100000000,
                       "description": "Amount in paise (₹1 = 100)"
                     },
+                    "commissionBps": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10000,
+                      "description": "Cook commission snapshot (basis points of food)"
+                    },
                     "convenienceFeePaise": {
                       "type": "integer",
                       "minimum": 0,
@@ -34804,6 +35901,7 @@
                     "weekDiscountPercent",
                     "deliveryPaise",
                     "platformFeePaise",
+                    "commissionBps",
                     "convenienceFeePaise",
                     "creditAppliedPaise",
                     "paymentMethod",
@@ -35052,6 +36150,12 @@
                       "maximum": 100000000,
                       "description": "Amount in paise (₹1 = 100)"
                     },
+                    "commissionBps": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10000,
+                      "description": "Commission snapshot (basis points of food)"
+                    },
                     "convenienceFeePaise": {
                       "type": "integer",
                       "minimum": 0,
@@ -35201,6 +36305,7 @@
                     "weekDiscountPercent",
                     "deliveryPaise",
                     "platformFeePaise",
+                    "commissionBps",
                     "convenienceFeePaise",
                     "creditAppliedPaise",
                     "paymentMethod",
@@ -35477,6 +36582,12 @@
                       "maximum": 100000000,
                       "description": "Amount in paise (₹1 = 100)"
                     },
+                    "commissionBps": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10000,
+                      "description": "Cook commission snapshot (basis points of food)"
+                    },
                     "convenienceFeePaise": {
                       "type": "integer",
                       "minimum": 0,
@@ -35648,6 +36759,7 @@
                     "weekDiscountPercent",
                     "deliveryPaise",
                     "platformFeePaise",
+                    "commissionBps",
                     "convenienceFeePaise",
                     "creditAppliedPaise",
                     "paymentMethod",
@@ -36065,6 +37177,12 @@
                       "maximum": 100000000,
                       "description": "Amount in paise (₹1 = 100)"
                     },
+                    "commissionBps": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10000,
+                      "description": "Commission snapshot (basis points of food)"
+                    },
                     "convenienceFeePaise": {
                       "type": "integer",
                       "minimum": 0,
@@ -36214,6 +37332,7 @@
                     "weekDiscountPercent",
                     "deliveryPaise",
                     "platformFeePaise",
+                    "commissionBps",
                     "convenienceFeePaise",
                     "creditAppliedPaise",
                     "paymentMethod",
@@ -36628,6 +37747,12 @@
                             "maximum": 100000000,
                             "description": "Amount in paise (₹1 = 100)"
                           },
+                          "commissionBps": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 10000,
+                            "description": "Cook commission snapshot (basis points of food)"
+                          },
                           "convenienceFeePaise": {
                             "type": "integer",
                             "minimum": 0,
@@ -36773,6 +37898,7 @@
                           "weekDiscountPercent",
                           "deliveryPaise",
                           "platformFeePaise",
+                          "commissionBps",
                           "convenienceFeePaise",
                           "creditAppliedPaise",
                           "paymentMethod",
@@ -37122,6 +38248,12 @@
                       "maximum": 100000000,
                       "description": "Amount in paise (₹1 = 100)"
                     },
+                    "commissionBps": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10000,
+                      "description": "Cook commission snapshot (basis points of food)"
+                    },
                     "convenienceFeePaise": {
                       "type": "integer",
                       "minimum": 0,
@@ -37270,6 +38402,7 @@
                     "weekDiscountPercent",
                     "deliveryPaise",
                     "platformFeePaise",
+                    "commissionBps",
                     "convenienceFeePaise",
                     "creditAppliedPaise",
                     "paymentMethod",
@@ -37574,6 +38707,12 @@
                             "maximum": 100000000,
                             "description": "Amount in paise (₹1 = 100)"
                           },
+                          "commissionBps": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 10000,
+                            "description": "Cook commission snapshot taken at EOD"
+                          },
                           "convenienceFeePaise": {
                             "type": "integer",
                             "minimum": 0,
@@ -37718,6 +38857,7 @@
                           "weekDiscountPercent",
                           "deliveryPaise",
                           "platformFeePaise",
+                          "commissionBps",
                           "convenienceFeePaise",
                           "creditAppliedPaise",
                           "paymentMethod",
@@ -37977,6 +39117,12 @@
                           "maximum": 100000000,
                           "description": "Amount in paise (₹1 = 100)"
                         },
+                        "commissionBps": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 10000,
+                          "description": "Cook commission snapshot taken at EOD"
+                        },
                         "convenienceFeePaise": {
                           "type": "integer",
                           "minimum": 0,
@@ -38216,6 +39362,12 @@
                                 "maximum": 100000000,
                                 "description": "Amount in paise (₹1 = 100)"
                               },
+                              "commissionBps": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 10000,
+                                "description": "Cook commission snapshot taken at EOD"
+                              },
                               "convenienceFeePaise": {
                                 "type": "integer",
                                 "minimum": 0,
@@ -38360,6 +39512,7 @@
                               "weekDiscountPercent",
                               "deliveryPaise",
                               "platformFeePaise",
+                              "commissionBps",
                               "convenienceFeePaise",
                               "creditAppliedPaise",
                               "paymentMethod",
@@ -38417,6 +39570,7 @@
                         "weekDiscountPercent",
                         "deliveryPaise",
                         "platformFeePaise",
+                        "commissionBps",
                         "convenienceFeePaise",
                         "creditAppliedPaise",
                         "paymentMethod",
@@ -38560,6 +39714,12 @@
                             "minimum": 0,
                             "maximum": 100000000,
                             "description": "Amount in paise (₹1 = 100)"
+                          },
+                          "commissionBps": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 10000,
+                            "description": "Cook commission snapshot taken at EOD"
                           },
                           "convenienceFeePaise": {
                             "type": "integer",
@@ -38705,6 +39865,7 @@
                           "weekDiscountPercent",
                           "deliveryPaise",
                           "platformFeePaise",
+                          "commissionBps",
                           "convenienceFeePaise",
                           "creditAppliedPaise",
                           "paymentMethod",
@@ -38806,11 +39967,13 @@
                         },
                         "expected": {
                           "type": "integer",
-                          "minimum": 0
+                          "minimum": 0,
+                          "maximum": 100000
                         },
                         "applied": {
                           "type": "integer",
-                          "minimum": 0
+                          "minimum": 0,
+                          "maximum": 100000
                         }
                       },
                       "required": [
@@ -38825,10 +39988,14 @@
                       "properties": {
                         "pending": {
                           "type": "integer",
-                          "minimum": 0
+                          "minimum": 0,
+                          "maximum": 1000000,
+                          "description": "Count"
                         },
                         "oldestPendingAgeSec": {
                           "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000000,
                           "nullable": true
                         }
                       },
@@ -40196,6 +41363,12 @@
                             "maximum": 100000000,
                             "description": "Amount in paise (₹1 = 100)"
                           },
+                          "commissionBps": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 10000,
+                            "description": "Cook commission snapshot taken at EOD"
+                          },
                           "convenienceFeePaise": {
                             "type": "integer",
                             "minimum": 0,
@@ -40340,6 +41513,7 @@
                           "weekDiscountPercent",
                           "deliveryPaise",
                           "platformFeePaise",
+                          "commissionBps",
                           "convenienceFeePaise",
                           "creditAppliedPaise",
                           "paymentMethod",
@@ -40477,6 +41651,12 @@
                           "minimum": 0,
                           "maximum": 100000000,
                           "description": "Amount in paise (₹1 = 100)"
+                        },
+                        "commissionBps": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 10000,
+                          "description": "Cook commission snapshot taken at EOD"
                         },
                         "convenienceFeePaise": {
                           "type": "integer",
@@ -40717,6 +41897,12 @@
                                 "maximum": 100000000,
                                 "description": "Amount in paise (₹1 = 100)"
                               },
+                              "commissionBps": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 10000,
+                                "description": "Cook commission snapshot taken at EOD"
+                              },
                               "convenienceFeePaise": {
                                 "type": "integer",
                                 "minimum": 0,
@@ -40861,6 +42047,7 @@
                               "weekDiscountPercent",
                               "deliveryPaise",
                               "platformFeePaise",
+                              "commissionBps",
                               "convenienceFeePaise",
                               "creditAppliedPaise",
                               "paymentMethod",
@@ -40918,6 +42105,7 @@
                         "weekDiscountPercent",
                         "deliveryPaise",
                         "platformFeePaise",
+                        "commissionBps",
                         "convenienceFeePaise",
                         "creditAppliedPaise",
                         "paymentMethod",

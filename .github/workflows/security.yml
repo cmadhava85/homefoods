@@ -113,6 +113,8 @@ jobs:
       - run: npm ci
       - name: Spec is fresh and passes the offline 42Crunch-style rules
         run: |
+          # No DATABASE_URL here: route-drift subtest skips; audit rules + committed openapi.json still gate.
+          # Full drift check runs in CI (with Postgres).
           npm run build -w @localmeals/domain -w @localmeals/observability -w @localmeals/adapters -w @localmeals/i18n -w @localmeals/db
           node --import tsx --test apps/api/src/openapi/openapi.test.ts
       - name: 42Crunch REST API Static Security Testing

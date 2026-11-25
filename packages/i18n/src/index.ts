@@ -2,13 +2,14 @@ import { DEFAULT_LOCALE, isLocale, parseLocale, type Locale, LOCALES } from "./l
 import { messages as baseMessages } from "./messages.js";
 import { moduleMessages, type ModuleMsgKey } from "./modules.js";
 import { waFlowMessages, type WaFlowMsgKey } from "./waFlow.js";
+import { cateringMessages, type CateringMsgKey } from "./catering.js";
 
 export const messages = {
-  en: { ...baseMessages.en, ...moduleMessages.en, ...waFlowMessages.en },
-  ta: { ...baseMessages.ta, ...moduleMessages.ta, ...waFlowMessages.ta },
+  en: { ...baseMessages.en, ...moduleMessages.en, ...waFlowMessages.en, ...cateringMessages.en },
+  ta: { ...baseMessages.ta, ...moduleMessages.ta, ...waFlowMessages.ta, ...cateringMessages.ta },
 };
 
-export type MsgKey = keyof typeof baseMessages.en | ModuleMsgKey | WaFlowMsgKey;
+export type MsgKey = keyof typeof baseMessages.en | ModuleMsgKey | WaFlowMsgKey | CateringMsgKey;
 
 export { DEFAULT_LOCALE, isLocale, parseLocale, LOCALES };
 export type { Locale };

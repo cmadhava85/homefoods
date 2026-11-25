@@ -1,6 +1,8 @@
 export type CookEarnings = {
   serviceDate: string;
   note: string;
+  /** Current commission for new orders (basis points). */
+  commissionBps?: number;
   meal: { mealType: string; plates: number; foodPaise: number };
   day: {
     plates: number;
@@ -8,6 +10,8 @@ export type CookEarnings = {
     deliveredPlates: number;
     deliveredFoodPaise: number;
     heldPlates: number;
+    /** Commission on today's plates, from each order's snapshot rate. */
+    commissionPaise?: number;
     pendingClawbackPaise?: number;
     clawbackPaise?: number;
   };
@@ -16,6 +20,7 @@ export type CookEarnings = {
     label: string;
     detail: string | null;
     netPaise: number | null;
+    feesPaise?: number;
     orderCount: number | null;
     manualPaidAt: string | null;
     manualUtr: string | null;

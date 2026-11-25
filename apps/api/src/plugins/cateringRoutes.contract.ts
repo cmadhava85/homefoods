@@ -88,6 +88,9 @@ const Booking = z.object({
 });
 
 const AdminBooking = Booking.extend({
+  commissionBps: z.number().int().min(0).max(10_000).describe("Commission snapshot (basis points of food)"),
+  commissionPaise: Paise.describe("Platform commission on food"),
+  cookPayoutPaise: Paise.describe("Food minus commission — what to pay the cook"),
   cookPaidAt: IsoDateTime.nullable(),
   cookPaidUtr: Text(80).nullable(),
   payments: z
@@ -151,6 +154,7 @@ export const CreateBookingBody = z
   })
   .describe("Book a party combo — returns the advance payment link");
 
+const NoBody = z.object({}).describe("No body fields");
 export const CancelBody = z.object({ reason: z.string().max(300).nullable().optional() });
 export const AdminCancelBody = z.object({
   reason: z.string().min(3).max(300),
@@ -172,6 +176,7 @@ const PublicKitchen = z.object({
   kitchenName: Text(100),
   pinCode: Text(6),
   cutoffHours: Hours,
+  platformFeePaise: Paise.describe("Admin-set platform fee per booking, charged with the advance"),
   earliestEventDate: IsoDate,
   latestEventDate: IsoDate,
   fulfillment: z.object({ cookDelivery: z.boolean(), pickup: z.boolean(), customerArrange: z.boolean() }),
@@ -249,6 +254,7 @@ export const cateringOperations = defineOperations([
     tags: TAGS,
     access: "customer",
     params: BookingParams,
+    body: NoBody,
     response: z.object({ paymentUrl: Url, phase: Phase, amountPaise: Paise, booking: Booking }),
     errors: { 404: "Booking not found", 409: "Nothing due / kitchen full" },
   },
@@ -260,6 +266,7 @@ export const cateringOperations = defineOperations([
     tags: TAGS,
     access: "customer",
     params: BookingParams,
+    body: NoBody,
     response: BookingOut,
     errors: { 404: "Booking not found" },
   },
@@ -329,6 +336,7 @@ export const cateringOperations = defineOperations([
     tags: TAGS,
     access: "cook",
     params: SlugBookingParams,
+    body: NoBody,
     response: BookingOut,
     errors: { 404: "Booking not found", 409: "Balance still due" },
   },
@@ -397,6 +405,7 @@ export const cateringOperations = defineOperations([
     summary: "Scheduler: one WhatsApp balance reminder per booking ≤48h before the event",
     tags: TAGS,
     access: "internal",
+    body: NoBody,
     response: z.object({ ok: z.literal(true), reminded: Count }),
   },
 ]);

@@ -62,11 +62,13 @@ export async function metaRoutes(app: FastifyInstance, opts: { db: Db }) {
 
   app.get("/meta/features", async () => {
     const { getFeatureFlags } = await import("../services/featureFlags.js");
+    const { getPlatformPricing } = await import("../services/platformSettings.js");
     try {
-      return { flags: await getFeatureFlags(db) };
+      const [flags, pricing] = await Promise.all([getFeatureFlags(db), getPlatformPricing(db)]);
+      return { flags, pricing: { platformFeePaise: pricing.platformFeePaise } };
     } catch {
-      const { defaultFeatureFlags } = await import("@localmeals/domain");
-      return { flags: defaultFeatureFlags() };
+      const { defaultFeatureFlags, PLATFORM_FEE_PAISE } = await import("@localmeals/domain");
+      return { flags: defaultFeatureFlags(), pricing: { platformFeePaise: PLATFORM_FEE_PAISE } };
     }
   });
 }

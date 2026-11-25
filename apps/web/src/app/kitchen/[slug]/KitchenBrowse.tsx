@@ -14,7 +14,7 @@ import { useLocale } from "@/components/LocaleProvider";
 import { API_BASE } from "@/lib/api";
 import { authFetch, loginPath } from "@/lib/auth";
 import { FulfillmentChooser } from "@/components/FulfillmentChooser";
-import { flagOn, useFeatureFlags } from "@/lib/features";
+import { flagOn, useFeatureFlags, usePlatformFeePaise } from "@/lib/features";
 import {
   needsCheckoutAddress,
   resolveEffectiveFulfillment,
@@ -22,7 +22,7 @@ import {
 } from "@/lib/fulfillment";
 import { resolveSelfDeliveryPaise } from "@/lib/deliveryDistance";
 import { isExternalPaymentUrl, payPageHref } from "@/lib/payments";
-import { isSoloKitchenMode, platformFeePaise } from "@/lib/soloKitchen";
+import { isSoloKitchenMode } from "@/lib/soloKitchen";
 import { localizedDishName } from "@localmeals/i18n";
 import { OrderForm, type CartAddPayload } from "./OrderForm";
 import {
@@ -119,11 +119,13 @@ export function KitchenBrowse({
   const { user } = useAuth();
   const { t, locale } = useLocale();
   const flags = useFeatureFlags();
+  const platformFeePaise = usePlatformFeePaise();
   const childPaysOn = flagOn(flags, "child_pays_enabled");
   const followOn = flagOn(flags, "kitchen_follow_enabled");
   const reviewsOn = flagOn(flags, "reviews_enabled");
   const distanceLimitsOn = flagOn(flags, "delivery_distance_limits_enabled");
   const selfDeliveryFeeOn = flagOn(flags, "self_delivery_fee_enabled");
+  const cateringOn = flagOn(flags, "catering_enabled");
 
   const mealParam = (searchParams.get("meal") ?? "").trim().toUpperCase();
   const afterDate = searchParams.get("after");
@@ -175,6 +177,7 @@ export function KitchenBrowse({
   /** Empty until customer picks — required each checkout for delivery. */
   const [addressId, setAddressId] = useState("");
   const [following, setFollowing] = useState(false);
+  const [cateringOpen, setCateringOpen] = useState(false);
   const [followBusy, setFollowBusy] = useState(false);
   const [fulfillmentMode, setFulfillmentMode] = useState<FulfillmentMode>("DELIVERY");
   /** Days already covered by an active order for this kitchen + meal. */
@@ -375,6 +378,19 @@ export function KitchenBrowse({
     };
   }, [user, slug, mealType]);
 
+  useEffect(() => {
+    if (!cateringOn) return;
+    let cancelled = false;
+    fetch(`${API_BASE}/kitchens/${slug}/catering`)
+      .then((r) => {
+        if (!cancelled) setCateringOpen(r.ok);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [cateringOn, slug]);
+
   async function toggleFollow() {
     if (!user || user.role !== "CUSTOMER") {
       router.push(loginPath("CUSTOMER", `/kitchen/${slug}`));
@@ -461,10 +477,10 @@ export function KitchenBrowse({
       const discount = pct > 0 ? Math.floor((food * pct) / 100) : 0;
       return s + food - discount + deliveryPaise;
     }, 0);
-    // ₹7 once per week checkout (matches API createOrderBatch)
-    const fee = cart.length > 0 ? platformFeePaise() : 0;
+    // Platform fee once per week checkout (matches API createOrderBatch)
+    const fee = cart.length > 0 ? platformFeePaise : 0;
     return linesPaise + fee;
-  }, [cart, deliveryPaise, weekDiscountOn, weekRule?.percent, fulfillmentMode]);
+  }, [cart, deliveryPaise, weekDiscountOn, weekRule?.percent, fulfillmentMode, platformFeePaise]);
 
   const cartDiscountPaise = useMemo(() => {
     if (!weekDiscountOn || !weekRule) return 0;
@@ -479,7 +495,7 @@ export function KitchenBrowse({
     [cart],
   );
   const cartDeliveryPaise = deliveryPaise * cart.length;
-  const cartPlatformPaise = cart.length > 0 ? platformFeePaise() : 0;
+  const cartPlatformPaise = cart.length > 0 ? platformFeePaise : 0;
 
   function confirmAnotherOrderIfNeeded(serviceDate: string): boolean {
     if (!orderedDates.has(serviceDate)) return true;
@@ -615,7 +631,7 @@ export function KitchenBrowse({
 
   const confirmSummary: ConfirmPaySummary = useMemo(() => {
     const pct = weekDiscountOn ? (weekRule?.percent ?? 0) : 0;
-    const platform = cart.length > 0 ? platformFeePaise() : 0;
+    const platform = cart.length > 0 ? platformFeePaise : 0;
     const sorted = [...cart].sort((a, b) => a.serviceDate.localeCompare(b.serviceDate));
     return {
       rows: sorted.map((c, i) => ({
@@ -636,7 +652,7 @@ export function KitchenBrowse({
       cutoff: data?.cutoff ?? data?.lunchCutoff ?? null,
       childPays: Boolean(payerMobile),
     };
-  }, [cart, weekDiscountOn, weekRule?.percent, deliveryPaise, cartFoodPaise, cartDiscountPaise, cartDeliveryPaise, effectiveFulfillment, data?.cutoff, data?.lunchCutoff, payerMobile]);
+  }, [cart, weekDiscountOn, weekRule?.percent, deliveryPaise, cartFoodPaise, cartDiscountPaise, cartDeliveryPaise, effectiveFulfillment, data?.cutoff, data?.lunchCutoff, payerMobile, platformFeePaise]);
 
   if (err) return <p className="err">{err}</p>;
   if (!data || !day) return <p className="muted">Loading week’s menu…</p>;
@@ -717,6 +733,13 @@ export function KitchenBrowse({
             </li>
           ) : null}
         </ul>
+        {cateringOn && cateringOpen ? (
+          <p>
+            <Link className="btn sm secondary" href={`/kitchen/${slug}/party`}>
+              {t("cat.kitchenLink")}
+            </Link>
+          </p>
+        ) : null}
 
         {data.cook.deliveryType === "PARTNER" ? (
           <p className="muted kitchen-partner-note" style={{ margin: "0.35rem 0 0" }}>
@@ -1189,7 +1212,7 @@ export function KitchenBrowse({
                       : t("cart.deliveryDistanceUnavailable")}
                   </li>
                 ) : null}
-                {!isSoloKitchenMode() ? (
+                {cartPlatformPaise > 0 ? (
                   <li>
                     {t("cart.platform", { amount: (cartPlatformPaise / 100).toFixed(0) })}
                   </li>

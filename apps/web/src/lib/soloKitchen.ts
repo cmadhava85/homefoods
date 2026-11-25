@@ -2,7 +2,7 @@
  * Temporary single-kitchen launch overlay (CSK Homemade Delights).
  * Set NEXT_PUBLIC_SOLO_KITCHEN_SLUG (and SOLO_KITCHEN_SLUG on the API) to the
  * kitchen slug. SSR also accepts SOLO_KITCHEN_SLUG so fee display matches API
- * when only the server env is set. Unset both to restore multi-cook + ₹7 fee.
+ * when only the server env is set. Unset both to restore multi-cook.
  */
 export function soloKitchenSlug(): string | null {
   const fromPublic = (process.env.NEXT_PUBLIC_SOLO_KITCHEN_SLUG ?? "").trim().toLowerCase();
@@ -31,7 +31,10 @@ export function hideCookOnboard(): boolean {
   return v === "1" || v === "true" || v === "yes";
 }
 
-/** ₹7 once per checkout normally; ₹0 during solo launch. */
+/**
+ * Fallback platform fee until the live admin value (`/meta/features` → pricing) loads.
+ * Mirrors the API's first-boot seed: ₹7 normally, ₹0 during solo launch.
+ */
 export function platformFeePaise(): number {
   return isSoloKitchenMode() ? 0 : 700;
 }

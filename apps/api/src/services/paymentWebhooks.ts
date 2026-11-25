@@ -416,7 +416,7 @@ export async function handlePaymentWebhook(db: Db, event: GatewayWebhookEvent) {
           publicId: event.orderPublicId,
         });
       }
-      if (isCateringGatewayEvent(event)) {
+      if (await isCateringGatewayEvent(db, event)) {
         const booking = event.gatewayTxnId
           ? await markCateringPaymentCaptured(db, {
               gatewayTxnId: event.gatewayTxnId,

@@ -14,6 +14,8 @@ export const BigId = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).descri
 const Hour = z.number().int().min(0).max(23);
 const Minute = z.number().int().min(0).max(59);
 const Percent = z.number().int().min(0).max(100);
+/** Basis points (1% = 100). */
+export const Bps = z.number().int().min(0).max(10_000).describe("Basis points (1% = 100)");
 /** Postgres numeric(…) columns arrive as decimal strings. */
 const Decimal = z.string().max(20).regex(/^-?\d+(\.\d+)?$/).describe("Decimal string");
 
@@ -72,6 +74,7 @@ export const OrderRow = z
     weekDiscountPercent: Percent.nullable(),
     deliveryPaise: Paise,
     platformFeePaise: Paise,
+    commissionBps: Bps.describe("Cook commission snapshot taken at EOD"),
     convenienceFeePaise: Paise,
     creditAppliedPaise: Paise,
     paymentMethod: PaymentMethod,
@@ -136,6 +139,7 @@ export const CookProfileRow = z
     lateOrdersEnabled: z.boolean(),
     offerCookDelivery: z.boolean(),
     offerCustomerArrange: z.boolean(),
+    commissionBps: Bps.nullable().describe("Per-cook commission override (null = platform default)"),
     createdAt: Timestamp,
   })
   .describe("Cook profile");

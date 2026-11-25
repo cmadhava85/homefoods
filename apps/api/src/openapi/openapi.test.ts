@@ -23,7 +23,11 @@ describe("OpenAPI contract", () => {
     assert.deepEqual(violations, [], `\n${violations.join("\n")}`);
   });
 
-  it("documents every route and only real routes (no drift)", async () => {
+  it("documents every route and only real routes (no drift)", async (t) => {
+    if (!process.env.DATABASE_URL) {
+      t.skip("DATABASE_URL required to boot Fastify for route drift");
+      return;
+    }
     const routes = new Set<string>();
     const db = createDb();
     // Production serves uploads from GCS via GET /uploads/:name (registration makes no GCS call).

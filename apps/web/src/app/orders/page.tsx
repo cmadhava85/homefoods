@@ -13,6 +13,7 @@ import { customerStatusLabel, statusTone } from "@/lib/orderStatus";
 import { localizedDishName, type MsgKey } from "@localmeals/i18n";
 import { kitchenOrderHref } from "@/lib/kitchenHref";
 import { kitchensBrowseHref } from "@/lib/soloKitchen";
+import { PartyOrdersList } from "@/components/PartyOrdersList";
 
 type HistoryOrder = {
   id: number;
@@ -554,6 +555,8 @@ function OrdersInner() {
           </div>
         ) : null}
       </header>
+
+      <PartyOrdersList />
 
       {orders.length > 0 ? (
         <div className="seg orders-filter" role="tablist" aria-label={t("orders.filter")}>

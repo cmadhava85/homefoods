@@ -50,6 +50,7 @@ export async function getTurnoverReport(
     .select({
       cookId: settlements.cookId,
       netPaise: settlements.netPaise,
+      feesPaise: settlements.feesPaise,
       orderCount: settlements.orderCount,
       status: settlements.status,
       manualPaidAt: settlements.manualPaidAt,
@@ -98,8 +99,9 @@ export async function getTurnoverReport(
       "Route / connected-account turnover — food GMV from paid orders by service date; settlements by business date. Export for RBI / Razorpay reviews.",
     definitions: {
       foodGmvPaise: "Sum of (food×qty − food discount) on paid-pipeline orders",
-      platformFeePaise: "Customer ₹7 once per checkout (stored on first day-line for week carts)",
+      platformFeePaise: "Customer platform fee (admin-set) once per checkout (stored on first day-line for week carts)",
       settledNetPaise: "Settlement net_paise in window (cook food owed / paid)",
+      commissionPaise: "Cook commission deducted in settlements in window (settlements.fees_paise)",
       gmvStatuses: GMV_STATUSES,
     },
     platform,

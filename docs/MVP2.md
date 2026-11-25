@@ -33,8 +33,8 @@ Product scope from [PRODUCT_DECISIONS.md](./PRODUCT_DECISIONS.md) and [TECHNICAL
 
 - Cook desk → Menu & settings → **Week cart discount** (`PATCH /cooks/:slug/week-discount`)
 - Applies only on week cart (`/orders/batch`) when day count ≥ min days
-- Food only — delivery + ₹7 platform fee never discounted; no coupon stacks
-- Platform fee is **₹7 once per week checkout** (stored on the earliest day-line); delivery still per day
+- Food only — delivery + platform fee never discounted; no coupon stacks
+- Platform fee (admin-set) is charged **once per week checkout** (stored on the earliest day-line); delivery still per day
 - On pay: cook/customer WA per day-line with service date + day N of M (`formatOrderPaidCookWa` / domain)
 - Migration: `0011_week_discount.sql`
 
@@ -52,7 +52,7 @@ Product scope from [PRODUCT_DECISIONS.md](./PRODUCT_DECISIONS.md) and [TECHNICAL
 - LIVE gate: FSSAI + UPI/bank note (Route optional)
 - Discover: pin confirm + menu cover photo + plates this week
 - WA: review nudge on DELIVERED; family invite notify
-- Cart: food / delivery / ₹7 fee once per checkout
+- Cart: food / delivery / platform fee once per checkout
 - Admin: unpaid &gt;1 day highlight
 
 ## Admin feature toggles

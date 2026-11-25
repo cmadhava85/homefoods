@@ -175,6 +175,8 @@ export const cookProfiles = pgTable("cook_profiles", {
   offerCookDelivery: boolean("offer_cook_delivery").default(true).notNull(),
   /** Customer arranges their own auto / porter — ₹0 platform delivery. */
   offerCustomerArrange: boolean("offer_customer_arrange").default(false).notNull(),
+  /** Per-cook commission override in basis points (null = platform default). */
+  commissionBps: integer("commission_bps"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -319,6 +321,8 @@ export const orders = pgTable(
     weekDiscountPercent: integer("week_discount_percent"),
     deliveryPaise: integer("delivery_paise").default(0).notNull(),
     platformFeePaise: integer("platform_fee_paise").default(700).notNull(),
+    /** Cook commission snapshot (bps of food net) taken at EOD settlement. */
+    commissionBps: integer("commission_bps").default(0).notNull(),
     /** Gateway cost passed to the customer for this line (0 when the fee flag is off). */
     convenienceFeePaise: integer("convenience_fee_paise").default(0).notNull(),
     /** Wallet credit used for this line; the gateway charges lineTotal − credit. */
@@ -488,6 +492,14 @@ export const platformFeatureFlags = pgTable("platform_feature_flags", {
   enabled: boolean("enabled").default(true).notNull(),
   label: varchar("label", { length: 120 }).notNull(),
   description: text("description"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedBy: varchar("updated_by", { length: 80 }),
+});
+
+/** Admin-editable numeric settings (platform fee, cook commission) — Admin → Pricing. */
+export const platformSettings = pgTable("platform_settings", {
+  key: varchar("key", { length: 64 }).primaryKey(),
+  intValue: integer("int_value").notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   updatedBy: varchar("updated_by", { length: 80 }),
 });
@@ -750,6 +762,8 @@ export const cateringBookings = pgTable(
     pricePerPlatePaise: integer("price_per_plate_paise").notNull(),
     foodPaise: integer("food_paise").notNull(),
     platformFeePaise: integer("platform_fee_paise").notNull(),
+    /** Cook commission snapshot (bps of food) deducted from the manual cook payout. */
+    commissionBps: integer("commission_bps").default(0).notNull(),
     advancePaise: integer("advance_paise").notNull(),
     balancePaise: integer("balance_paise").notNull(),
     eventDate: date("event_date").notNull(),

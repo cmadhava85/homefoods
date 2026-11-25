@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { defaultFeatureFlags } from "@localmeals/domain";
-import { flagOn, loadFeatureFlags } from "./features";
+import { flagOn, loadFeatureFlags, loadPlatformPricing } from "./features";
 
 describe("flagOn", () => {
   it("treats missing keys as on and explicit false as off", () => {
@@ -29,5 +29,22 @@ describe("loadFeatureFlags", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(a.ordering_enabled).toBe(false);
     expect(b.ordering_enabled).toBe(false);
+  });
+
+  it("exposes the admin platform fee from the same response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ flags: {}, pricing: { platformFeePaise: 1500 } }),
+      }),
+    );
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 120_000); // past the client cache from the test above
+    try {
+      expect((await loadPlatformPricing()).platformFeePaise).toBe(1500);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

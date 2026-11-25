@@ -1,12 +1,37 @@
-/** Customer platform fee (₹7) — once per checkout / payment, not per day. */
+/**
+ * Default customer platform fee (₹7) — once per checkout / payment, not per day.
+ * The live value is admin-editable (Admin → Pricing); this is the seed / fallback.
+ */
 export const PLATFORM_FEE_PAISE = 700;
+/** Guard rail for the admin-editable platform fee (₹50). */
+export const MAX_PLATFORM_FEE_PAISE = 5_000;
+
+/** Default cook commission: 5% of food (basis points). Admin-editable, per-cook override allowed. */
+export const DEFAULT_COOK_COMMISSION_BPS = 500;
+/** Guard rail for global and per-cook commission: 10% of food. */
+export const MAX_COOK_COMMISSION_BPS = 1_000;
 
 /**
  * Week cart stores one DB row per day under one payment.
- * Put the ₹7 fee on the first day-line only so checkout total is correct.
+ * Put the fee on the first day-line only so checkout total is correct.
  */
-export function platformFeePaiseForCheckoutLine(lineIndex: number): number {
-  return lineIndex === 0 ? PLATFORM_FEE_PAISE : 0;
+export function platformFeePaiseForCheckoutLine(
+  lineIndex: number,
+  feePaise: number = PLATFORM_FEE_PAISE,
+): number {
+  return lineIndex === 0 ? feePaise : 0;
+}
+
+/** Cook override wins over the platform default; both are clamped to the guard rail. */
+export function effectiveCommissionBps(platformBps: number, cookOverrideBps?: number | null): number {
+  const bps = cookOverrideBps ?? platformBps;
+  return Math.min(MAX_COOK_COMMISSION_BPS, Math.max(0, Math.trunc(bps)));
+}
+
+/** Platform share of a line's food net. Rounded down so the cook never loses a fraction of a paisa. */
+export function commissionPaise(foodNetPaise: number, bps: number): number {
+  if (foodNetPaise <= 0 || bps <= 0) return 0;
+  return Math.floor((foodNetPaise * bps) / 10_000);
 }
 
 export function orderTotalPaise(input: {

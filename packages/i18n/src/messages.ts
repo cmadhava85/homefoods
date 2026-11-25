@@ -45,7 +45,7 @@ export const messages = {
     "onboard.chipDone": "Application received",
     "onboard.title": "Enroll your kitchen",
     "onboard.blurb":
-      "Join LocalMeals near your pin. We verify FSSAI and payout, then make you LIVE. You keep 100% of food at launch.",
+      "Join LocalMeals near your pin. We verify FSSAI and payout, then make you LIVE. You keep your food price minus a small LocalMeals commission.",
     "onboard.pointFssai": "FSSAI number optional now — required before you go LIVE",
     "onboard.pointPayout": "UPI or bank note for EOD payout",
     "onboard.pointNoAadhaar": "We do not collect Aadhaar",
@@ -102,7 +102,7 @@ export const messages = {
     "onboard.home": "Back home",
 
     "home.cookCtaTitle": "Cook near this pin?",
-    "home.cookCtaBody": "Enroll your FSSAI kitchen. Keep 100% of food at launch.",
+    "home.cookCtaBody": "Enroll your FSSAI kitchen. You set the price; LocalMeals takes a small commission.",
     "home.cookCta": "Want to enroll as a cook",
 
     "footer.enrollCook": "Want to enroll as a cook",
@@ -260,7 +260,7 @@ export const messages = {
     "cancel.refundCredit": "Instant LocalMeals credit (use on any order)",
     "cancel.refundSource": "Back to my UPI / bank (1–7 working days)",
     "pay.total": "Total due",
-    "pay.cookGets": "Cook receives the food amount. Platform fee is ₹7 per checkout.",
+    "pay.cookGets": "The cook receives the food amount (less a small LocalMeals commission). The platform fee is charged once per checkout.",
     "pay.mockCta": "Pay ₹{amount} (mock UPI)",
     "pay.upiCta": "Pay ₹{amount} with UPI",
     "pay.retry": "Retry UPI pay",
@@ -315,7 +315,7 @@ export const messages = {
     "home.step1Title": "Pick a kitchen",
     "home.step1Body": "See who’s open now and what’s cooking this week.",
     "home.step2Title": "Order before cut-off",
-    "home.step2Body": "One day or a week cart — food, delivery, ₹7 platform fee.",
+    "home.step2Body": "One day or a week cart — food, delivery, one platform fee.",
     "home.step3Title": "Pay on UPI",
     "home.step3Body": "Track packing to delivery — or pickup in the meal window.",
 
@@ -391,7 +391,7 @@ export const messages = {
     "cart.deliveryDistanceUnavailable":
       "Delivery distance not available for this address — choose pickup or update address",
     "cart.kitchenPaused": "Kitchen paused intake for today",
-    "cart.platform": "Platform ₹{amount} (₹7 once)",
+    "cart.platform": "Platform ₹{amount} (once per checkout)",
     "cart.whoPays": "Who pays?",
     "cart.family": "Family {mobile}",
     "cart.checkingOut": "Checking out…",
@@ -523,7 +523,7 @@ export const messages = {
     "footer.cookLogin": "Cook desk login",
     "footer.adminLogin": "Admin login",
     "footer.whatsNew": "What’s new",
-    "footer.metaFee": "Cooks keep 100% of food · ₹7 platform fee per checkout",
+    "footer.metaFee": "Cooks set their own prices · one platform fee per checkout",
     "account.deleteTitle": "Delete my account",
     "account.deleteHelp": "Removes your name, phone, saved addresses, follows and family links. Past orders stay in our tax records without your name or address.",
     "account.deleteConfirmLabel": "Type DELETE to confirm",
@@ -595,7 +595,7 @@ export const messages = {
     "onboard.chipDone": "விண்ணப்பம் பெறப்பட்டது",
     "onboard.title": "உங்கள் சமையலறையைப் பதிவு செய்யுங்கள்",
     "onboard.blurb":
-      "உங்கள் பகுதியில் LocalMeals-இல் சேருங்கள். FSSAI, வருமானப் பட்டுவாடா விவரங்களைச் சரிபார்த்த பின் உங்களை நேரலைக்குக் கொண்டுவருவோம். தொடக்கத்தில் உணவுத் தொகை முழுவதும் (100%) உங்களுக்கே.",
+      "உங்கள் பகுதியில் LocalMeals-இல் சேருங்கள். FSSAI, வருமானப் பட்டுவாடா விவரங்களைச் சரிபார்த்த பின் உங்களை நேரலைக்குக் கொண்டுவருவோம். சிறிய LocalMeals கமிஷன் போக மீதி உணவுத் தொகை உங்களுக்கே.",
     "onboard.pointFssai": "FSSAI எண் இப்போது கட்டாயமில்லை — நேரலைக்கு வரும் முன் தேவை",
     "onboard.pointPayout": "நாள் முடிவு வருமானப் பட்டுவாடாவுக்கு UPI அல்லது வங்கி விவரம்",
     "onboard.pointNoAadhaar": "நாங்கள் ஆதார் விவரங்களைச் சேகரிப்பதில்லை",
@@ -652,7 +652,7 @@ export const messages = {
     "onboard.home": "முகப்புக்குத் திரும்பு",
 
     "home.cookCtaTitle": "இந்தப் பகுதியில் சமைக்கிறீர்களா?",
-    "home.cookCtaBody": "உங்கள் FSSAI சமையலறையைப் பதிவு செய்யுங்கள். தொடக்கத்தில் உணவுத் தொகை முழுவதும் உங்களுக்கே.",
+    "home.cookCtaBody": "உங்கள் FSSAI சமையலறையைப் பதிவு செய்யுங்கள். விலையை நீங்களே நிர்ணயிக்கலாம்; LocalMeals சிறிய கமிஷன் மட்டும் எடுக்கும்.",
     "home.cookCta": "சமையலராகச் சேருங்கள்",
 
     "footer.enrollCook": "சமையலராகச் சேருங்கள்",
@@ -808,7 +808,7 @@ export const messages = {
     "cancel.refundCredit": "உடனடி LocalMeals இருப்புத் தொகை (எந்த முன்பதிவிலும் பயன்படுத்தலாம்)",
     "cancel.refundSource": "என் UPI / வங்கிக் கணக்குக்கே (1–7 வேலை நாட்கள்)",
     "pay.total": "மொத்தம் செலுத்த வேண்டியது",
-    "pay.cookGets": "உணவுத் தொகை சமையலருக்குச் சேரும். தளக் கட்டணம் ஒவ்வொரு முன்பதிவுக்கும் ₹7.",
+    "pay.cookGets": "உணவுத் தொகை (சிறிய LocalMeals கமிஷன் போக) சமையலருக்குச் சேரும். தளக் கட்டணம் ஒவ்வொரு முன்பதிவுக்கும் ஒருமுறை.",
     "pay.mockCta": "₹{amount} செலுத்துங்கள் (மாதிரி UPI)",
     "pay.upiCta": "UPI மூலம் ₹{amount} செலுத்துங்கள்",
     "pay.retry": "UPI-இல் மீண்டும் முயலுங்கள்",
@@ -859,7 +859,7 @@ export const messages = {
     "home.step1Title": "சமையலறையைத் தேர்ந்தெடுங்கள்",
     "home.step1Body": "இப்போது யார் திறந்துள்ளார்கள், இந்த வாரம் என்ன சமைக்கிறார்கள் என்று பாருங்கள்.",
     "home.step2Title": "கடைசி நேரத்துக்கு முன் முன்பதிவு செய்யுங்கள்",
-    "home.step2Body": "ஒரு நாள் அல்லது வாரக் கூடை — உணவு, விநியோகம், ₹7 தளக் கட்டணம்.",
+    "home.step2Body": "ஒரு நாள் அல்லது வாரக் கூடை — உணவு, விநியோகம், ஒரு தளக் கட்டணம்.",
     "home.step3Title": "UPI-இல் பணம் செலுத்துங்கள்",
     "home.step3Body": "தயாரிப்பு முதல் விநியோகம் வரை நிலையைப் பாருங்கள் — அல்லது உணவு நேரத்தில் நேரில் பெறுங்கள்.",
 
@@ -932,7 +932,7 @@ export const messages = {
     "cart.deliveryDistanceUnavailable":
       "இந்த முகவரிக்கு விநியோகத் தூரம் கிடைக்கவில்லை — நேரில் பெறுதலைத் தேர்ந்தெடுங்கள் அல்லது முகவரியைப் புதுப்பியுங்கள்",
     "cart.kitchenPaused": "இன்று சமையலறை முன்பதிவுகளை நிறுத்தியுள்ளது",
-    "cart.platform": "தளம் ₹{amount} (ஒருமுறை ₹7)",
+    "cart.platform": "தளம் ₹{amount} (ஒரு முன்பதிவுக்கு ஒருமுறை)",
     "cart.whoPays": "யார் பணம் செலுத்துவார்?",
     "cart.family": "குடும்பம் {mobile}",
     "cart.checkingOut": "முன்பதிவை முடிக்கிறோம்…",
@@ -1060,7 +1060,7 @@ export const messages = {
     "footer.cookLogin": "சமையலர் பணிமேசை உள்நுழைவு",
     "footer.adminLogin": "நிர்வாகி உள்நுழைவு",
     "footer.whatsNew": "புதியவை",
-    "footer.metaFee": "உணவுத் தொகை முழுவதும் சமையலருக்கே · ஒவ்வொரு முன்பதிவுக்கும் ₹7 தளக் கட்டணம்",
+    "footer.metaFee": "சமையலர்களே விலையை நிர்ணயிக்கிறார்கள் · ஒவ்வொரு முன்பதிவுக்கும் ஒரு தளக் கட்டணம்",
     "account.deleteTitle": "என் கணக்கை நீக்கு",
     "account.deleteHelp": "உங்கள் பெயர், கைபேசி எண், சேமித்த முகவரிகள், பின்தொடர்தல்கள், குடும்ப இணைப்புகள் அனைத்தும் நீக்கப்படும். பழைய முன்பதிவுகள் உங்கள் பெயரும் முகவரியும் இல்லாமல் எங்கள் வரிப் பதிவுகளில் இருக்கும்.",
     "account.deleteConfirmLabel": "உறுதிசெய்ய DELETE என்று தட்டச்சு செய்யுங்கள்",

@@ -6,6 +6,7 @@ import { RequireAuth } from "@/components/RequireAuth";
 import { useLocale } from "@/components/LocaleProvider";
 import { authFetch } from "@/lib/auth";
 import { adminHref } from "@/lib/adminPath";
+import { CateringAdminPanel } from "./CateringAdminPanel";
 
 type Ticket = {
   id: number;
@@ -33,6 +34,16 @@ type Cook = {
   pickupLandmark?: string | null;
   pickupEnabled?: boolean;
   deliveryType?: "SELF" | "PARTNER";
+  commissionBps?: number | null;
+};
+
+type Pricing = {
+  platformFeePaise: number;
+  cookCommissionBps: number;
+  maxPlatformFeePaise: number;
+  maxCookCommissionBps: number;
+  updatedAt: string | null;
+  updatedBy: string | null;
 };
 
 type Settlement = {
@@ -46,6 +57,7 @@ type Settlement = {
   payoutAccountNote: string | null;
   payoutBeneficiaryRef: string | null;
   grossPaise?: number;
+  feesPaise?: number;
   clawbackPaise?: number;
   pendingClawbackPaise?: number;
   netPaise: number;
@@ -86,6 +98,7 @@ type TurnoverCook = {
   heldOrderCount: number;
   refundedFoodPaise: number;
   settledNetPaise: number;
+  commissionPaise?: number;
   manualPaidPaise: number;
   transferCompletedPaise: number;
 };
@@ -102,13 +115,14 @@ type TurnoverReport = {
     orderCount: number;
     refundedFoodPaise: number;
     settledNetPaise: number;
+    commissionPaise?: number;
     cookCountWithVolume: number;
   };
   liveCookCount: number;
   cooks: TurnoverCook[];
 };
 
-type Tab = "payouts" | "analytics" | "cooks" | "tickets" | "orders" | "features" | "ads";
+type Tab = "payouts" | "analytics" | "cooks" | "tickets" | "orders" | "features" | "ads" | "parties";
 
 type AdCampaign = {
   id: number;
@@ -218,6 +232,20 @@ type AdminOrderRow = {
 
 type AdminAttentionRow = AdminOrderRow & { reason: string };
 
+/** "5" / "2.5" from basis points. */
+function bpsToPercentText(bps: number) {
+  return String(Number((bps / 100).toFixed(2)));
+}
+
+/** Percent text → basis points; "" → null; NaN → undefined (invalid). */
+function percentTextToBps(text: string): number | null | undefined {
+  const v = text.trim();
+  if (!v) return null;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0) return undefined;
+  return Math.round(n * 100);
+}
+
 function rupees(paise: number) {
   return `₹${(paise / 100).toFixed(2)}`;
 }
@@ -229,6 +257,10 @@ function AdminInner() {
   const [cooks, setCooks] = useState<Cook[]>([]);
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [features, setFeatures] = useState<FeatureFlag[]>([]);
+  const [pricing, setPricing] = useState<Pricing | null>(null);
+  const [feeDraft, setFeeDraft] = useState("");
+  const [commissionPctDraft, setCommissionPctDraft] = useState("");
+  const [cookCommissionDraft, setCookCommissionDraft] = useState<Record<string, string>>({});
   const [adsEnabled, setAdsEnabled] = useState(false);
   const [adCampaigns, setAdCampaigns] = useState<AdCampaign[]>([]);
   const [adForm, setAdForm] = useState({
@@ -275,7 +307,9 @@ function AdminInner() {
         const landmark: Record<string, string> = {};
         const pickupOn: Record<string, boolean> = {};
         const deliveryType: Record<string, "SELF" | "PARTNER"> = {};
+        const commission: Record<string, string> = {};
         for (const c of rows) {
+          commission[c.id] = c.commissionBps == null ? "" : bpsToPercentText(c.commissionBps);
           upi[c.id] = c.payoutUpiId ?? "";
           note[c.id] = c.payoutAccountNote ?? "";
           route[c.id] = c.payoutBeneficiaryRef ?? "";
@@ -289,8 +323,25 @@ function AdminInner() {
         setLandmarkDraft(landmark);
         setPickupOnDraft(pickupOn);
         setDeliveryTypeDraft(deliveryType);
+        setCookCommissionDraft(commission);
       });
   }, []);
+
+  const applyPricing = useCallback((p: Pricing) => {
+    setPricing(p);
+    setFeeDraft(String(p.platformFeePaise / 100));
+    setCommissionPctDraft(bpsToPercentText(p.cookCommissionBps));
+  }, []);
+
+  const refreshPricing = useCallback(() => {
+    return authFetch("/admin/pricing")
+      .then(async (r) => {
+        const json = await r.json();
+        if (!r.ok) throw new Error(json.error ?? "Failed to load pricing");
+        applyPricing(json as Pricing);
+      })
+      .catch((e) => setErr((e as Error).message));
+  }, [applyPricing]);
 
   const refreshSettlements = useCallback(() => {
     return authFetch(`/admin/settlements?filter=${settleFilter}`)
@@ -350,6 +401,7 @@ function AdminInner() {
       "held",
       "refunded_food_inr",
       "settled_net_inr",
+      "commission_inr",
       "manual_paid_inr",
       "transfer_completed_inr",
     ];
@@ -371,6 +423,7 @@ function AdminInner() {
           c.heldOrderCount,
           (c.refundedFoodPaise / 100).toFixed(2),
           (c.settledNetPaise / 100).toFixed(2),
+          ((c.commissionPaise ?? 0) / 100).toFixed(2),
           (c.manualPaidPaise / 100).toFixed(2),
           (c.transferCompletedPaise / 100).toFixed(2),
         ].join(","),
@@ -405,6 +458,38 @@ function AdminInner() {
     }
   }
 
+  async function savePricing() {
+    const fee = Number(feeDraft.trim());
+    const bps = percentTextToBps(commissionPctDraft);
+    if (!feeDraft.trim() || !Number.isFinite(fee) || fee < 0) {
+      setErr("Enter a platform fee in ₹ (0 or more)");
+      return;
+    }
+    if (bps == null) {
+      setErr("Enter a commission % (0 or more)");
+      return;
+    }
+    setBusy("pricing");
+    setErr(null);
+    setMsg(null);
+    try {
+      const res = await authFetch("/admin/pricing", {
+        method: "PATCH",
+        body: JSON.stringify({ platformFeePaise: Math.round(fee * 100), cookCommissionBps: bps }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Could not save pricing");
+      applyPricing(json as Pricing);
+      setMsg(
+        `Pricing saved: ₹${(json.platformFeePaise / 100).toFixed(2)} fee · ${bpsToPercentText(json.cookCommissionBps)}% commission (new orders)`,
+      );
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
   function refreshAll() {
     setErr(null);
     authFetch("/admin/tickets")
@@ -413,6 +498,7 @@ function AdminInner() {
     void refreshCooks();
     void refreshSettlements();
     void refreshFeatures();
+    void refreshPricing();
   }
 
   useEffect(() => {
@@ -522,6 +608,11 @@ function AdminInner() {
   }
 
   async function saveCookPayout(cookId: string) {
+    const commissionBps = percentTextToBps(cookCommissionDraft[cookId] ?? "");
+    if (commissionBps === undefined) {
+      setErr("Commission override must be a number (or blank for the default)");
+      return;
+    }
     setBusy(`cook-${cookId}`);
     setErr(null);
     setMsg(null);
@@ -539,6 +630,15 @@ function AdminInner() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Save failed");
+      const cook = cooks.find((c) => c.id === cookId);
+      if (commissionBps !== (cook?.commissionBps ?? null)) {
+        const cr = await authFetch(`/admin/cooks/${cookId}/commission`, {
+          method: "POST",
+          body: JSON.stringify({ commissionBps }),
+        });
+        const cj = await cr.json();
+        if (!cr.ok) throw new Error(cj.error ?? "Commission save failed");
+      }
       setMsg(`Saved cook details for ${json.kitchenName ?? cookId}`);
       await refreshCooks();
       await refreshSettlements();
@@ -689,6 +789,7 @@ function AdminInner() {
     cooks: t("admin.tabCooks"),
     tickets: t("admin.tabTickets"),
     orders: t("admin.tabOrders"),
+    parties: t("cat.myParties"),
   };
 
   return (
@@ -700,7 +801,7 @@ function AdminInner() {
 
       <div className="seg desk-tabs" role="tablist" aria-label={t("admin.title")}>
         {(
-          ["payouts", "analytics", "features", "ads", "cooks", "tickets", "orders"] as const
+          ["payouts", "analytics", "features", "ads", "cooks", "tickets", "orders", "parties"] as const
         ).map((id) => (
           <button
             key={id}
@@ -717,6 +818,8 @@ function AdminInner() {
 
       {err ? <p className="err">{err}</p> : null}
       {msg ? <pre className="ok">{msg}</pre> : null}
+
+      {tab === "parties" ? <CateringAdminPanel /> : null}
 
       {tab === "analytics" ? (
         <section>
@@ -774,6 +877,7 @@ function AdminInner() {
                       <th scope="col">{t("admin.colPlates")}</th>
                       <th scope="col">{t("admin.colOrders")}</th>
                       <th scope="col">{t("admin.settledNet")}</th>
+                      <th scope="col">{t("admin.commission")}</th>
                       <th scope="col">{t("admin.refundedFood")}</th>
                       <th scope="col">{t("admin.cooksWithVolume")}</th>
                     </tr>
@@ -787,6 +891,7 @@ function AdminInner() {
                       <td>{turnover.platform.plates}</td>
                       <td>{turnover.platform.orderCount}</td>
                       <td>{rupees(turnover.platform.settledNetPaise)}</td>
+                      <td>{rupees(turnover.platform.commissionPaise ?? 0)}</td>
                       <td>{rupees(turnover.platform.refundedFoodPaise)}</td>
                       <td>{turnover.platform.cookCountWithVolume}</td>
                     </tr>
@@ -811,6 +916,7 @@ function AdminInner() {
                         <th scope="col">{t("admin.colDelivered")}</th>
                         <th scope="col">{t("admin.colHold")}</th>
                         <th scope="col">{t("admin.settledNet")}</th>
+                        <th scope="col">{t("admin.commission")}</th>
                         <th scope="col">{t("admin.colManual")}</th>
                         <th scope="col">{t("admin.colRoute")}</th>
                         <th scope="col">{t("admin.refundedFood")}</th>
@@ -839,6 +945,7 @@ function AdminInner() {
                           <td>{c.deliveredOrderCount}</td>
                           <td>{c.heldOrderCount || "—"}</td>
                           <td>{rupees(c.settledNetPaise)}</td>
+                          <td>{c.commissionPaise ? rupees(c.commissionPaise) : "—"}</td>
                           <td>{c.manualPaidPaise ? rupees(c.manualPaidPaise) : "—"}</td>
                           <td>
                             {c.transferCompletedPaise
@@ -872,6 +979,47 @@ function AdminInner() {
 
       {tab === "features" ? (
         <section>
+          <div className="card">
+            <strong>{t("admin.pricingTitle")}</strong>
+            <p className="muted" style={{ margin: "0.35rem 0 0" }}>
+              {t("admin.pricingBlurb")}
+            </p>
+            <label className="order-field" style={{ marginTop: "0.55rem" }}>
+              {t("admin.platformFeeInr", {
+                max: pricing ? (pricing.maxPlatformFeePaise / 100).toFixed(0) : "50",
+              })}
+              <input
+                inputMode="decimal"
+                value={feeDraft}
+                onChange={(e) => setFeeDraft(e.target.value)}
+              />
+            </label>
+            <label className="order-field" style={{ marginTop: "0.55rem" }}>
+              {t("admin.commissionPercent", {
+                max: pricing ? bpsToPercentText(pricing.maxCookCommissionBps) : "10",
+              })}
+              <input
+                inputMode="decimal"
+                value={commissionPctDraft}
+                onChange={(e) => setCommissionPctDraft(e.target.value)}
+              />
+            </label>
+            {pricing?.updatedBy ? (
+              <p className="muted" style={{ margin: "0.35rem 0 0", fontSize: "0.8rem" }}>
+                {t("admin.pricingUpdatedBy", { by: pricing.updatedBy })}
+              </p>
+            ) : null}
+            <div className="actions">
+              <button
+                type="button"
+                className="btn"
+                disabled={busy === "pricing" || !pricing}
+                onClick={() => void savePricing()}
+              >
+                {busy === "pricing" ? t("admin.saving") : t("admin.savePricing")}
+              </button>
+            </div>
+          </div>
           <div className="card">
             <strong>{t("admin.featureToggles")}</strong>
             <p className="muted" style={{ margin: "0.35rem 0 0" }}>
@@ -1159,6 +1307,11 @@ function AdminInner() {
                     {t("admin.grossFood")}: {rupees(s.grossPaise)}
                   </li>
                 ) : null}
+                {(s.feesPaise ?? 0) > 0 ? (
+                  <li>
+                    {t("admin.commission")}: −{rupees(s.feesPaise ?? 0)}
+                  </li>
+                ) : null}
                 {(s.clawbackPaise ?? 0) > 0 ? (
                   <li>
                     {t("admin.clawbackApplied")}: −{rupees(s.clawbackPaise ?? 0)}
@@ -1336,6 +1489,19 @@ function AdminInner() {
                   }
                 />
                 {t("admin.offerPickup")}
+              </label>
+              <label className="order-field" style={{ marginTop: "0.55rem" }}>
+                {t("admin.cookCommission", {
+                  pct: pricing ? bpsToPercentText(pricing.cookCommissionBps) : "—",
+                })}
+                <input
+                  inputMode="decimal"
+                  value={cookCommissionDraft[c.id] ?? ""}
+                  placeholder={pricing ? bpsToPercentText(pricing.cookCommissionBps) : ""}
+                  onChange={(e) =>
+                    setCookCommissionDraft((prev) => ({ ...prev, [c.id]: e.target.value }))
+                  }
+                />
               </label>
               <label className="order-field" style={{ marginTop: "0.55rem" }}>
                 {t("admin.deliveryType")}

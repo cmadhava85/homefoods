@@ -14,7 +14,7 @@ Defaults tuned for **one-kitchen / one-pin** launch on GCP. Product fee rules st
 | Logs | `LOG_LEVEL=info` |
 | GCS uploads | Nearline after **30 d**, delete after **180 d** |
 | Artifact Registry | Keep **5** versions; delete older than **30 d** |
-| Solo overlay | `solo_kitchen_slug=csk-homemade-delights` → ₹0 platform fee + single kitchen |
+| Solo overlay | `solo_kitchen_slug=csk-homemade-delights` → single kitchen; platform fee seeded at ₹0 on first boot (then Admin → Features → Pricing) |
 
 Example / tfvars:
 
@@ -116,8 +116,9 @@ Admin → Features:
 - `whatsapp_outbound_enabled` — stop Meta send loops  
 - `ordering_enabled` — stop new orders during incidents  
 - `eod_settlement_enabled` — skip EOD when payouts broken  
+- `catering_enabled` — MVP-3 party orders (**OFF** by default). No infra cost while off (4 empty tables). When on: 2 payment links per booking — Razorpay ~2% + GST on each, absorbed by the platform (the convenience fee is not applied to party orders) — ~4 WhatsApp messages per booking, and one Cloud Scheduler job for balance reminders.  
 
-Unset `SOLO_KITCHEN_SLUG` / `NEXT_PUBLIC_SOLO_KITCHEN_SLUG` (and TF `solo_kitchen_slug = ""`) when leaving solo → restores multi-cook + ₹7 fee.
+Unset `SOLO_KITCHEN_SLUG` / `NEXT_PUBLIC_SOLO_KITCHEN_SLUG` (and TF `solo_kitchen_slug = ""`) when leaving solo → restores multi-cook. The platform fee no longer follows the env — set it in Admin → Features → Pricing.
 
 ## Do not cut for “savings”
 

@@ -1,4 +1,4 @@
-import { lineFoodNetPaise } from "@localmeals/domain";
+import { commissionPaise, lineFoodNetPaise } from "@localmeals/domain";
 import { and, asc, eq } from "drizzle-orm";
 import { cookLedger, type Db } from "@localmeals/db";
 import { getWhatsAppProvider } from "@localmeals/adapters";
@@ -37,7 +37,7 @@ export async function listPendingClawbacks(db: Db, cookId?: string) {
 
 /**
  * After customer refund on a plate already included in a cook settlement,
- * queue food net for deduction on the cook's next EOD with volume.
+ * queue what the cook was paid for it (food net − commission) for deduction on the cook's next EOD with volume.
  * Idempotent per order (one pending/applied clawback).
  */
 export async function enqueueCookClawback(
@@ -51,6 +51,7 @@ export async function enqueueCookClawback(
       foodPaise: number;
       qty: number;
       foodDiscountPaise?: number | null;
+      commissionBps?: number | null;
     };
     reason: string;
     ticketId?: number;
@@ -61,7 +62,8 @@ export async function enqueueCookClawback(
     return { created: false, amountPaise: 0 };
   }
 
-  const amountPaise = foodNetPaise(order);
+  const foodNet = foodNetPaise(order);
+  const amountPaise = foodNet - commissionPaise(foodNet, order.commissionBps ?? 0);
   if (amountPaise <= 0) {
     return { created: false, amountPaise: 0 };
   }
@@ -114,7 +116,7 @@ export async function enqueueCookClawback(
         to: cook.mobileNumber,
         body: [
           "⚠️ Payout recovery queued",
-          `${order.publicId} · food ₹${(amountPaise / 100).toFixed(0)}`,
+          `${order.publicId} · payout ₹${(amountPaise / 100).toFixed(0)}`,
           "Customer was refunded after this plate was already settled to you.",
           "We will deduct it from your next EOD food payout (when you have delivered volume).",
           input.reason ? `Note: ${input.reason.slice(0, 120)}` : null,

@@ -265,10 +265,10 @@ export function ConfirmedCheckoutClient({ checkout }: { checkout: ConfirmedCheck
             {deliveryPaise > 0 ? (
               <DetailRow label={t("pay.delivery")}>₹{(deliveryPaise / 100).toFixed(0)}</DetailRow>
             ) : null}
-            {!solo && platformPaise > 0 ? (
+            {platformPaise > 0 ? (
               <DetailRow label={t("pay.platform")}>₹{(platformPaise / 100).toFixed(0)}</DetailRow>
             ) : null}
-            {deliveryPaise > 0 || (!solo && platformPaise > 0) ? (
+            {deliveryPaise > 0 || platformPaise > 0 ? (
               <DetailRow label={t("pay.food")}>₹{(foodPaise / 100).toFixed(0)}</DetailRow>
             ) : null}
             <div className="confirm-total-row">
@@ -473,12 +473,12 @@ export function ConfirmedOrderClient({ order }: { order: ConfirmedOrderView }) {
                 ₹{(order.deliveryPaise / 100).toFixed(0)}
               </DetailRow>
             ) : null}
-            {!solo && order.platformFeePaise > 0 ? (
+            {order.platformFeePaise > 0 ? (
               <DetailRow label={t("pay.platform")}>
                 ₹{(order.platformFeePaise / 100).toFixed(0)}
               </DetailRow>
             ) : null}
-            {order.deliveryPaise > 0 || (!solo && order.platformFeePaise > 0) ? (
+            {order.deliveryPaise > 0 || order.platformFeePaise > 0 ? (
               <DetailRow label={t("pay.food")}>
                 ₹{(foodNet / 100).toFixed(0)}
                 {order.weekDiscountPercent ? ` (−${order.weekDiscountPercent}%)` : ""}

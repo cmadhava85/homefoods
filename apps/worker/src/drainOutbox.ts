@@ -13,6 +13,7 @@ import {
   readCorr,
 } from "@localmeals/observability";
 import { recordOutboxOpsFailure } from "./opsLedger.js";
+import { cateringWaMessages } from "./cateringNotify.js";
 
 const defaultLog = createServiceLogger("localmeals-worker");
 
@@ -782,6 +783,12 @@ export async function drainOutboxOnce(
 
       if (row.eventName === "SettlementBatchCompleted") {
         logger.info({ event: LogEvent.SETTLEMENT_BATCH_COMPLETED, settlementId: payload.settlementId, status: payload.status, cookId: payload.cookId }, "SettlementBatchCompleted");
+      }
+
+      if (row.eventName.startsWith("Catering")) {
+        for (const message of cateringWaMessages(row.eventName, payload)) {
+          await sendWa(logger, wa, message);
+        }
       }
     } catch (err) {
       const nextAttempts = attempts + 1;

@@ -20,6 +20,7 @@ import {
   AdminAdUpsertBody,
   AdminAdsQuery,
   AdminAttentionQuery,
+  AdminCookCommissionBody,
   AdminCookIdParams,
   AdminFeatureBody,
   AdminFeatureKeyParams,
@@ -28,6 +29,7 @@ import {
   AdminOrderKeyParams,
   AdminOrdersQuery,
   AdminPayoutDetailsBody,
+  AdminPricingBody,
   AdminSettlementsQuery,
   AdminTicketPatchBody,
   AdminTurnoverQuery,
@@ -247,6 +249,43 @@ app.patch("/admin/features/:key", async (req, reply) => {
       actor: user?.mobile ?? "admin",
     });
     return { flags };
+  } catch (e) {
+    return sendCaughtError(reply, e);
+  }
+});
+
+app.get("/admin/pricing", async (req, reply) => {
+  try {
+    assertAuthed(req, ["ADMIN"]);
+    const { getPricingForAdmin } = await import("../services/platformSettings.js");
+    return await getPricingForAdmin(db);
+  } catch (e) {
+    return sendCaughtError(reply, e);
+  }
+});
+
+app.patch("/admin/pricing", async (req, reply) => {
+  try {
+    const user = assertAuthed(req, ["ADMIN"]);
+    const body = AdminPricingBody.parse(req.body ?? {});
+    const { setPlatformPricing } = await import("../services/platformSettings.js");
+    return await setPlatformPricing(db, { ...body, actor: user?.mobile ?? "admin" });
+  } catch (e) {
+    return sendCaughtError(reply, e);
+  }
+});
+
+app.post("/admin/cooks/:id/commission", async (req, reply) => {
+  try {
+    const user = assertAuthed(req, ["ADMIN"]);
+    const { id } = AdminCookIdParams.parse(req.params);
+    const body = AdminCookCommissionBody.parse(req.body ?? {});
+    const { setCookCommission } = await import("../services/platformSettings.js");
+    return await setCookCommission(db, {
+      cookId: id,
+      commissionBps: body.commissionBps,
+      actor: user?.mobile ?? "admin",
+    });
   } catch (e) {
     return sendCaughtError(reply, e);
   }

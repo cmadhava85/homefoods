@@ -13,11 +13,26 @@ export async function clearRateLimitBuckets() {
   }
 }
 
-export function testMobile(prefix = "99") {
-  return `+91${prefix}${String(Date.now()).slice(-8)}${Math.floor(Math.random() * 10)}`.slice(
-    0,
-    15,
+/**
+ * Seed kitchens default to 40 plates/day. Full API suites + local Playwright leave
+ * soft holds (AWAITING_PAYMENT / kitchen states) that exhaust that quickly.
+ * Re-apply on login helpers so suites that restore capacity to 40 don't flake later.
+ */
+const TEST_KITCHEN_CAPACITY = 100_000;
+
+export async function ensureTestKitchenCapacity() {
+  const db = createDb();
+  await db.execute(
+    sql`UPDATE cook_profiles SET max_daily_capacity = ${TEST_KITCHEN_CAPACITY}
+        WHERE max_daily_capacity < ${TEST_KITCHEN_CAPACITY}`,
   );
+}
+
+export function testMobile(prefix = "99") {
+  // Prefer entropy over Date.now() — mock.timers freezes Date in late-order tests and
+  // would otherwise collapse many customers onto ~10 mobiles.
+  const entropy = `${process.hrtime.bigint()}${Math.floor(Math.random() * 1e6)}`.replace(/\D/g, "");
+  return `+91${prefix}${entropy}`.slice(0, 15);
 }
 
 /** Mock OTP login as CUSTOMER; returns bearer headers + mobile. */
@@ -69,6 +84,7 @@ export async function ensureHomeAddress(
 
 /** Login + HOME address for web checkout payloads. */
 export async function customerWithAddress(app: FastifyInstance, mobile = testMobile()) {
+  await ensureTestKitchenCapacity();
   const auth = await loginCustomer(app, mobile);
   const addressId = await ensureHomeAddress(app, auth.headers);
   return { ...auth, addressId };
@@ -108,6 +124,7 @@ export async function loginCook(
   app: FastifyInstance,
   slug = "csk-homemade-delights",
 ): Promise<{ mobile: string; token: string; headers: { authorization: string }; slug: string }> {
+  await ensureTestKitchenCapacity();
   await clearRateLimitBuckets();
   const mobile = COOK_MOBILES[slug] ?? COOK_MOBILES["csk-homemade-delights"]!;
   const req = await app.inject({

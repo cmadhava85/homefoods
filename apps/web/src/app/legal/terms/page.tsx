@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { GATEWAY_FEE_BPS, PLATFORM_FEE_PAISE, WEEK_DISCOUNT_PERCENT_MAX } from "@localmeals/domain";
+import { GATEWAY_FEE_BPS, WEEK_DISCOUNT_PERCENT_MAX } from "@localmeals/domain";
 import { legal } from "@/lib/legal";
 
 export const metadata: Metadata = { title: "Terms of service" };
@@ -45,8 +45,8 @@ export default function TermsPage() {
           payment window shown at checkout.
         </li>
         <li>
-          Prices are set by the cook and shown inclusive of applicable taxes. A platform fee of ₹
-          {PLATFORM_FEE_PAISE / 100} per checkout may apply and is shown before you pay. Week-plan discounts (up
+          Prices are set by the cook and shown inclusive of applicable taxes. A platform fee per checkout may
+          apply; the current amount is shown before you pay. Week-plan discounts (up
           to {WEEK_DISCOUNT_PERCENT_MAX}%) are set by each cook.
         </li>
         <li>

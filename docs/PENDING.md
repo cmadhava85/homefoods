@@ -32,7 +32,7 @@ See [ROADMAP.md](./ROADMAP.md).
 | Item | Horizon |
 |------|---------|
 | MVP-2 cook desk polish (pause, fulfillment, templates, FSSAI help, lean WA) | **Live** — Cloud SQL `0027`; api/worker/web `polish-202611181526` |
-| Temporary solo-kitchen overlay | **In repo** — launch kitchen **CSK Homemade Delights** (`csk-homemade-delights`). Set **both** `SOLO_KITCHEN_SLUG` (API/worker) + `NEXT_PUBLIC_SOLO_KITCHEN_SLUG` (web build). Terraform `solo_kitchen_slug` wires both on Cloud Run. Redirects `/` + `/discover` → kitchen, hides enroll, filters kitchens, blocks apply. Launch pricing: **SELF** delivery, **₹0 delivery**, **₹0 platform fee** while solo env is set. Cost lean defaults: [COST.md](./COST.md). Unset solo env to restore multi-cook + ₹7. |
+| Temporary solo-kitchen overlay | **In repo** — launch kitchen **CSK Homemade Delights** (`csk-homemade-delights`). Set **both** `SOLO_KITCHEN_SLUG` (API/worker) + `NEXT_PUBLIC_SOLO_KITCHEN_SLUG` (web build). Terraform `solo_kitchen_slug` wires both on Cloud Run. Redirects `/` + `/discover` → kitchen, hides enroll, filters kitchens, blocks apply. Launch pricing: **SELF** delivery, **₹0 delivery**, **₹0 platform fee** seeded on first boot while solo env is set (then Admin → Features → Pricing owns it). Cost lean defaults: [COST.md](./COST.md). Unset solo env to restore multi-cook. |
 | Party & bulk catering (MOQ, 48–72h, 50% advance) | MVP-3 — [MVP3.md](./MVP3.md) |
 | Radius / PostGIS discovery | MVP-3+ |
 

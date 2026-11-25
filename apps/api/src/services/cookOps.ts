@@ -36,6 +36,7 @@ import {
   WEEKDAY_SHORT,
   type DeliveryWindow,
   type MealPeriod,
+  commissionPaise,
   lineFoodNetPaise,
 } from "@localmeals/domain";
 import { buildMultiStopMapsUrl, getWhatsAppProvider } from "@localmeals/adapters";
@@ -616,6 +617,14 @@ export async function runLunchCutoff(
   return runMealCutoff(db, "LUNCH", opts);
 }
 
+function earningsNote(commissionBps: number) {
+  const keep =
+    commissionBps > 0
+      ? `You earn food minus a ${(commissionBps / 100).toFixed(commissionBps % 100 ? 2 : 0)}% LocalMeals commission.`
+      : "You earn 100% of food.";
+  return `${keep} Delivery fee and platform fee stay with LocalMeals.`;
+}
+
 function foodLinePaise(o: {
   foodPaise: number;
   qty: number;
@@ -726,6 +735,12 @@ export async function getManifest(
   const dayFoodPaise = dayOrders.reduce((n, o) => n + foodLinePaise(o), 0);
   const deliveredOrders = dayOrders.filter((o) => o.status === "DELIVERED" && !o.settlementHold);
   const deliveredFoodPaise = deliveredOrders.reduce((n, o) => n + foodLinePaise(o), 0);
+  const dayCommissionPaise = dayOrders.reduce(
+    (n, o) => n + commissionPaise(foodLinePaise(o), o.commissionBps),
+    0,
+  );
+  const { commissionBpsForCook } = await import("./platformSettings.js");
+  const currentCommissionBps = await commissionBpsForCook(db, cook);
   const heldPlates = dayOrders
     .filter((o) => o.settlementHold)
     .reduce((n, o) => n + o.qty, 0);
@@ -770,8 +785,8 @@ export async function getManifest(
     deliveryWindowParts: schedule.deliveryWindow,
     earnings: {
       serviceDate,
-      /** You keep 100% of food; delivery + ₹7 stay with platform. */
-      note: "You earn 100% of food. Delivery fee and ₹7 platform fee stay with LocalMeals.",
+      note: earningsNote(currentCommissionBps),
+      commissionBps: currentCommissionBps,
       meal: {
         mealType,
         plates: mealPlates,
@@ -783,12 +798,14 @@ export async function getManifest(
         deliveredPlates: deliveredOrders.reduce((n, o) => n + o.qty, 0),
         deliveredFoodPaise,
         heldPlates,
+        commissionPaise: dayCommissionPaise,
         pendingClawbackPaise,
         clawbackPaise: settlement?.clawbackPaise ?? 0,
       },
       payout: {
         ...payout,
         netPaise: settlement?.netPaise ?? null,
+        feesPaise: settlement?.feesPaise ?? 0,
         orderCount: settlement?.orderCount ?? null,
         manualPaidAt: settlement?.manualPaidAt ?? null,
         manualUtr: settlement?.manualUtr ?? null,

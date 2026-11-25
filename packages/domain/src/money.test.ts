@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import {
   allocateCredit,
   buildIdempotencyKey,
+  commissionPaise,
   convenienceFeePaise,
+  effectiveCommissionBps,
   lineGatewayPaise,
   lineTotalPaise,
   priceCheckoutLines,
@@ -18,6 +20,23 @@ describe("money", () => {
     assert.equal(platformFeePaiseForCheckoutLine(0), 700);
     assert.equal(platformFeePaiseForCheckoutLine(1), 0);
     assert.equal(platformFeePaiseForCheckoutLine(4), 0);
+    assert.equal(platformFeePaiseForCheckoutLine(0, 1500), 1500);
+    assert.equal(platformFeePaiseForCheckoutLine(2, 1500), 0);
+  });
+
+  it("cook override beats the platform commission and both are clamped", () => {
+    assert.equal(effectiveCommissionBps(500, null), 500);
+    assert.equal(effectiveCommissionBps(500, 0), 0);
+    assert.equal(effectiveCommissionBps(500, 250), 250);
+    assert.equal(effectiveCommissionBps(5000, null), 1000);
+    assert.equal(effectiveCommissionBps(-10, null), 0);
+  });
+
+  it("commission is a floor share of food net", () => {
+    assert.equal(commissionPaise(10_000, 500), 500);
+    assert.equal(commissionPaise(9_999, 500), 499);
+    assert.equal(commissionPaise(10_000, 0), 0);
+    assert.equal(commissionPaise(0, 500), 0);
   });
 
   it("totals food × qty + delivery + platform fee", () => {

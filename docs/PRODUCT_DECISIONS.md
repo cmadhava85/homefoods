@@ -6,10 +6,11 @@ Decided for LocalMeals launch and near-term roadmap. Do not reverse without an e
 
 | Decision | Rule |
 |----------|------|
-| Customer platform fee | **₹7 once per checkout / payment** (`PLATFORM_FEE_PAISE=700`) — multi-day week cart = one ₹7, not per day |
-| Cook take at launch | **100% of food** — no cook surcharge / % fee in MVP-1 |
-| Delivery fee | Platform keeps delivery + platform fee; food → cook at EOD |
-| Later cook monetization | Only after pin has volume: small % of food, weekly listing fee, or payout fee — never block supply at launch |
+| Customer platform fee | **Admin-set, once per checkout / payment** (Admin → Features → Pricing; seed ₹7, ₹0 on first boot in solo mode; max ₹50) — multi-day week cart = one fee, not per day |
+| Cook commission | **Admin-set % of food net** (seed **5%**, max **10%**), optional **per-cook override** (Admin → Cooks). Deducted at EOD settlement (`settlements.fees_paise`) — never added to the customer bill |
+| Rate changes | Fee and commission are **snapshotted on each order / booking** (`platform_fee_paise`, `commission_bps`) — changes apply to **new orders only**. Orders placed before the migration keep 0% commission |
+| Delivery fee | Platform keeps delivery + platform fee + commission; food − commission → cook at EOD |
+| Refund after payout | Recovery (`CLAWBACK_PENDING`) = what the cook was paid for the line (food net − commission) |
 | Ads / kitchen boosts | Scaffolded behind `ads_enabled` (**default OFF**). Flat boost packages later — **not** a % of food. Turn on only when pin volume is healthy |
 
 ## Trust & reviews (MVP-2)
@@ -45,10 +46,18 @@ Full table: [ROADMAP.md](./ROADMAP.md). Placement:
 |-------|------|
 | Pilot: one pin, 5–8 cooks, shareable `/kitchen/:slug` | Now (ops) |
 | Cook sold-out toggle, fulfillment toggles, weekly templates, FSSAI enroll help, opt-in lean WA status | **MVP-2** polish |
-| Party / bulk catering (MOQ, 48–72h cut-off, 50% advance UPI) | **MVP-3** — [MVP3.md](./MVP3.md) |
+| Party / bulk catering (MOQ, 48–72h cut-off, 50% advance UPI) | **MVP-3 — built, OFF** (`catering_enabled`) — [MVP3.md](./MVP3.md) |
 | Radius / PostGIS, catering RFQ, pantry, tiffin | MVP-3+ |
 
-Do not start party mode until the lunch pin is stable. Keep customer WA lean by default (status spam stays opt-in).
+Do not switch party mode on until the lunch pin is stable. Keep customer WA lean by default (status spam stays opt-in).
+
+### Party / bulk catering rules (locked for the first slice)
+
+- **Fee:** one platform fee per booking (the admin-set value), charged with the advance. The cook commission is snapshotted on the booking; admin pays the cook food − commission (`cookPayoutPaise`).
+- **Split:** advance = 50% of food (rounded up) + fee; balance = remaining food, due before the event.
+- **Bounds:** MOQ ≥ 10, ≤ 150 plates per booking, cook cut-off 48–72 h, events ≤ 60 days ahead, per-day party-plate cap per kitchen.
+- **Cancellation:** customer free before the advance, full refund until the cut-off, support after; cook-cancel = full refund; admin may refund partially.
+- **Payout:** manual (admin marks cook paid with UTR) — not part of lunch EOD batches.
 
 ## Channels
 

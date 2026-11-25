@@ -3,13 +3,14 @@
 import Link from "next/link";
 import { useAuth } from "@/components/AuthProvider";
 import { useLocale } from "@/components/LocaleProvider";
-import { flagOn, useFeatureFlags } from "@/lib/features";
-import { hideCookOnboard, kitchensBrowseHref } from "@/lib/soloKitchen";
+import { flagOn, useFeatureFlags, usePlatformFeePaise } from "@/lib/features";
+import { hideCookOnboard, isSoloKitchenMode, kitchensBrowseHref } from "@/lib/soloKitchen";
 
 export function SiteFooter() {
   const { t } = useLocale();
   const { user } = useAuth();
   const flags = useFeatureFlags();
+  const platformFeePaise = usePlatformFeePaise();
   const browse = kitchensBrowseHref();
   const showEnroll = !hideCookOnboard();
   const customer = user?.role === "CUSTOMER";
@@ -116,7 +117,11 @@ export function SiteFooter() {
         <div className="site-footer-meta">
           <span>
             {isSoloKitchenMode()
-              ? "Cooks keep 100% of food · free delivery · no platform fee"
+              ? `Home-cooked by one kitchen · free delivery · ${
+                  platformFeePaise > 0
+                    ? `₹${(platformFeePaise / 100).toFixed(0)} platform fee per checkout`
+                    : "no platform fee"
+                }`
               : t("footer.metaFee")}
           </span>
         </div>

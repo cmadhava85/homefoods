@@ -37,7 +37,7 @@ Kitchen pickup, SELF Maps delivery, partner delivery **scaffold**, saved plates 
 
 ## MVP-3 — party & bulk catering
 
-Higher-margin small functions (≈20–100 plates). See [MVP3.md](./MVP3.md).
+Higher-margin small functions (≈20–100 plates). See [MVP3.md](./MVP3.md). **First slice built and dark-launched** behind `catering_enabled` (OFF).
 
 | Item | Notes |
 |------|--------|

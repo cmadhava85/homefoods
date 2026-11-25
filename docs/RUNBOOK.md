@@ -53,6 +53,8 @@ Staging URLs (current): see [MVP1_LAUNCH.md](./MVP1_LAUNCH.md).
 
 **Manual EOD (Admin):** Ops console → Payouts → **Run EOD**, or `POST /admin/settlements/run-eod` as admin session (audited `RUN_EOD`).
 
+**Pricing (Admin):** Ops console → Features → **Pricing** sets the customer platform fee (₹, max ₹50) and the default cook commission (% of food, max 10%); Cooks → *Commission override* sets a per-cook rate (blank = default). Both apply to **new orders only** — each order stores `platform_fee_paise` + `commission_bps`. EOD pays `net = food − commission − recovery`; the commission shows on each payout card (`fees_paise`), in the turnover report, and on the cook desk. Changes are audited as `PRICING_UPDATED` / `COOK_COMMISSION_SET`.
+
 **Manual cut-off / EOD (curl):**
 
 ```bash

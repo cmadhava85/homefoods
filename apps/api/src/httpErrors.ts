@@ -122,6 +122,10 @@ export function httpStatusForError(err: unknown): number {
   if (/amount does not match|CORS origin not allowed/i.test(msg)) {
     return 409;
   }
+  // Customer-facing catalog errors that are still thrown as bare Error in places.
+  if (/cut-off passed|Kitchen at capacity|That plate is not available|is not offered by this kitchen/i.test(msg)) {
+    return 400;
+  }
   if (/\bnot found\b|error\.(notFound|kitchenNotFound|orderNotFound|customerNotFound)/i.test(msg)) {
     return 404;
   }

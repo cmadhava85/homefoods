@@ -8,6 +8,7 @@ const PROTECTED = [
   /^\/orders(?:\/|$)/,
   /^\/account(?:\/|$)/,
   /^\/family(?:\/|$)/,
+  /^\/catering(?:\/|$)/,
 ];
 
 /** Public cook enrollment — not a desk route. */

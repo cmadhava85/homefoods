@@ -239,6 +239,7 @@ const OrderRow = z
     weekDiscountPercent: z.number().int().min(0).max(100).nullable(),
     deliveryPaise: Paise,
     platformFeePaise: Paise,
+    commissionBps: z.number().int().min(0).max(10_000).describe("Commission snapshot (basis points of food)"),
     convenienceFeePaise: Paise,
     creditAppliedPaise: Paise,
     paymentMethod: z.enum(["LINK", "UPI_QR", "CREDIT"]),
@@ -431,6 +432,7 @@ const ManifestResponse = z.object({
   earnings: z.object({
     serviceDate: IsoDate,
     note: Label,
+    commissionBps: z.number().int().min(0).max(10_000).describe("Current commission for new orders (basis points)"),
     meal: z.object({ mealType: MealType, plates: Count, foodPaise: Paise }),
     day: z.object({
       plates: Count,
@@ -438,6 +440,7 @@ const ManifestResponse = z.object({
       deliveredPlates: Count,
       deliveredFoodPaise: Paise,
       heldPlates: Count,
+      commissionPaise: Paise.describe("Commission on today's plates (snapshot rates)"),
       pendingClawbackPaise: Paise,
       clawbackPaise: Paise,
     }),
@@ -446,6 +449,7 @@ const ManifestResponse = z.object({
       label: Label,
       detail: Label.nullable(),
       netPaise: SignedPaise.nullable(),
+      feesPaise: Paise.describe("Commission deducted in this settlement"),
       orderCount: Count.nullable(),
       manualPaidAt: Ts.nullable(),
       manualUtr: Text(80).nullable(),

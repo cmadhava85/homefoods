@@ -1,9 +1,11 @@
 import { z } from "zod";
+import { MAX_COOK_COMMISSION_BPS, MAX_PLATFORM_FEE_PAISE } from "@localmeals/domain";
 import { defineOperations } from "../openapi/registry.js";
 import { Count, Id, IdParam, IsoDate, MealType, OrderStatus, Paise, PinCode, Spice, Text, Uuid } from "../openapi/shared.js";
 import {
   AdCampaign,
   AdStatus,
+  Bps,
   AdType,
   BigId,
   ChannelEnum,
@@ -73,6 +75,29 @@ export const AdminFeatureKeyParams = z.object({
   key: z.string().min(1).max(64).regex(/^[a-z0-9_]+$/).describe("Feature flag key"),
 });
 export const AdminFeatureBody = z.object({ enabled: z.boolean() }).describe("Toggle a feature flag");
+export const AdminPricingBody = z
+  .object({
+    platformFeePaise: z.number().int().min(0).max(MAX_PLATFORM_FEE_PAISE).optional().describe("Customer fee per checkout"),
+    cookCommissionBps: z
+      .number()
+      .int()
+      .min(0)
+      .max(MAX_COOK_COMMISSION_BPS)
+      .optional()
+      .describe("Default cook commission on food (basis points)"),
+  })
+  .describe("Platform pricing (at least one field)");
+export const AdminCookCommissionBody = z
+  .object({
+    commissionBps: z
+      .number()
+      .int()
+      .min(0)
+      .max(MAX_COOK_COMMISSION_BPS)
+      .nullable()
+      .describe("Override in basis points; null = use platform default"),
+  })
+  .describe("Per-cook commission override");
 export const AdminAdsQuery = z.object({
   pin: PinCode.optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
@@ -287,6 +312,7 @@ const TurnoverReport = z
       foodGmvPaise: Text(300),
       platformFeePaise: Text(300),
       settledNetPaise: Text(300),
+      commissionPaise: Text(300),
       gmvStatuses: z.array(OrderStatus).max(20),
     }),
     platform: z.object({
@@ -298,6 +324,7 @@ const TurnoverReport = z
       orderCount: TurnoverCount,
       refundedFoodPaise: PaiseTotal,
       settledNetPaise: PaiseTotal,
+      commissionPaise: PaiseTotal,
       cookCountWithVolume: TurnoverCount,
     }),
     liveCookCount: TurnoverCount,
@@ -323,6 +350,7 @@ const TurnoverReport = z
           refundedFoodPaise: PaiseTotal,
           refundedOrderCount: TurnoverCount,
           settledNetPaise: PaiseTotal,
+          commissionPaise: PaiseTotal,
           settledOrderCount: TurnoverCount,
           manualPaidPaise: PaiseTotal,
           transferCompletedPaise: PaiseTotal,
@@ -348,6 +376,17 @@ const FeatureFlags = z
       .max(100),
   })
   .describe("Feature flags (admin view)");
+
+const Pricing = z
+  .object({
+    platformFeePaise: Paise,
+    cookCommissionBps: Bps,
+    maxPlatformFeePaise: Paise,
+    maxCookCommissionBps: Bps,
+    updatedAt: Timestamp.nullable(),
+    updatedBy: Text(80).nullable(),
+  })
+  .describe("Platform fee + default cook commission");
 
 const Tags = ["Admin"];
 
@@ -462,6 +501,22 @@ export const adminOperations = defineOperations([
     response: EodSettlementResult,
   },
   {
+    method: "post",
+    path: "/admin/outbox/:id/retry",
+    operationId: "adminRetryOutbox",
+    summary: "Re-queue a parked or flag-skipped outbox row and wake push workers",
+    tags: Tags,
+    access: "admin",
+    params: AdminIdParams,
+    body: z.object({}).describe("No body fields"),
+    response: z.object({
+      ok: z.literal(true),
+      id: Id,
+      eventName: Text(120),
+    }),
+    errors: { 400: "Invalid outbox id", 404: "Outbox row not found" },
+  },
+  {
     method: "get",
     path: "/admin/cooks",
     operationId: "adminListCooks",
@@ -510,6 +565,37 @@ export const adminOperations = defineOperations([
     params: AdminFeatureKeyParams,
     body: AdminFeatureBody,
     response: FeatureFlags,
+  },
+  {
+    method: "get",
+    path: "/admin/pricing",
+    operationId: "adminGetPricing",
+    summary: "Platform fee and default cook commission",
+    tags: Tags,
+    access: "admin",
+    response: Pricing,
+  },
+  {
+    method: "patch",
+    path: "/admin/pricing",
+    operationId: "adminSetPricing",
+    summary: "Change platform fee and/or default cook commission (applies to new orders only)",
+    tags: Tags,
+    access: "admin",
+    body: AdminPricingBody,
+    response: Pricing,
+  },
+  {
+    method: "post",
+    path: "/admin/cooks/:id/commission",
+    operationId: "adminSetCookCommission",
+    summary: "Set or clear a per-cook commission override (applies to new orders only)",
+    tags: Tags,
+    access: "admin",
+    params: AdminCookIdParams,
+    body: AdminCookCommissionBody,
+    response: CookProfileRow,
+    errors: { 404: "Cook not found" },
   },
   {
     method: "get",

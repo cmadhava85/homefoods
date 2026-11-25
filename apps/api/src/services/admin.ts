@@ -171,7 +171,7 @@ export async function refundOrder(
     reason: string;
     ticketId?: number;
     /**
-     * Customer-initiated cancel of one week-cart day: move the ₹7 fee to a remaining day and
+     * Customer-initiated cancel of one week-cart day: move the platform fee to a remaining day and
      * claw back the week discount if the cart drops below minDays. Runs inside the claim txn,
      * only on the first claim, so retries can't apply it twice. Not used for admin/quality refunds.
      */

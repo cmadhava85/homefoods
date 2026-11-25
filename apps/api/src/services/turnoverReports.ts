@@ -73,6 +73,8 @@ export type CookTurnoverRow = {
   refundedOrderCount: number;
   /** Settlement net owed/paid in window */
   settledNetPaise: number;
+  /** Platform commission deducted in settlements in window */
+  commissionPaise: number;
   settledOrderCount: number;
   manualPaidPaise: number;
   transferCompletedPaise: number;
@@ -87,6 +89,7 @@ export type PlatformTurnoverSummary = {
   orderCount: number;
   refundedFoodPaise: number;
   settledNetPaise: number;
+  commissionPaise: number;
   cookCountWithVolume: number;
 };
 
@@ -104,6 +107,7 @@ export type TurnoverOrderRow = {
 export type TurnoverSettleRow = {
   cookId: string;
   netPaise: number;
+  feesPaise?: number | null;
   orderCount: number;
   status: string;
   manualPaidAt: Date | string | null;
@@ -153,6 +157,7 @@ export function aggregateTurnoverFromRows(
       refundedFoodPaise: 0,
       refundedOrderCount: 0,
       settledNetPaise: 0,
+      commissionPaise: 0,
       settledOrderCount: 0,
       manualPaidPaise: 0,
       transferCompletedPaise: 0,
@@ -183,6 +188,7 @@ export function aggregateTurnoverFromRows(
   for (const s of settleRows) {
     const row = ensure(s.cookId);
     row.settledNetPaise += s.netPaise;
+    row.commissionPaise += s.feesPaise ?? 0;
     row.settledOrderCount += s.orderCount;
     if (s.manualPaidAt || s.status === "MANUAL_PAID") {
       row.manualPaidPaise += s.netPaise;
@@ -205,6 +211,7 @@ export function aggregateTurnoverFromRows(
     orderCount: 0,
     refundedFoodPaise: 0,
     settledNetPaise: 0,
+    commissionPaise: 0,
     cookCountWithVolume: 0,
   };
   for (const c of cooksOut) {
@@ -216,6 +223,7 @@ export function aggregateTurnoverFromRows(
     platform.orderCount += c.orderCount;
     platform.refundedFoodPaise += c.refundedFoodPaise;
     platform.settledNetPaise += c.settledNetPaise;
+    platform.commissionPaise += c.commissionPaise;
     if (c.foodGmvPaise > 0 || c.settledNetPaise > 0) platform.cookCountWithVolume += 1;
   }
 

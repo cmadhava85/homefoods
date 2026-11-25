@@ -55,11 +55,32 @@ Base: `http://127.0.0.1:4000`
 | GET | `/admin/tickets` | Ticket inbox |
 | GET | `/admin/tickets/:id` | Ticket detail |
 | GET | `/admin/orders/:key` | Ops support: LM-… / checkoutId / trc_… / gatewayTxnId → order, payments, outbox, activity, Cloud Logging hint |
-| GET | `/admin/cooks` | Cook list |
+| GET | `/admin/cooks` | Cook list (incl. `commissionBps` override, null = default) |
+| POST | `/admin/cooks/:id/commission` | Admin: `{ commissionBps: 0–1000 \| null }` per-cook override (new orders only) |
+| GET | `/admin/pricing` | Admin: `{ platformFeePaise, cookCommissionBps, max…, updatedBy }` |
+| PATCH | `/admin/pricing` | Admin: `{ platformFeePaise?, cookCommissionBps? }` — audited `PRICING_UPDATED`; new orders only |
+| GET | `/meta/features` | Public flags + `pricing.platformFeePaise` (web cart reads the live fee) |
 | GET | `/admin/analytics/turnover?period=week\|month\|year\|custom&from=&to=&cookId=` | Route/RBI turnover by cook (food GMV, fees, settlements) |
 | POST | `/internal/ops/holds` | settlement_hold=true |
 | POST | `/internal/ops/refunds` | Admin: `{ orderId, mode, reason }` (numeric id; prefer `/orders/:publicId/refund`) |
 | POST | `/internal/ops/cooks/:id/pause` | is_active=false |
+| GET | `/kitchens/:slug/catering` | MVP-3 party combos (404 unless `catering_enabled` + cook opted in) |
+| POST | `/catering/bookings` | Customer: book combo `{ slug, comboId, plates, eventDate, eventTime, fulfillmentMode?, addressId?, note?, idempotencyKey? }` → advance link |
+| GET | `/me/catering/bookings` | Customer: party bookings |
+| GET | `/catering/bookings/:publicId` | Customer: one booking (CAT-…) |
+| POST | `/catering/bookings/:publicId/pay` | Customer: link for the due phase (advance / balance) |
+| POST | `/catering/bookings/:publicId/confirm` | Customer: re-verify open links with the gateway after redirect |
+| POST | `/catering/bookings/:publicId/cancel` | Customer: free before advance, full refund until cut-off |
+| GET | `/cooks/:slug/catering` | Cook desk: settings, combos, bookings (+ `platformEnabled`) |
+| PATCH | `/cooks/:slug/catering/settings` | Cook: `{ enabled?, cutoffHours 48–72, dailyPlateCap }` |
+| POST / PUT | `/cooks/:slug/catering/combos[/:id]` | Cook: create / replace combo (`isActive:false` hides) |
+| POST | `/cooks/:slug/catering/bookings/:publicId/complete` | Cook: PAID → COMPLETED |
+| POST | `/cooks/:slug/catering/bookings/:publicId/cancel` | Cook: cancel → full refund |
+| GET | `/admin/catering/bookings?status=&limit=` | Admin: bookings + payment rows |
+| POST | `/admin/catering/bookings/:publicId/cancel` | Admin: `{ reason, refundPaise? }` |
+| POST | `/admin/catering/bookings/:publicId/manual-payment` | Admin: record due phase paid (cash / direct UPI) |
+| POST | `/admin/catering/bookings/:publicId/cook-paid` | Admin: `{ utr }` after COMPLETED |
+| POST | `/internal/catering/balance-reminders` | Scheduler: one WA balance reminder ≤ 48 h before event |
 
 ## WhatsApp inbound contract
 

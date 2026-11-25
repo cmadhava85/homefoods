@@ -45,7 +45,7 @@ export const waFlowMessages = {
     "wa.howPickup": "• Pickup → add PICKUP at the end (e.g. Week {slug} {mealCmd} {day} PICKUP)",
     "wa.weekHeader": "📅 {kitchen} · week {meal}",
     "wa.weekMeta": "Order by {cutoff} · ETA {window}",
-    "wa.weekDeal": "Deal: {deal} (food only; delivery + ₹7 never discounted)",
+    "wa.weekDeal": "Deal: {deal} (food only; delivery + platform fee never discounted)",
     "wa.noOpenWeekDays":
       "{kitchen}: no open {meal} days with plates in the next week. Try Week {slug} for other meals, or Menu for today.",
     "wa.addressesTitle": "Your delivery addresses:",
@@ -147,7 +147,7 @@ export const waFlowMessages = {
     "wa.howPickup": "• நேரில் பெற → இறுதியில் PICKUP (எ.கா. Week {slug} {mealCmd} {day} PICKUP)",
     "wa.weekHeader": "📅 {kitchen} · வாரம் {meal}",
     "wa.weekMeta": "{cutoff}-க்குள் முன்பதிவு · வருகை {window}",
-    "wa.weekDeal": "சலுகை: {deal} (உணவுக்கு மட்டும்; விநியோகம் + ₹7-க்குத் தள்ளுபடி இல்லை)",
+    "wa.weekDeal": "சலுகை: {deal} (உணவுக்கு மட்டும்; விநியோகம் + தளக் கட்டணத்திற்குத் தள்ளுபடி இல்லை)",
     "wa.noOpenWeekDays": "{kitchen}: அடுத்த வாரத்தில் {meal} முன்பதிவுக்கு நாட்கள் இல்லை. வேறு உணவு நேரத்துக்கு \"Week {slug}\", இன்றைக்கு \"Menu\".",
     "wa.addressesTitle": "உங்கள் விநியோக முகவரிகள்:",
     "wa.orderWithLabel": "முகவரிப் பெயருடன் முன்பதிவு: Order csk-homemade-delights 1 HOME",

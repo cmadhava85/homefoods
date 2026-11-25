@@ -118,6 +118,8 @@ describe("httpStatusForError", () => {
     assert.equal(httpStatusForError(new Error("amount does not match")), 409);
     // "not allowed" also matches the 403 regex — CORS message is intentionally 403 today.
     assert.equal(httpStatusForError(new Error("CORS origin not allowed")), 403);
+    assert.equal(httpStatusForError(new Error("Lunch cut-off passed (00:00) — try tomorrow")), 400);
+    assert.equal(httpStatusForError(new Error("Kitchen at capacity (40 plates) — try another kitchen")), 400);
     assert.equal(httpStatusForError(new Error("ECONNREFUSED postgres")), 503);
     // Idempotent-create race: a conflict the client can retry/refresh, not a server fault.
     assert.equal(httpStatusForError(new Error("duplicate key value")), 409);

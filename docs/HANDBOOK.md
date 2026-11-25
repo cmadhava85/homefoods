@@ -13,7 +13,7 @@ LocalMeals (HomeFood) is a **hyper-local home-kitchen lunch marketplace**.
 - **Lunch-first** (breakfast/dinner can be enabled later per cook)  
 - **Customers** order on web or WhatsApp  
 - **Cooks** run a light web desk + WhatsApp Status  
-- **Platform fee** ₹7 **once per checkout** (week cart ≠ ₹7/day); cook gets **100% of food** at launch  
+- **Platform fee** (admin-set, seed ₹7) **once per checkout** (week cart ≠ fee/day); cook gets **food − commission** (admin-set %, seed 5%, per-cook override)  
 - **Delivery:** SELF (Maps + WA) first; pickup optional (feature-flagged); partner logistics later  
 
 ### Why we build it (5 Whys)
@@ -72,7 +72,7 @@ From the cook WhatsApp number (desk still works):
 
 ### Week cart
 
-Multi-day lunch in one checkout; optional cook **% food discount** when day count ≥ min days (delivery + ₹7 never discounted).  
+Multi-day lunch in one checkout; optional cook **% food discount** when day count ≥ min days (delivery + platform fee never discounted).  
 On pay: cook (and customer) get **one WhatsApp per day-line**, each showing **service date**, **day N of M**, and week `checkoutId`. Kitchen ops / Status / EOD stay **per `serviceDate`**.
 
 ### Pickup (MVP-2, flag `pickup_enabled`)
@@ -128,8 +128,8 @@ Deep dive: [TECHNICAL_DESIGN.md](./TECHNICAL_DESIGN.md) · stack guide: [TECH_ST
 
 | Rule | Value |
 |------|--------|
-| Customer platform fee | ₹7 once per checkout (`PLATFORM_FEE_PAISE=700`); week cart is not ₹7/day |
-| Cook food take (launch) | 100% |
+| Customer platform fee | Admin → Features → Pricing (seed ₹7 / ₹0 solo); once per checkout, not per day |
+| Cook commission | Admin → Features → Pricing (seed 5%, max 10%); per-cook override in Admin → Cooks; snapshotted per order, deducted at EOD |
 | Delivery fee | Platform keeps (with fee); food → cook at EOD |
 | LIVE kitchen | FSSAI + active + payout UPI/bank note (Route optional while RBI-blocked) |
 | Reviews | Platform-standard for LIVE; no cook opt-out |

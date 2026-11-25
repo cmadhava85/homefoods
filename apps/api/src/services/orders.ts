@@ -58,12 +58,10 @@ import {
   lineTotalPaise,
   lineGatewayPaise,
   type PaymentMethod,
+  platformFeePaiseForCheckoutLine,
 } from "@localmeals/domain";
 import { getPaymentProvider, UNPAID_HOLD_TTL_SEC } from "@localmeals/adapters";
-import {
-  platformFeePaise,
-  platformFeePaiseForCheckoutLine,
-} from "../soloKitchen.js";
+import { commissionBpsForCook, getPlatformPricing } from "./platformSettings.js";
 
 /**
  * Customer-facing kitchen card — never include cook personal mobile or payout rails.
@@ -126,7 +124,7 @@ const ALREADY_PAID: OrderState[] = [
   "REFUNDED",
 ];
 
-/** Stable paid lines that may receive the ₹7 fee / lose week discount during cart rebalance. */
+/** Stable paid lines that may receive the platform fee / lose week discount during cart rebalance. */
 const REBALANCE_ACTIVE: OrderState[] = ALREADY_PAID.filter(
   (s) => s !== "CANCEL_REQUESTED" && s !== "REFUNDED",
 );
@@ -1341,7 +1339,8 @@ export async function createOrder(
     fulfillmentMode,
     baseDeliveryPaise: fulfillDeliveryPaise,
   });
-  const feePaise = platformFeePaise();
+  const { platformFeePaise: feePaise } = await getPlatformPricing(db);
+  const commissionBps = await commissionBpsForCook(db, cook);
   const { checkoutPricingOptions, lockCustomerCredit, priceLinesForCustomer } = await import(
     "./credits.js"
   );
@@ -1453,6 +1452,7 @@ export async function createOrder(
           foodPaise: menu.pricePaise,
           deliveryPaise,
           platformFeePaise: feePaise,
+          commissionBps,
           convenienceFeePaise: pricing.priced[0].convenienceFeePaise,
           creditAppliedPaise: pricing.priced[0].creditAppliedPaise,
           paymentMethod: pricing.method,
@@ -2158,7 +2158,9 @@ export async function createOrderBatch(
   const discountOn = weekDiscountApplies(dayCount, weekRule);
 
   const mealOrder: Record<string, number> = { BREAKFAST: 0, LUNCH: 1, DINNER: 2 };
-  // Earliest day gets the single ₹7 platform fee for this checkout; delivery stays per meal line.
+  // Earliest day gets the single platform fee for this checkout; delivery stays per meal line.
+  const { platformFeePaise: checkoutFeePaise } = await getPlatformPricing(db);
+  const commissionBps = await commissionBpsForCook(db, cook);
   const draftsByDate = [...drafts].sort((a, b) => {
     const byDate = a.serviceDate.localeCompare(b.serviceDate);
     if (byDate !== 0) return byDate;
@@ -2166,7 +2168,7 @@ export async function createOrderBatch(
   });
 
   const prepared: Prepared[] = draftsByDate.map((d, lineIndex) => {
-    const linePlatformFeePaise = platformFeePaiseForCheckoutLine(lineIndex);
+    const linePlatformFeePaise = platformFeePaiseForCheckoutLine(lineIndex, checkoutFeePaise);
     const foodDiscountPaise = lineFoodDiscountPaise({
       foodPaise: d.menu.pricePaise,
       qty: d.qty,
@@ -2352,6 +2354,7 @@ export async function createOrderBatch(
             weekDiscountPercent: p.weekDiscountPercent,
             deliveryPaise,
             platformFeePaise: p.platformFeePaise,
+            commissionBps,
             convenienceFeePaise: pricing.priced[i].convenienceFeePaise,
             creditAppliedPaise: pricing.priced[i].creditAppliedPaise,
             paymentMethod: pricing.method,
@@ -2696,7 +2699,7 @@ const CHECKOUT_TERMINAL = new Set(["CANCELLED", "REFUNDED", "FAILED"]);
 
 /**
  * Customer cancels one day of a paid week cart (called inside refundOrder's claim txn, order row locked):
- * - Move the ₹7 platform fee onto the earliest remaining day (don't refund the fee while days remain).
+ * - Move the platform fee onto the earliest remaining day (don't refund the fee while days remain).
  * - If the remaining *calendar days* drop below minDays, claw the remaining paid days' week discount
  *   out of this refund (the cart no longer qualifies). Percent comes from the order snapshot; minDays
  *   from the cook profile (not snapshotted).
@@ -3256,7 +3259,8 @@ export async function requestLateOrder(
     fulfillmentMode,
     baseDeliveryPaise: fulfillDeliveryPaise,
   });
-  const feePaise = platformFeePaise();
+  const { platformFeePaise: feePaise } = await getPlatformPricing(db);
+  const commissionBps = await commissionBpsForCook(db, cook);
   const amountPaise = orderTotalPaise({
     foodPaise: menu.pricePaise,
     deliveryPaise,
@@ -3313,6 +3317,7 @@ export async function requestLateOrder(
         foodPaise: menu.pricePaise,
         deliveryPaise,
         platformFeePaise: feePaise,
+        commissionBps,
         status: "PENDING_APPROVAL",
         fulfillmentMode,
         deliveryTargetAddress,
@@ -3387,7 +3392,9 @@ export async function approveLateOrder(db: Db, publicId: string) {
     qty: order.qty,
   });
   const pay = getPaymentProvider();
-  const payKey = `${order.idempotencyKey}|pay`;
+  // Include publicId so a retry after cancel (order idempotency key cleared, payment row kept)
+  // cannot collide on payments.idempotency_key with the prior charge.
+  const payKey = `${order.idempotencyKey}|${order.publicId}|pay`;
   const billMobile = order.payerMobile ?? order.customerMobile;
 
   bindTrace({

@@ -1,11 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import {
-  isSoloKitchenMode,
-  platformFeePaise,
-  platformFeePaiseForCheckoutLine,
-  soloKitchenSlug,
-} from "./soloKitchen.js";
+import { isSoloKitchenMode, soloKitchenSlug } from "./soloKitchen.js";
 
 const KEYS = ["SOLO_KITCHEN_SLUG", "NEXT_PUBLIC_SOLO_KITCHEN_SLUG"] as const;
 const saved: Partial<Record<(typeof KEYS)[number], string | undefined>> = {};
@@ -26,26 +21,20 @@ afterEach(() => {
 });
 
 describe("soloKitchen (api)", () => {
-  it("is off by default with normal ₹7 fee", () => {
+  it("is off by default", () => {
     assert.equal(soloKitchenSlug(), null);
     assert.equal(isSoloKitchenMode(), false);
-    assert.equal(platformFeePaise(), 700);
-    assert.equal(platformFeePaiseForCheckoutLine(0), 700);
-    assert.equal(platformFeePaiseForCheckoutLine(1), 0);
   });
 
-  it("accepts a valid slug and zeros platform fee", () => {
+  it("accepts a valid slug", () => {
     process.env.SOLO_KITCHEN_SLUG = "csk-homemade-delights";
     assert.equal(soloKitchenSlug(), "csk-homemade-delights");
     assert.equal(isSoloKitchenMode(), true);
-    assert.equal(platformFeePaise(), 0);
-    assert.equal(platformFeePaiseForCheckoutLine(0), 0);
   });
 
   it("falls back to NEXT_PUBLIC_SOLO_KITCHEN_SLUG", () => {
     process.env.NEXT_PUBLIC_SOLO_KITCHEN_SLUG = "csk-homemade-delights";
     assert.equal(soloKitchenSlug(), "csk-homemade-delights");
-    assert.equal(platformFeePaise(), 0);
   });
 
   it("rejects invalid slugs", () => {

@@ -309,15 +309,18 @@ describe("MVP-1 API flows", () => {
       headers: cookHeaders,
       payload: { cutoffHour: 0, cutoffMinute: 0 },
     });
-    const res = await placeOrder();
-    assert.equal(res.statusCode, 400);
-    assert.match(res.json().error, /cut-off/i);
-    await app.inject({
-      method: "PATCH",
-      url: "/cooks/csk-homemade-delights/meal-settings/LUNCH",
-      headers: cookHeaders,
-      payload: { cutoffHour: 23, cutoffMinute: 59 },
-    });
+    try {
+      const res = await placeOrder();
+      assert.equal(res.statusCode, 400, res.body);
+      assert.match(res.json().error, /cut-off/i);
+    } finally {
+      await app.inject({
+        method: "PATCH",
+        url: "/cooks/csk-homemade-delights/meal-settings/LUNCH",
+        headers: cookHeaders,
+        payload: { cutoffHour: 23, cutoffMinute: 59 },
+      });
+    }
   });
 
   it("refund is idempotent when already REFUNDED", async () => {

@@ -147,6 +147,7 @@ describe("aggregateTurnoverFromRows", () => {
         {
           cookId: "c1",
           netPaise: 10000,
+          feesPaise: 500,
           orderCount: 2,
           status: "MANUAL_PAID",
           manualPaidAt: new Date(),
@@ -164,6 +165,8 @@ describe("aggregateTurnoverFromRows", () => {
     assert.equal(rows.find((r) => r.cookId === "c1")!.manualPaidPaise, 10000);
     assert.equal(rows.find((r) => r.cookId === "c2")!.transferCompletedPaise, 5000);
     assert.equal(platform.settledNetPaise, 15000);
+    assert.equal(rows.find((r) => r.cookId === "c1")!.commissionPaise, 500);
+    assert.equal(platform.commissionPaise, 500);
     assert.equal(platform.cookCountWithVolume, 2);
   });
 

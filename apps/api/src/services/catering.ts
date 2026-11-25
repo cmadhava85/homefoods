@@ -38,6 +38,7 @@ import {
   cateringCutoffAt,
   cateringDuePhase,
   cateringEventStartAt,
+  commissionPaise,
   cookFulfillmentOffersFromRow,
   customerCanCancelCatering,
   isFeatureEnabled,
@@ -56,6 +57,7 @@ import {
 import { createServiceLogger, newTraceId } from "@localmeals/observability";
 import { enqueueOutbox } from "./outboxEnqueue.js";
 import { getFeatureFlags } from "./featureFlags.js";
+import { commissionBpsForCook, getPlatformPricing } from "./platformSettings.js";
 
 const log = createServiceLogger("localmeals-api");
 
@@ -218,8 +220,12 @@ function bookingView(
     customerMobile: audience === "CUSTOMER" || advancePaid ? b.customerMobile : null,
   };
   if (audience !== "ADMIN") return view;
+  const bookingCommissionPaise = commissionPaise(b.foodPaise, b.commissionBps);
   return {
     ...view,
+    commissionBps: b.commissionBps,
+    commissionPaise: bookingCommissionPaise,
+    cookPayoutPaise: b.foodPaise - bookingCommissionPaise,
     cookPaidAt: b.cookPaidAt?.toISOString() ?? null,
     cookPaidUtr: b.cookPaidUtr,
     payments: payments.map((p) => ({
@@ -447,6 +453,7 @@ export async function getPublicKitchenCatering(db: Db, slug: string) {
     kitchenName: cook.kitchenName,
     pinCode: cook.pinCode,
     cutoffHours: settings.cutoffHours,
+    platformFeePaise: (await getPlatformPricing(db)).platformFeePaise,
     earliestEventDate: addDaysISO(today, Math.ceil(settings.cutoffHours / 24)),
     latestEventDate: addDaysISO(today, CATERING_MAX_DAYS_AHEAD),
     fulfillment: {
@@ -527,7 +534,12 @@ export async function createCateringBooking(
     deliveryAddress = [addr.line1, addr.line2, addr.pinCode].filter(Boolean).join(", ");
   }
 
-  const amounts = cateringAmounts({ pricePerPlatePaise: combo.pricePerPlatePaise, plates: input.plates });
+  const amounts = cateringAmounts({
+    pricePerPlatePaise: combo.pricePerPlatePaise,
+    plates: input.plates,
+    platformFeePaise: (await getPlatformPricing(db)).platformFeePaise,
+  });
+  const commissionBps = await commissionBpsForCook(db, cook);
   const cutoffAt = cateringCutoffAt(input.eventDate, input.eventTime, settings.cutoffHours);
   await ensureCustomerRow(db, input.customerMobile, cook.pinCode);
 
@@ -556,6 +568,7 @@ export async function createCateringBooking(
         pricePerPlatePaise: combo.pricePerPlatePaise,
         foodPaise: amounts.foodPaise,
         platformFeePaise: amounts.platformFeePaise,
+        commissionBps,
         advancePaise: amounts.advancePaise,
         balancePaise: amounts.balancePaise,
         eventDate: input.eventDate,
@@ -742,12 +755,18 @@ export async function confirmCateringPayment(db: Db, publicId: string, customerM
 
 /* ───────────────────────────── Payments ───────────────────────────── */
 
-/** True when a gateway event belongs to catering (CAT- reference / notes.kind). */
-export function isCateringGatewayEvent(event: {
-  orderPublicId?: string;
-  notes?: Record<string, string>;
-}) {
-  return event.notes?.kind === "CATERING" || Boolean(event.orderPublicId?.startsWith("CAT-"));
+/** True when a gateway event belongs to catering (CAT- reference / notes.kind / known link id). */
+export async function isCateringGatewayEvent(
+  db: Db,
+  event: { orderPublicId?: string; gatewayTxnId?: string; notes?: Record<string, string> },
+) {
+  if (event.notes?.kind === "CATERING" || event.orderPublicId?.startsWith("CAT-")) return true;
+  if (!event.gatewayTxnId) return false;
+  const row = await db.query.cateringPayments.findFirst({
+    where: (t, { eq: e }) => e(t.gatewayTxnId, event.gatewayTxnId!),
+    columns: { id: true },
+  });
+  return Boolean(row);
 }
 
 /**
@@ -1079,7 +1098,11 @@ export async function adminMarkCateringCookPaid(
     entityType: "catering_booking",
     entityId: publicId,
     reason: input.utr,
-    payload: { foodPaise: row.foodPaise },
+    payload: {
+      foodPaise: row.foodPaise,
+      commissionBps: row.commissionBps,
+      cookPayoutPaise: row.foodPaise - commissionPaise(row.foodPaise, row.commissionBps),
+    },
   });
   return { booking: await viewFor(db, row, "ADMIN") };
 }

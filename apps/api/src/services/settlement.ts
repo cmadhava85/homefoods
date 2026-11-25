@@ -2,7 +2,7 @@ import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { cookLedger, orders, settlements, type Db } from "@localmeals/db";
 import { LogEvent, createServiceLogger, newTraceId } from "@localmeals/observability";
 import { enqueueOutbox } from "./outboxEnqueue.js";
-import { lineFoodNetPaise, serviceDateISO } from "@localmeals/domain";
+import { commissionPaise, lineFoodNetPaise, serviceDateISO } from "@localmeals/domain";
 import { getPaymentProvider, getWhatsAppProvider, isMockPayments } from "@localmeals/adapters";
 
 const log = createServiceLogger("localmeals-api");
@@ -13,6 +13,16 @@ function foodNetPaise(o: {
   foodDiscountPaise?: number | null;
 }) {
   return lineFoodNetPaise(o);
+}
+
+/** Platform commission on a line, from the rate snapshotted when the order was placed. */
+function lineCommissionPaise(o: {
+  foodPaise: number;
+  qty: number;
+  foodDiscountPaise?: number | null;
+  commissionBps?: number | null;
+}) {
+  return commissionPaise(foodNetPaise(o), o.commissionBps ?? 0);
 }
 
 /**
@@ -105,11 +115,14 @@ export async function runEodSettlement(db: Db, businessDate = serviceDateISO()) 
         return null;
       }
       const claimedGross = claimedOrders.reduce((n, o) => n + foodNetPaise(o), 0);
+      const claimedFees = claimedOrders.reduce((n, o) => n + lineCommissionPaise(o), 0);
+      const claimedNet = claimedGross - claimedFees;
       const [updated] = await tx
         .update(settlements)
         .set({
           grossPaise: sql`${settlements.grossPaise} + ${claimedGross}`,
-          netPaise: sql`${settlements.netPaise} + ${claimedGross}`,
+          feesPaise: sql`${settlements.feesPaise} + ${claimedFees}`,
+          netPaise: sql`${settlements.netPaise} + ${claimedNet}`,
           orderCount: sql`${settlements.orderCount} + ${claimedOrders.length}`,
           status: "PENDING_TRANSFER",
         })
@@ -120,14 +133,15 @@ export async function runEodSettlement(db: Db, businessDate = serviceDateISO()) 
         previousGatewayBatchId: row.gatewayBatchId,
         isAppend: row.orderCount > 0,
         claimedOrders,
-        addGross: claimedGross,
+        addNet: claimedNet,
+        addFees: claimedFees,
       };
     });
     if (!claim) {
       skipped.push({ cookId, businessDate: settleDate, reason: "already_claimed" });
       continue;
     }
-    const { draft, isAppend, addGross, previousGatewayBatchId } = claim;
+    const { draft, isAppend, addNet, addFees, previousGatewayBatchId } = claim;
     const settledOrders = claim.claimedOrders;
 
     const { applyPendingClawbacksToSettlement } = await import("./cookClawback.js");
@@ -136,10 +150,10 @@ export async function runEodSettlement(db: Db, businessDate = serviceDateISO()) 
       : await applyPendingClawbacksToSettlement(db, {
           cookId,
           settlementId: draft.id,
-          availablePaise: addGross,
+          availablePaise: addNet,
           businessDate: settleDate,
         });
-    const transferPaise = Math.max(0, addGross - clawbackPaise);
+    const transferPaise = Math.max(0, addNet - clawbackPaise);
 
     let gatewayBatchId = `local_settle_${cookId.slice(0, 8)}_${settleDate}`;
     let status = "COMPLETED";
@@ -190,6 +204,7 @@ export async function runEodSettlement(db: Db, businessDate = serviceDateISO()) 
             cookId,
             orderCount: String(settledOrders.length),
             clawbackPaise: String(clawbackPaise),
+            commissionPaise: String(addFees),
             append: isAppend ? "1" : "0",
             traceId: settleTraceId.slice(0, 40),
           },
@@ -233,6 +248,7 @@ export async function runEodSettlement(db: Db, businessDate = serviceDateISO()) 
       amountPaise: transferPaise,
       note: [
         `${isAppend ? "Catch-up" : "Settlement"} ${settleDate} · ${settledOrders.length} orders`,
+        addFees > 0 ? `commission −₹${(addFees / 100).toFixed(2)}` : null,
         clawbackPaise > 0 ? `clawback −₹${(clawbackPaise / 100).toFixed(0)}` : null,
         gatewayBatchId,
         transferError ? `err: ${transferError}` : null,
@@ -277,13 +293,14 @@ export async function runEodSettlement(db: Db, businessDate = serviceDateISO()) 
     }
 
     if (cook && status !== "TRANSFER_FAILED" && status !== "MISSING_PAYOUT_ACCOUNT") {
+      const feeLine = addFees > 0 ? ` (after ₹${(addFees / 100).toFixed(2)} LocalMeals commission)` : "";
       const clawLine =
         clawbackPaise > 0
           ? ` · recovery −₹${(clawbackPaise / 100).toFixed(0)} (prior refunds)`
           : "";
       await getWhatsAppProvider().send({
         to: cook.mobileNumber,
-        body: `${isAppend ? "Catch-up" : "EOD"} settlement ${settleDate}: ${settledOrders.length} orders · ₹${(transferPaise / 100).toFixed(2)}${clawLine} · ref ${gatewayBatchId}`,
+        body: `${isAppend ? "Catch-up" : "EOD"} settlement ${settleDate}: ${settledOrders.length} orders · ₹${(transferPaise / 100).toFixed(2)}${feeLine}${clawLine} · ref ${gatewayBatchId}`,
       });
     }
 

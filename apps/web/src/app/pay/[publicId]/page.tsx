@@ -399,7 +399,7 @@ export default function PayPage() {
               <span>{t("pay.delivery")}</span>
               <span>₹{formatInrAmount(deliverySub)}</span>
             </div>
-            {!solo ? (
+            {platformSub > 0 ? (
               <div className="pay-summary-row">
                 <span>{t("pay.platform")}</span>
                 <span>₹{formatInrAmount(platformSub)}</span>
@@ -420,7 +420,7 @@ export default function PayPage() {
           </div>
         </div>
 
-        {!solo && platformSub > 0 ? (
+        {platformSub > 0 ? (
           <p className="pay-cook-note muted">{t("pay.cookGets")}</p>
         ) : null}
 
