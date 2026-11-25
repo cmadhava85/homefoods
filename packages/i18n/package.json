@@ -19,7 +19,7 @@
     "test:coverage": "node ../../scripts/node-test-coverage.mjs --lines 95 --branches 70 --functions 68"
   },
   "devDependencies": {
-    "@types/node": "^22.10.5",
+    "@types/node": "^26.6.6",
     "tsx": "^4.19.2"
   }
 }
