@@ -1545,29 +1545,34 @@ export async function createOrder(
     });
 
     // Fully credit-paid: no pay prompt — markOrderPaid below sends OrderPaid.
-    // WEB: customer is already on the pay screen — no WA until paid / failed (see drainOutbox).
-    if (order.paymentMethod !== "CREDIT") await enqueueOutbox(tx, "OrderCreated", {
-      orderId: order.id,
-      publicId: order.publicId,
-      traceId,
-      checkoutId: null,
-      channel,
-      cookId: cook.id,
-      cookSlug: cook.slugHandle,
-      kitchenName: cook.kitchenName,
-      customerMobile: input.customerMobile,
-      payerMobile,
-      billMobile,
-      childPays: Boolean(payerMobile),
-      itemName: menu.itemName,
-      qty: input.qty,
-      spice: input.spice,
-      serviceDate,
-      mealType,
-      amountPaise: chargePaise,
-      paymentUrl: payment.paymentUrl,
-      gatewayTxnId: payment.gatewayTxnId,
-    });
+    // WEB: customer is already on /pay — never enqueue a pre-pay WA (even if an old
+    // worker still lacks the drainOutbox skip). WhatsApp bot still needs the link in chat.
+    // Child-pays: senior gets a short "waiting" ping; payer gets ChildPaysRequested.
+    const needsCreatedWa = channel === "WHATSAPP_BOT" || Boolean(payerMobile);
+    if (order.paymentMethod !== "CREDIT" && needsCreatedWa) {
+      await enqueueOutbox(tx, "OrderCreated", {
+        orderId: order.id,
+        publicId: order.publicId,
+        traceId,
+        checkoutId: null,
+        channel,
+        cookId: cook.id,
+        cookSlug: cook.slugHandle,
+        kitchenName: cook.kitchenName,
+        customerMobile: input.customerMobile,
+        payerMobile,
+        billMobile,
+        childPays: Boolean(payerMobile),
+        itemName: menu.itemName,
+        qty: input.qty,
+        spice: input.spice,
+        serviceDate,
+        mealType,
+        amountPaise: chargePaise,
+        paymentUrl: payment.paymentUrl,
+        gatewayTxnId: payment.gatewayTxnId,
+      });
+    }
 
     orderLog.info(
       {
@@ -2472,7 +2477,9 @@ export async function createOrderBatch(
       },
     });
 
-    if (chargeMethod !== "CREDIT") await enqueueOutbox(tx, "OrderCreated", {
+    const needsCreatedWa = channel === "WHATSAPP_BOT" || Boolean(payerMobile);
+    if (chargeMethod !== "CREDIT" && needsCreatedWa) {
+      await enqueueOutbox(tx, "OrderCreated", {
         checkoutId,
         traceId,
         channel,
@@ -2496,6 +2503,7 @@ export async function createOrderBatch(
           spice: o.spice,
         })),
       });
+    }
 
     orderLog.info(
       {
@@ -3472,10 +3480,13 @@ export async function approveLateOrder(db: Db, publicId: string) {
       },
     });
 
-    await enqueueOutbox(tx, "LateOrderApproved", {
+    // Same lean rule as OrderCreated: web customers open /pay after accept; WA needs the link.
+    if (order.channel === "WHATSAPP_BOT" || order.payerMobile) {
+      await enqueueOutbox(tx, "LateOrderApproved", {
         orderId: order.id,
         publicId: order.publicId,
         traceId: order.traceId,
+        channel: order.channel,
         customerMobile: order.customerMobile,
         payerMobile: order.payerMobile,
         billMobile,
@@ -3486,6 +3497,7 @@ export async function approveLateOrder(db: Db, publicId: string) {
         paymentUrl: payment.paymentUrl,
         gatewayTxnId: payment.gatewayTxnId,
       });
+    }
 
     if (order.payerMobile) {
       await enqueueOutbox(tx, "ChildPaysRequested", {

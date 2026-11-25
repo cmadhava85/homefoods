@@ -4260,7 +4260,8 @@ select {
 
   .site-header-inner {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    /* Brand keeps its natural width — never share/ellipsis against auth. */
+    grid-template-columns: auto minmax(0, 1fr);
     grid-template-areas:
       "brand auth"
       "nav nav";
@@ -4272,20 +4273,22 @@ select {
 
   .site-header-inner > .brand {
     grid-area: brand;
-    font-size: 1.02rem;
+    font-size: 1.05rem;
     padding: 0.15rem 0 !important;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    overflow: visible;
+    text-overflow: clip;
     white-space: nowrap;
+    flex-shrink: 0;
   }
 
   .site-header-auth {
     grid-area: auth;
     margin-left: 0;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     gap: 0.3rem;
-    justify-self: end;
+    justify-content: flex-end;
+    justify-self: stretch;
+    min-width: 0;
   }
 
   .site-header-auth .lang-toggle button {
@@ -4299,8 +4302,8 @@ select {
 
   .site-header-auth .btn.sm {
     min-height: 36px;
-    padding: 0.35rem 0.65rem;
-    font-size: 0.78rem;
+    padding: 0.35rem 0.55rem;
+    font-size: 0.74rem;
   }
 
   .site-header-role {
@@ -4342,10 +4345,6 @@ select {
     align-items: center;
     justify-content: center;
     white-space: nowrap;
-  }
-
-  .brand {
-    font-size: 1.05rem;
   }
 
   .site-footer {

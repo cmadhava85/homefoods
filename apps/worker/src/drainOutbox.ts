@@ -595,14 +595,21 @@ export async function drainOutboxOnce(
         const customerMobile = str(payload.customerMobile);
         const payUrl = str(payload.paymentUrl);
         const pid = str(payload.publicId);
-        const body = [
-          `✅ Late lunch accepted by ${str(payload.kitchenName) || "kitchen"}`,
-          `${pid} · ${payload.qty ?? 1}× ${str(payload.itemName) || "plate"}`,
-          payUrl ? `Pay link: ${payUrl}` : "Tap Pay below.",
-          "",
-          `Reply Pay ${pid} anytime for the link again.`,
-        ].join("\n");
-        if (customerMobile.length > 5) {
+        const channel = str(payload.channel) || "WEB_STOREFRONT";
+        // Web late-approve opens /pay in-app — skip pre-pay WA (same lean rule as OrderCreated).
+        if (channel !== "WHATSAPP_BOT" && !payload.payerMobile) {
+          logger.info(
+            { event: LogEvent.OUTBOX_SKIPPED, reason: "in_app_checkout", channel },
+            "LateOrderApproved WA skipped — customer pays in app",
+          );
+        } else if (customerMobile.length > 5) {
+          const body = [
+            `✅ Late lunch accepted by ${str(payload.kitchenName) || "kitchen"}`,
+            `${pid} · ${payload.qty ?? 1}× ${str(payload.itemName) || "plate"}`,
+            payUrl ? `Pay link: ${payUrl}` : "Tap Pay below.",
+            "",
+            `Reply Pay ${pid} anytime for the link again.`,
+          ].join("\n");
           await sendWa(logger, wa, {
             to: customerMobile,
             body,

@@ -4,6 +4,7 @@ import { createHmac } from "node:crypto";
 import {
   MockLogisticsProvider,
   HttpLogisticsProvider,
+  UnconfiguredLogisticsProvider,
   setLogisticsProvider,
   getLogisticsProvider,
   resetLogisticsProvider,
@@ -39,14 +40,43 @@ describe("mock logistics provider", () => {
     resetLogisticsProvider();
     assert.ok(["mock", "unconfigured", "http"].includes(getLogisticsProvider().name));
   });
+
+  it("getShipment falls back when id is unknown; cancel + setStatus work", async () => {
+    const mock = new MockLogisticsProvider();
+    const created = await mock.createShipment({
+      orderPublicId: "LM-FALLBACK",
+      pickupAddress: "K",
+      dropAddress: "T",
+      customerMobile: "+919840111111",
+      cookMobile: "+919840222222",
+    });
+    mock.setStatus(created.partnerShipmentId, "PICKED_UP");
+    assert.equal((await mock.getShipment(created.partnerShipmentId)).status, "PICKED_UP");
+    const missing = await mock.getShipment("shp_missing");
+    assert.equal(missing.status, "ASSIGNED");
+    assert.equal(missing.trackingUrl, null);
+    await mock.cancelShipment(created.partnerShipmentId);
+    assert.equal((await mock.getShipment(created.partnerShipmentId)).status, "ASSIGNED");
+  });
+});
+
+describe("UnconfiguredLogisticsProvider", () => {
+  it("throws on create and get", async () => {
+    const p = new UnconfiguredLogisticsProvider();
+    // Class stubs omit unused params; interface still requires callers to pass them.
+    await assert.rejects(() => p.createShipment(), /not configured/i);
+    await assert.rejects(() => p.getShipment(), /not configured/i);
+  });
 });
 
 describe("mapPartnerShipmentStatus", () => {
   it("maps common aliases", () => {
+    assert.equal(mapPartnerShipmentStatus(null), null);
     assert.equal(mapPartnerShipmentStatus("rider_assigned"), "ASSIGNED");
     assert.equal(mapPartnerShipmentStatus("out-for-delivery"), "PICKED_UP");
     assert.equal(mapPartnerShipmentStatus("COMPLETED"), "DELIVERED");
     assert.equal(mapPartnerShipmentStatus("RTO"), "FAILED");
+    assert.equal(mapPartnerShipmentStatus("undelivered"), "FAILED");
     assert.equal(mapPartnerShipmentStatus("nope"), null);
   });
 });

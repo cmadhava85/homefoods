@@ -16,7 +16,7 @@ test.describe("mock pay → confirmed", () => {
     await saveCheckoutAddress(page);
     await placeDayOrder(page);
 
-    await expect(page.getByRole("heading", { name: /Pay/i }).or(page.getByText(/mock UPI/i))).toBeVisible({
+    await expect(page.getByRole("heading", { name: "Pay", exact: true })).toBeVisible({
       timeout: 15_000,
     });
     await completeMockPay(page);

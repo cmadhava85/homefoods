@@ -36,6 +36,11 @@ test.describe("week cart checkout", () => {
     await page.getByRole("button", { name: "Review & pay" }).click();
     const payWeek = page.getByRole("button", { name: "Pay for week" });
     await expect(payWeek).toBeVisible({ timeout: 10_000 });
+    await payWeek.click();
+
+    // Kitchen week cart shows a confirm dialog before creating the batch checkout.
+    const confirmPay = page.getByRole("button", { name: /Confirm & pay/i });
+    await expect(confirmPay).toBeVisible({ timeout: 10_000 });
 
     const batchOk = page.waitForResponse(
       (r) =>
@@ -44,7 +49,7 @@ test.describe("week cart checkout", () => {
         r.status() === 200,
       { timeout: 25_000 },
     );
-    await Promise.all([batchOk, payWeek.click()]);
+    await Promise.all([batchOk, confirmPay.click()]);
     await expect(page).toHaveURL(/\/pay\//, { timeout: 25_000 });
     await completeMockPay(page);
 

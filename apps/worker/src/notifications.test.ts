@@ -225,10 +225,28 @@ describe("worker outbox notifications", () => {
       expect: [{ body: /Late lunch request[\s\S]*LM-II10[\s\S]*Tower 1/, buttons: ["Accept LM-II10", "Decline LM-II10", "Late requests"] }],
     },
     {
-      name: "LateOrderApproved sends the pay link",
+      name: "LateOrderApproved (WhatsApp) sends the pay link",
       event: "LateOrderApproved",
-      payload: (m) => ({ customerMobile: m, publicId: "LM-II11", kitchenName: "CSK", paymentUrl: "https://pay/y" }),
+      payload: (m) => ({
+        customerMobile: m,
+        channel: "WHATSAPP_BOT",
+        publicId: "LM-II11",
+        kitchenName: "CSK",
+        paymentUrl: "https://pay/y",
+      }),
       expect: [{ body: /Late lunch accepted by CSK[\s\S]*Pay link: https:\/\/pay\/y/, buttons: ["Pay LM-II11", "Menu"] }],
+    },
+    {
+      name: "LateOrderApproved (web) skips pay WA — customer pays in app",
+      event: "LateOrderApproved",
+      payload: (m) => ({
+        customerMobile: m,
+        channel: "WEB_STOREFRONT",
+        publicId: "LM-II11B",
+        kitchenName: "CSK",
+        paymentUrl: "https://pay/y",
+      }),
+      expect: [],
     },
     {
       name: "LateOrderDeclined says no charge",
