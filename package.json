@@ -29,7 +29,7 @@
     "test:coverage": "npm run test:coverage -w @localmeals/domain && npm run test:coverage -w @localmeals/adapters && npm run test:coverage -w @localmeals/i18n && npm run test:coverage -w @localmeals/observability && npm run test:coverage -w @localmeals/api && npm run test:coverage -w @localmeals/worker && npm run test:coverage -w @localmeals/web"
   },
   "devDependencies": {
-    "@playwright/test": "^1.65.0",
+    "@playwright/test": "^1.65.1",
     "typescript": "^5.7.3"
   }
 }

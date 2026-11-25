@@ -18,7 +18,7 @@
     "@localmeals/domain": "*",
     "@localmeals/observability": "*",
     "dotenv": "^16.4.7",
-    "drizzle-orm": "^0.38.3"
+    "drizzle-orm": "^0.45.4"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
